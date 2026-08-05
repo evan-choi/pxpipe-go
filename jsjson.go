@@ -4,8 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"sort"
-	"strings"
-	"unicode/utf16"
+	"unicode/utf8"
 
 	"github.com/bytedance/sonic/ast"
 )
@@ -117,86 +116,82 @@ func nodeToValue(n *ast.Node) (any, error) {
 // jsStringify mirrors JSON.stringify: insertion-ordered object keys, JS string
 // escaping (no HTML/2028 escaping), numbers emitted as decoded.
 func jsStringify(v any) []byte {
-	var b strings.Builder
-	writeJSValue(&b, v)
-	return []byte(b.String())
+	return appendJSValue(nil, v)
 }
 
-func writeJSValue(b *strings.Builder, v any) {
+func appendJSValue(b []byte, v any) []byte {
 	switch tv := v.(type) {
 	case nil:
-		b.WriteString("null")
+		return append(b, "null"...)
 	case bool:
 		if tv {
-			b.WriteString("true")
-		} else {
-			b.WriteString("false")
+			return append(b, "true"...)
 		}
+		return append(b, "false"...)
 	case string:
-		writeJSString(b, tv)
+		return appendJSString(b, tv)
 	case json.Number:
 		if tv == "" {
-			b.WriteString("0")
-		} else {
-			b.WriteString(string(tv))
+			return append(b, '0')
 		}
+		return append(b, string(tv)...)
 	case float64:
 		nb, _ := json.Marshal(tv)
-		b.Write(nb)
+		return append(b, nb...)
 	case int:
 		nb, _ := json.Marshal(tv)
-		b.Write(nb)
+		return append(b, nb...)
 	case []any:
-		b.WriteByte('[')
+		b = append(b, '[')
 		for i, item := range tv {
 			if i > 0 {
-				b.WriteByte(',')
+				b = append(b, ',')
 			}
-			writeJSValue(b, item)
+			b = appendJSValue(b, item)
 		}
-		b.WriteByte(']')
+		return append(b, ']')
 	case []string:
-		b.WriteByte('[')
+		b = append(b, '[')
 		for i, item := range tv {
 			if i > 0 {
-				b.WriteByte(',')
+				b = append(b, ',')
 			}
-			writeJSString(b, item)
+			b = appendJSString(b, item)
 		}
-		b.WriteByte(']')
+		return append(b, ']')
 	case map[string]any:
-		writeJSObject(b, tv)
+		return appendJSObject(b, tv)
 	default:
 		nb, err := jsonAPI.Marshal(tv)
 		if err != nil {
-			b.WriteString("null")
-			return
+			return append(b, "null"...)
 		}
-		b.Write(nb)
+		return append(b, nb...)
 	}
 }
 
-func writeJSObject(b *strings.Builder, m map[string]any) {
+func appendJSObjectPair(b []byte, key string, value any, comma bool) []byte {
+	if comma {
+		b = append(b, ',')
+	}
+	b = appendJSString(b, key)
+	b = append(b, ':')
+	return appendJSValue(b, value)
+}
+
+func appendJSObject(b []byte, m map[string]any) []byte {
 	ordered := objKeyOrder(m)
 	seen := make(map[string]struct{}, len(ordered))
-	b.WriteByte('{')
+	b = append(b, '{')
 	first := true
-	writePair := func(k string, v any) {
-		if !first {
-			b.WriteByte(',')
-		}
-		first = false
-		writeJSString(b, k)
-		b.WriteByte(':')
-		writeJSValue(b, v)
-	}
 	for _, k := range ordered {
 		v, ok := m[k]
 		if !ok {
 			continue
 		}
 		seen[k] = struct{}{}
-		writePair(k, v)
+		b = appendJSObjectPair(b, k, v, !first)
+		first = false
 	}
 	var extras []string
 	for k := range m {
@@ -209,42 +204,55 @@ func writeJSObject(b *strings.Builder, m map[string]any) {
 	}
 	sort.Strings(extras)
 	for _, k := range extras {
-		writePair(k, m[k])
+		b = appendJSObjectPair(b, k, m[k], !first)
+		first = false
 	}
-	b.WriteByte('}')
+	return append(b, '}')
 }
 
-func writeJSString(b *strings.Builder, s string) {
-	b.WriteByte('"')
-	for _, r := range s {
-		switch r {
-		case '"':
-			b.WriteString(`\"`)
-		case '\\':
-			b.WriteString(`\\`)
-		case '\b':
-			b.WriteString(`\b`)
-		case '\f':
-			b.WriteString(`\f`)
-		case '\n':
-			b.WriteString(`\n`)
-		case '\r':
-			b.WriteString(`\r`)
-		case '\t':
-			b.WriteString(`\t`)
-		default:
-			if r < 0x20 {
-				const hex = "0123456789abcdef"
-				b.WriteString(`\u00`)
-				b.WriteByte(hex[r>>4])
-				b.WriteByte(hex[r&0xf])
-			} else if r >= 0x10000 || !utf16.IsSurrogate(r) {
-				b.WriteRune(r)
-			} else {
-				// Lone surrogates escape as \uXXXX (well-formed JSON.stringify).
-				fmt.Fprintf(b, `\u%04x`, r)
+func appendJSString(b []byte, s string) []byte {
+	const hex = "0123456789abcdef"
+	b = append(b, '"')
+	start := 0
+	for i := 0; i < len(s); {
+		c := s[i]
+		if c >= 0x20 && c != '"' && c != '\\' {
+			if c < utf8.RuneSelf {
+				i++
+				continue
 			}
+			r, size := utf8.DecodeRuneInString(s[i:])
+			if r != utf8.RuneError || size > 1 {
+				i += size
+				continue
+			}
+			b = append(b, s[start:i]...)
+			b = utf8.AppendRune(b, utf8.RuneError)
+			i++
+			start = i
+			continue
 		}
+
+		b = append(b, s[start:i]...)
+		switch c {
+		case '"', '\\':
+			b = append(b, '\\', c)
+		case '\b':
+			b = append(b, `\b`...)
+		case '\f':
+			b = append(b, `\f`...)
+		case '\n':
+			b = append(b, `\n`...)
+		case '\r':
+			b = append(b, `\r`...)
+		case '\t':
+			b = append(b, `\t`...)
+		default:
+			b = append(b, '\\', 'u', '0', '0', hex[c>>4], hex[c&0xf])
+		}
+		i++
+		start = i
 	}
-	b.WriteByte('"')
+	b = append(b, s[start:]...)
+	return append(b, '"')
 }
