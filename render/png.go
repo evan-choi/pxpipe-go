@@ -4,52 +4,57 @@ import (
 	"bytes"
 	"encoding/binary"
 	"fmt"
-	"github.com/klauspost/compress/zlib"
 	"hash/crc32"
-	"sync"
+	"runtime"
+
+	"github.com/klauspost/compress/zlib"
 )
 
 var pngSignature = []byte{0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a}
 
-type zlibEncoder struct {
-	buf bytes.Buffer
-	zw  *zlib.Writer
+const maxCachedPNGBuffer = 8 << 20
+
+type pngEncoder struct {
+	raw        bytes.Buffer
+	compressed bytes.Buffer
+	zw         *zlib.Writer
 }
 
-var zlibPool = sync.Pool{
-	New: func() any {
-		e := &zlibEncoder{}
-		e.zw, _ = zlib.NewWriterLevel(&e.buf, 6)
+var pngEncoderCache = make(chan *pngEncoder, runtime.GOMAXPROCS(0))
+
+func newPNGEncoder() *pngEncoder {
+	e := &pngEncoder{}
+	e.zw, _ = zlib.NewWriterLevel(&e.compressed, 6)
+	return e
+}
+
+func getPNGEncoder() *pngEncoder {
+	select {
+	case e := <-pngEncoderCache:
 		return e
-	},
+	default:
+		return newPNGEncoder()
+	}
 }
 
-var scratchPool = sync.Pool{
-	New: func() any { return new(bytes.Buffer) },
+func putPNGEncoder(e *pngEncoder) {
+	if e.raw.Cap() > maxCachedPNGBuffer || e.compressed.Cap() > maxCachedPNGBuffer {
+		return
+	}
+	select {
+	case pngEncoderCache <- e:
+	default:
+	}
 }
 
-func deflate(raw []byte) []byte {
-	e := zlibPool.Get().(*zlibEncoder)
-	e.buf.Reset()
-	e.zw.Reset(&e.buf)
-	_, _ = e.zw.Write(raw)
-	_ = e.zw.Close()
-	out := make([]byte, e.buf.Len())
-	copy(out, e.buf.Bytes())
-	zlibPool.Put(e)
-	return out
-}
-
-func writeChunk(out *bytes.Buffer, typ string, data []byte) {
-	var lenBuf [4]byte
-	binary.BigEndian.PutUint32(lenBuf[:], uint32(len(data)))
-	out.Write(lenBuf[:])
-	start := out.Len()
-	out.WriteString(typ)
-	out.Write(data)
-	crc := crc32.ChecksumIEEE(out.Bytes()[start:])
-	binary.BigEndian.PutUint32(lenBuf[:], crc)
-	out.Write(lenBuf[:])
+func writeChunk(out []byte, offset int, typ string, data []byte) int {
+	binary.BigEndian.PutUint32(out[offset:], uint32(len(data)))
+	offset += 4
+	start := offset
+	offset += copy(out[offset:], typ)
+	offset += copy(out[offset:], data)
+	binary.BigEndian.PutUint32(out[offset:], crc32.ChecksumIEEE(out[start:offset]))
+	return offset + 4
 }
 
 func encodePNG(pixels []byte, width, height, bytesPerPixel int, colorType byte) []byte {
@@ -59,25 +64,29 @@ func encodePNG(pixels []byte, width, height, bytesPerPixel int, colorType byte) 
 	ihdr[8] = 8
 	ihdr[9] = colorType
 
+	e := getPNGEncoder()
+	e.raw.Reset()
 	stride := width*bytesPerPixel + 1
-	rawBuf := scratchPool.Get().(*bytes.Buffer)
-	rawBuf.Reset()
-	rawBuf.Grow(stride * height)
+	e.raw.Grow(stride * height)
 	rowLen := width * bytesPerPixel
 	for y := 0; y < height; y++ {
-		rawBuf.WriteByte(0)
-		rawBuf.Write(pixels[y*rowLen : (y+1)*rowLen])
+		e.raw.WriteByte(0)
+		e.raw.Write(pixels[y*rowLen : (y+1)*rowLen])
 	}
-	compressed := deflate(rawBuf.Bytes())
-	scratchPool.Put(rawBuf)
 
-	out := &bytes.Buffer{}
-	out.Grow(len(compressed) + 128)
-	out.Write(pngSignature)
-	writeChunk(out, "IHDR", ihdr[:])
-	writeChunk(out, "IDAT", compressed)
-	writeChunk(out, "IEND", nil)
-	return out.Bytes()
+	e.compressed.Reset()
+	e.zw.Reset(&e.compressed)
+	_, _ = e.zw.Write(e.raw.Bytes())
+	_ = e.zw.Close()
+
+	compressed := e.compressed.Bytes()
+	out := make([]byte, len(compressed)+57)
+	offset := copy(out, pngSignature)
+	offset = writeChunk(out, offset, "IHDR", ihdr[:])
+	offset = writeChunk(out, offset, "IDAT", compressed)
+	writeChunk(out, offset, "IEND", nil)
+	putPNGEncoder(e)
+	return out
 }
 
 // EncodeGrayPNG encodes a row-major single-channel buffer (len = w×h) as an
