@@ -525,7 +525,7 @@ func blitGlyph(fb []byte, fbW, x, y int, cp rune, selected *atlas.Set, markerMas
 	return 1
 }
 
-func blitGlyphGray(fb []byte, fbW, x, y int, cp rune, selected *atlas.Set, overwrite bool) int {
+func blitGlyphGray(fb []byte, fbW, fbH, x, y int, cp rune, selected *atlas.Set, overwrite bool) int {
 	g, ok := grayGlyph(cp, selected)
 	if !ok {
 		return 0
@@ -539,7 +539,7 @@ func blitGlyphGray(fb []byte, fbW, x, y int, cp rune, selected *atlas.Set, overw
 	srcOff := int(a.Offsets[g.rank])
 	yOffset := selected.Gray.Ascent - a.Ascent
 	dstY := y + yOffset
-	if overwrite && x >= 0 && x+srcW <= fbW && dstY >= 0 && dstY+a.CellH <= len(fb)/fbW {
+	if overwrite && x >= 0 && x+srcW <= fbW && dstY >= 0 && dstY+a.CellH <= fbH {
 		dstRow := dstY*fbW + x
 		srcRow := srcOff
 		for gy := 0; gy < a.CellH; gy++ {
@@ -828,7 +828,7 @@ func renderWrappedLinesToPNG(fitLines, fitSlotLines []string, charsRendered, col
 				}
 			} else {
 				if useAA {
-					advance = blitGlyphGray(fb, width, baseX, baseY, cp, selected, cellW >= atlasW)
+					advance = blitGlyphGray(fb, width, height, baseX, baseY, cp, selected, cellW >= atlasW)
 				} else {
 					var mm []byte
 					if isMarker {
