@@ -12,7 +12,7 @@ import (
 
 var pngSignature = []byte{0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a}
 
-const maxCachedPNGBuffer = 8 << 20
+const maxCachedBufferBytes = 8 << 20
 
 type pngEncoder struct {
 	raw        bytes.Buffer
@@ -21,6 +21,7 @@ type pngEncoder struct {
 }
 
 var pngEncoderCache = make(chan *pngEncoder, runtime.GOMAXPROCS(0))
+var pixelBufferCache = make(chan []byte, runtime.GOMAXPROCS(0))
 
 func newPNGEncoder() *pngEncoder {
 	e := &pngEncoder{}
@@ -38,11 +39,34 @@ func getPNGEncoder() *pngEncoder {
 }
 
 func putPNGEncoder(e *pngEncoder) {
-	if e.raw.Cap() > maxCachedPNGBuffer || e.compressed.Cap() > maxCachedPNGBuffer {
+	if e.raw.Cap() > maxCachedBufferBytes || e.compressed.Cap() > maxCachedBufferBytes {
 		return
 	}
 	select {
 	case pngEncoderCache <- e:
+	default:
+	}
+}
+
+func getPixelBuffer(size int) []byte {
+	select {
+	case buf := <-pixelBufferCache:
+		if cap(buf) >= size {
+			buf = buf[:size]
+			clear(buf)
+			return buf
+		}
+	default:
+	}
+	return make([]byte, size)
+}
+
+func putPixelBuffer(buf []byte) {
+	if cap(buf) > maxCachedBufferBytes {
+		return
+	}
+	select {
+	case pixelBufferCache <- buf[:0]:
 	default:
 	}
 }

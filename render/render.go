@@ -700,7 +700,7 @@ func RenderChunkToPng(text string, cols int, style RenderStyle, maxHeightPx int,
 	width := 2*PadX + cols*cellW + overhang
 	height := 2*PadY + len(fitLines)*cellH
 
-	fb := make([]byte, width*height)
+	fb := getPixelBuffer(width * height)
 	var markerMask []byte
 	if style.MarkerRed {
 		markerMask = make([]byte, width*height)
@@ -887,6 +887,7 @@ func RenderChunkToPng(text string, cols int, style RenderStyle, maxHeightPx int,
 	default:
 		png, err = EncodeGrayPNG(fb, width, height)
 	}
+	putPixelBuffer(fb)
 	if err != nil {
 		return nil, err
 	}
