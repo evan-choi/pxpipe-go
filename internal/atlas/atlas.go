@@ -129,8 +129,9 @@ func load(meta map[string]atlasMeta, name string) *Atlas {
 }
 
 var (
-	once sync.Once
-	sets map[string]*Set
+	once       sync.Once
+	sets       map[string]*Set
+	defaultSet *Set
 )
 
 // ForFont returns the atlas set for a render font name; unknown names fall
@@ -138,17 +139,21 @@ var (
 func ForFont(font string) *Set {
 	once.Do(func() {
 		meta := loadMeta()
+		defaultSet = &Set{Bit: load(meta, "spleen-5x8.bit"), Gray: load(meta, "spleen-5x8.gray")}
 		sets = map[string]*Set{
-			"spleen-5x8":        {Bit: load(meta, "spleen-5x8.bit"), Gray: load(meta, "spleen-5x8.gray")},
+			"spleen-5x8":        defaultSet,
 			"jetbrains-mono-10": {Bit: load(meta, "jbmono10.bit"), Gray: load(meta, "jbmono10.gray")},
 			"jetbrains-mono-12": {Bit: load(meta, "jbmono12.bit"), Gray: load(meta, "jbmono12.gray")},
 			"jetbrains-mono-14": {Bit: load(meta, "jbmono14.bit"), Gray: load(meta, "jbmono14.gray")},
 		}
 	})
+	if font == "" || font == "spleen-5x8" {
+		return defaultSet
+	}
 	if s, ok := sets[font]; ok {
 		return s
 	}
-	return sets["spleen-5x8"]
+	return defaultSet
 }
 
 // Default returns the Spleen 5x8 set (the fallback for every other font).
