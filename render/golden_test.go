@@ -19,6 +19,28 @@ func TestWrapLinesPreservesRuneBoundaries(t *testing.T) {
 	}
 }
 
+func TestMinifyForRender(t *testing.T) {
+	for _, tc := range []struct {
+		name, input, want string
+	}{
+		{"unchanged", "한글\ntext", "한글\ntext"},
+		{"trailing whitespace", "a  \nb\t", "a\nb"},
+		{"excess newlines", "a\n\n\n\nb", "a\n\n\nb"},
+		{"whitespace line", "a\n \n\n\nb", "a\n\n\nb"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := MinifyForRender(tc.input); got != tc.want {
+				t.Fatalf("MinifyForRender() = %q, want %q", got, tc.want)
+			}
+		})
+	}
+
+	var got string
+	if allocs := testing.AllocsPerRun(100, func() { got = MinifyForRender("한글\ntext") }); allocs != 0 {
+		t.Fatalf("unchanged input allocated %v times: %q", allocs, got)
+	}
+}
+
 type goldenPage struct {
 	File   string `json:"file"`
 	Width  int    `json:"width"`

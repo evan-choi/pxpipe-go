@@ -176,24 +176,48 @@ func trimLineEnd(line string) string {
 // MinifyForRender strips trailing whitespace per line and collapses 4+
 // consecutive newlines to 3.
 func MinifyForRender(text string) string {
-	lines := strings.Split(text, "\n")
-	for i, l := range lines {
-		lines[i] = trimLineEnd(l)
-	}
-	joined := strings.Join(lines, "\n")
-	var b strings.Builder
-	b.Grow(len(joined))
-	run := 0
-	for _, r := range joined {
-		if r == '\n' {
-			run++
-			if run > 3 {
-				continue
-			}
-		} else {
-			run = 0
+	newlineRun := 0
+	needsRewrite := false
+	for i := 0; i < len(text); i++ {
+		if text[i] != '\n' {
+			newlineRun = 0
+			continue
 		}
-		b.WriteRune(r)
+		newlineRun++
+		if newlineRun > 3 || i > 0 && (text[i-1] == ' ' || text[i-1] == '\t') {
+			needsRewrite = true
+			break
+		}
+	}
+	if !needsRewrite && len(text) > 0 {
+		last := text[len(text)-1]
+		needsRewrite = last == ' ' || last == '\t'
+	}
+	if !needsRewrite {
+		return text
+	}
+
+	var b strings.Builder
+	b.Grow(len(text))
+	start := 0
+	newlineRun = 0
+	for {
+		relEnd := strings.IndexByte(text[start:], '\n')
+		if relEnd < 0 {
+			b.WriteString(trimLineEnd(text[start:]))
+			break
+		}
+		end := start + relEnd
+		line := trimLineEnd(text[start:end])
+		if len(line) > 0 {
+			b.WriteString(line)
+			newlineRun = 0
+		}
+		newlineRun++
+		if newlineRun <= 3 {
+			b.WriteByte('\n')
+		}
+		start = end + 1
 	}
 	return b.String()
 }
