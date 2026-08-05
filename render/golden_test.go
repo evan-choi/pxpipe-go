@@ -41,6 +41,21 @@ func TestMinifyForRender(t *testing.T) {
 	}
 }
 
+func TestEscapeMissingGlyphs(t *testing.T) {
+	def := atlasSet(DefaultRenderFont).Bit
+	for r := rune(0); r < 0x80; r++ {
+		if !isEscapeExempt(r) && def.Rank(r) < 0 {
+			t.Fatalf("ASCII U+%04X is missing from the default atlas", r)
+		}
+	}
+	if got, want := EscapeMissingGlyphs("ASCII"+NLSentinel), "ASCII"+NLSentinel; got != want {
+		t.Fatalf("EscapeMissingGlyphs() = %q, want %q", got, want)
+	}
+	if got, want := EscapeMissingGlyphs("x\U0010ffff"), "x[U+10FFFF]"; got != want {
+		t.Fatalf("EscapeMissingGlyphs() = %q, want %q", got, want)
+	}
+}
+
 func TestReflowFastPath(t *testing.T) {
 	got, ok := Reflow("a\nb")
 	if !ok || got != "a"+NLSentinel+"b" {

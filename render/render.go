@@ -315,6 +315,22 @@ func isEscapeExempt(cp rune) bool {
 // EscapeMissingGlyphs replaces atlas-missing codepoints with "[U+HEX]"
 // (always ranked against the default Spleen atlas, matching TS).
 func EscapeMissingGlyphs(line string) string {
+	known := true
+	for i := 0; i < len(line); {
+		if line[i] < 0x80 {
+			i++
+			continue
+		}
+		if strings.HasPrefix(line[i:], NLSentinel) {
+			i += len(NLSentinel)
+			continue
+		}
+		known = false
+		break
+	}
+	if known {
+		return line
+	}
 	def := atlas.Default().Bit
 	miss := false
 	for _, r := range line {
