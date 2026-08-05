@@ -18,3 +18,16 @@ func TestCountTokensMatchesGptTokenizer(t *testing.T) {
 		}
 	}
 }
+
+func TestCountTokensTreatsSpecialTokensAsText(t *testing.T) {
+	e, err := encoding()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, text := range []string{"<|endoftext|>", "a<|endofprompt|>b"} {
+		want := len(e.Encode(text, nil, nil))
+		if got := CountTokens(text); got != want {
+			t.Errorf("CountTokens(%q) = %d, want %d", text, got, want)
+		}
+	}
+}

@@ -80,5 +80,5 @@ func CountTokens(text string) int {
 	if err != nil {
 		return 0
 	}
-	return len(e.Encode(text, nil, nil))
+	return len(e.EncodeOrdinary(text))
 }
