@@ -6,6 +6,7 @@ import (
 	"strings"
 	"unicode/utf16"
 	"unicode/utf8"
+	"unsafe"
 )
 
 // u16len counts UTF-16 code units, matching TS String.prototype.length —
@@ -133,6 +134,7 @@ func u16SliceFallback(s string, start, end int) string {
 }
 
 func sha8(text string) string {
-	sum := sha256.Sum256([]byte(text))
+	// Sum256 only reads its input; avoid copying large rendered contexts.
+	sum := sha256.Sum256(unsafe.Slice(unsafe.StringData(text), len(text)))
 	return hex.EncodeToString(sum[:4])
 }
