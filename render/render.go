@@ -486,7 +486,7 @@ func utf16Len(s string) int {
 
 func splitWrappedLinesIntoReadablePages(lines []string, maxLines, maxChars int) [][]string {
 	var pages [][]string
-	var cur []string
+	start := 0
 	curChars := 0
 	lineLimit := maxLines
 	if lineLimit < 1 {
@@ -496,25 +496,24 @@ func splitWrappedLinesIntoReadablePages(lines []string, maxLines, maxChars int) 
 	if charLimit < 1 {
 		charLimit = 1
 	}
-	for _, line := range lines {
+	for i, line := range lines {
 		lineChars := utf16Len(line)
-		if len(cur) > 0 {
+		if i > start {
 			lineChars++
 		}
-		if len(cur) > 0 && (len(cur) >= lineLimit || curChars+lineChars > charLimit) {
-			pages = append(pages, cur)
-			cur = nil
+		if i > start && (i-start >= lineLimit || curChars+lineChars > charLimit) {
+			pages = append(pages, lines[start:i])
+			start = i
 			curChars = 0
 		}
-		cur = append(cur, line)
-		if len(cur) > 1 {
+		if i > start {
 			curChars += utf16Len(line) + 1
 		} else {
 			curChars += utf16Len(line)
 		}
 	}
-	if len(cur) > 0 {
-		pages = append(pages, cur)
+	if start < len(lines) {
+		pages = append(pages, lines[start:])
 	}
 	if len(pages) == 0 {
 		pages = [][]string{{}}
