@@ -155,6 +155,15 @@ func cellsFor(cp rune, markerScale int, selected *atlas.Set) int {
 	if cp == nlSentinelCp && markerScale > 1 {
 		return markerScale
 	}
+	if cp >= 0 && cp < 128 {
+		if rank := selected.Bit.Rank(cp); rank >= 0 {
+			return 1 + int(selected.Bit.Wide[rank])
+		}
+	}
+	return cellsForSlow(cp, selected)
+}
+
+func cellsForSlow(cp rune, selected *atlas.Set) int {
 	g, ok := bitGlyph(cp, selected)
 	if !ok {
 		return 1
