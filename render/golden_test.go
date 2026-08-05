@@ -41,6 +41,16 @@ func TestMinifyForRender(t *testing.T) {
 	}
 }
 
+func TestReflowFastPath(t *testing.T) {
+	got, ok := Reflow("a\nb")
+	if !ok || got != "a"+NLSentinel+"b" {
+		t.Fatalf("Reflow() = %q, %v", got, ok)
+	}
+	if allocs := testing.AllocsPerRun(100, func() { got, ok = Reflow("a\nb") }); allocs > 1 {
+		t.Fatalf("Reflow() allocated %v times: %q, %v", allocs, got, ok)
+	}
+}
+
 type goldenPage struct {
 	File   string `json:"file"`
 	Width  int    `json:"width"`

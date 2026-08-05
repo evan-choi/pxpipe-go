@@ -273,7 +273,11 @@ func Reflow(text string) (string, bool) {
 	if strings.Contains(text, NLSentinel) {
 		return "", false
 	}
-	lines := strings.Split(MinifyForRender(text), "\n")
+	text = MinifyForRender(text)
+	if !strings.Contains(text, "\t") {
+		return strings.ReplaceAll(text, "\n", NLSentinel), true
+	}
+	lines := strings.Split(text, "\n")
 	for i, l := range lines {
 		lines[i] = ExpandTabsInLine(l)
 	}
