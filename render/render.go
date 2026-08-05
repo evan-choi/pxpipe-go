@@ -525,7 +525,7 @@ func blitGlyph(fb []byte, fbW, x, y int, cp rune, selected *atlas.Set, markerMas
 	return 1
 }
 
-func blitGlyphGray(fb []byte, fbW, x, y int, cp rune, selected *atlas.Set) int {
+func blitGlyphGray(fb []byte, fbW, x, y int, cp rune, selected *atlas.Set, overwrite bool) int {
 	g, ok := grayGlyph(cp, selected)
 	if !ok {
 		return 0
@@ -538,8 +538,22 @@ func blitGlyphGray(fb []byte, fbW, x, y int, cp rune, selected *atlas.Set) int {
 	}
 	srcOff := int(a.Offsets[g.rank])
 	yOffset := selected.Gray.Ascent - a.Ascent
+	dstY := y + yOffset
+	if overwrite && x >= 0 && x+srcW <= fbW && dstY >= 0 && dstY+a.CellH <= len(fb)/fbW {
+		dstRow := dstY*fbW + x
+		srcRow := srcOff
+		for gy := 0; gy < a.CellH; gy++ {
+			copy(fb[dstRow:dstRow+srcW], a.Pixels[srcRow:srcRow+srcW])
+			dstRow += fbW
+			srcRow += srcW
+		}
+		if wide {
+			return 2
+		}
+		return 1
+	}
 	for gy := 0; gy < a.CellH; gy++ {
-		dstRow := (y+yOffset+gy)*fbW + x
+		dstRow := (dstY+gy)*fbW + x
 		srcRow := srcOff + gy*srcW
 		for gx := 0; gx < srcW; gx++ {
 			coverage := a.Pixels[srcRow+gx]
@@ -814,7 +828,7 @@ func renderWrappedLinesToPNG(fitLines, fitSlotLines []string, charsRendered, col
 				}
 			} else {
 				if useAA {
-					advance = blitGlyphGray(fb, width, baseX, baseY, cp, selected)
+					advance = blitGlyphGray(fb, width, baseX, baseY, cp, selected, cellW >= atlasW)
 				} else {
 					var mm []byte
 					if isMarker {
