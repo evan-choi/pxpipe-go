@@ -6,10 +6,18 @@ import (
 	"image/png"
 	"os"
 	"path/filepath"
+	"slices"
 	"testing"
 
 	"github.com/bytedance/sonic"
 )
+
+func TestWrapLinesPreservesRuneBoundaries(t *testing.T) {
+	want := []string{"a" + NLSentinel, "b"}
+	if got := WrapLines("a"+NLSentinel+"b", 2, 1, DefaultRenderFont); !slices.Equal(got, want) {
+		t.Fatalf("WrapLines() = %q, want %q", got, want)
+	}
+}
 
 type goldenPage struct {
 	File   string `json:"file"`

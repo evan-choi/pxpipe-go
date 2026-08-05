@@ -392,22 +392,20 @@ func WrapLines(text string, cols, markerScale int, font string) []string {
 			out = append(out, "")
 			continue
 		}
-		var cur strings.Builder
+		start := 0
 		curCols := 0
-		for _, r := range raw {
+		for i, r := range raw {
 			w := cellsFor(r, markerScale, font)
 			if curCols+w > cols {
-				out = append(out, cur.String())
-				cur.Reset()
-				cur.WriteRune(r)
+				out = append(out, raw[start:i])
+				start = i
 				curCols = w
 			} else {
-				cur.WriteRune(r)
 				curCols += w
 			}
 		}
-		if cur.Len() > 0 {
-			out = append(out, cur.String())
+		if start < len(raw) {
+			out = append(out, raw[start:])
 		}
 	}
 	return out
