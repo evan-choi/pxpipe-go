@@ -562,10 +562,27 @@ func blitGlyphGray(fb []byte, fbW, fbH, x, y int, cp rune, selected *atlas.Set, 
 	if overwrite && x >= 0 && x+srcW <= fbW && dstY >= 0 && dstY+a.CellH <= fbH {
 		dstRow := dstY*fbW + x
 		srcRow := srcOff
-		for gy := 0; gy < a.CellH; gy++ {
-			copy(fb[dstRow:dstRow+srcW], a.Pixels[srcRow:srcRow+srcW])
-			dstRow += fbW
-			srcRow += srcW
+		switch srcW {
+		case 5:
+			for gy := 0; gy < a.CellH; gy++ {
+				binary.LittleEndian.PutUint32(fb[dstRow:], binary.LittleEndian.Uint32(a.Pixels[srcRow:]))
+				fb[dstRow+4] = a.Pixels[srcRow+4]
+				dstRow += fbW
+				srcRow += 5
+			}
+		case 10:
+			for gy := 0; gy < a.CellH; gy++ {
+				binary.LittleEndian.PutUint64(fb[dstRow:], binary.LittleEndian.Uint64(a.Pixels[srcRow:]))
+				binary.LittleEndian.PutUint16(fb[dstRow+8:], binary.LittleEndian.Uint16(a.Pixels[srcRow+8:]))
+				dstRow += fbW
+				srcRow += 10
+			}
+		default:
+			for gy := 0; gy < a.CellH; gy++ {
+				copy(fb[dstRow:dstRow+srcW], a.Pixels[srcRow:srcRow+srcW])
+				dstRow += fbW
+				srcRow += srcW
+			}
 		}
 		if wide {
 			return 2
