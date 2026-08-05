@@ -11,23 +11,12 @@ func TestCountTokensMatchesGptTokenizer(t *testing.T) {
 		{"hello world", 2},
 		{"const x = foo(bar, 42); // baz", 11},
 		{"프록시는 요청 본문을 PNG 이미지로 변환합니다.", 14},
+		{"<|endoftext|>", 7},
+		{"a<|endofprompt|>b", 9},
 	}
 	for _, c := range cases {
 		if got := CountTokens(c.text); got != c.want {
 			t.Errorf("CountTokens(%q) = %d, want %d", c.text, got, c.want)
-		}
-	}
-}
-
-func TestCountTokensTreatsSpecialTokensAsText(t *testing.T) {
-	e, err := encoding()
-	if err != nil {
-		t.Fatal(err)
-	}
-	for _, text := range []string{"<|endoftext|>", "a<|endofprompt|>b"} {
-		want := len(e.Encode(text, nil, nil))
-		if got := CountTokens(text); got != want {
-			t.Errorf("CountTokens(%q) = %d, want %d", text, got, want)
 		}
 	}
 }

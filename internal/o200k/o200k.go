@@ -6,65 +6,20 @@
 package o200k
 
 import (
-	"bufio"
-	"bytes"
-	"compress/gzip"
-	_ "embed"
-	"encoding/base64"
-	"fmt"
-	"strconv"
-	"strings"
 	"sync"
 
-	"github.com/pkoukk/tiktoken-go"
+	"github.com/tiktoken-go/tokenizer"
 )
-
-//go:embed data/o200k_base.tiktoken.gz
-var ranksGz []byte
-
-type embeddedLoader struct{}
-
-func (embeddedLoader) LoadTiktokenBpe(_ string) (map[string]int, error) {
-	zr, err := gzip.NewReader(bytes.NewReader(ranksGz))
-	if err != nil {
-		return nil, err
-	}
-	defer zr.Close()
-	ranks := make(map[string]int, 200_000)
-	sc := bufio.NewScanner(zr)
-	sc.Buffer(make([]byte, 1<<16), 1<<20)
-	for sc.Scan() {
-		line := sc.Text()
-		if line == "" {
-			continue
-		}
-		tok, rankStr, ok := strings.Cut(line, " ")
-		if !ok {
-			return nil, fmt.Errorf("o200k: malformed rank line %q", line)
-		}
-		raw, err := base64.StdEncoding.DecodeString(tok)
-		if err != nil {
-			return nil, err
-		}
-		rank, err := strconv.Atoi(rankStr)
-		if err != nil {
-			return nil, err
-		}
-		ranks[string(raw)] = rank
-	}
-	return ranks, sc.Err()
-}
 
 var (
 	once sync.Once
-	enc  *tiktoken.Tiktoken
+	enc  tokenizer.Codec
 	err  error
 )
 
-func encoding() (*tiktoken.Tiktoken, error) {
+func encoding() (tokenizer.Codec, error) {
 	once.Do(func() {
-		tiktoken.SetBpeLoader(embeddedLoader{})
-		enc, err = tiktoken.GetEncoding("o200k_base")
+		enc, err = tokenizer.Get(tokenizer.O200kBase)
 	})
 	return enc, err
 }
@@ -80,5 +35,9 @@ func CountTokens(text string) int {
 	if err != nil {
 		return 0
 	}
-	return len(e.EncodeOrdinary(text))
+	n, err := e.Count(text)
+	if err != nil {
+		return 0
+	}
+	return n
 }
