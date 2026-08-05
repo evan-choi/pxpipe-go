@@ -403,7 +403,7 @@ func MeasureContentCols(text string, maxCols, markerScale int, font string) int 
 		cap_ = 1
 	}
 	widest := 1
-	for _, line := range strings.Split(text, "\n") {
+	for line := range strings.SplitSeq(text, "\n") {
 		w := MeasureLineCols(EscapeMissingGlyphs(ExpandTabsInLine(line)), markerScale, font)
 		if w > widest {
 			widest = w
@@ -421,7 +421,7 @@ func MeasureContentCols(text string, maxCols, markerScale int, font string) int 
 func WrapLines(text string, cols, markerScale int, font string) []string {
 	var out []string
 	selected := atlasSet(font)
-	for _, rawWithTabs := range strings.Split(MinifyForRender(text), "\n") {
+	for rawWithTabs := range strings.SplitSeq(MinifyForRender(text), "\n") {
 		raw := EscapeMissingGlyphs(ExpandTabsInLine(rawWithTabs))
 		if len(raw) == 0 {
 			out = append(out, "")
