@@ -1,0 +1,1 @@
+{"model":"claude-fable-5","max_tokens":4096,"system":"You are terse.","messages":[{"role":"user","content":"@pxpipe pin /src/core/render.ts"},{"role":"assistant","content":"noted"},{"role":"user","content":"What did I pin?"}]}
