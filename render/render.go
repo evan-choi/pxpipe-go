@@ -661,22 +661,26 @@ func drawGrid(fb []byte, fbW, fbH, rows, gridCols, cellH, cellW, glyphH int) {
 
 func jsRound(f float64) int { return int(math.Floor(f + 0.5)) }
 
+func wrappedLinesRuneCount(lines []string) int {
+	n := 0
+	for _, line := range lines {
+		for range line {
+			n++
+		}
+	}
+	if len(lines) > 1 {
+		n += len(lines) - 1
+	}
+	return n
+}
+
 // RenderChunkToPng renders text to a single PNG page (≤ maxHeightPx tall).
 func RenderChunkToPng(text string, cols int, style RenderStyle, maxHeightPx int, slotText *string) (*RenderedImage, error) {
-	useAA := style.AA
-	selected := atlasSet(style.Font)
-	atlasH := selected.Bit.CellH
-	atlasW := selected.Bit.CellW
-	if useAA {
-		atlasH = selected.Gray.CellH
-		atlasW = selected.Gray.CellW
-	}
 	markerScale := style.MarkerScale
 	if markerScale < 1 {
 		markerScale = 1
 	}
 	cellH := RenderCellHeight(style)
-	cellW := RenderCellWidth(style)
 	lines := WrapLines(text, cols, markerScale, style.Font)
 	var slotLines []string
 	if style.ColorByRole && slotText != nil {
@@ -705,18 +709,26 @@ func RenderChunkToPng(text string, cols int, style RenderStyle, maxHeightPx int,
 			charsRendered++
 		}
 	} else {
-		n := 0
-		for _, l := range fitLines {
-			for range l {
-				n++
-			}
-		}
-		if len(fitLines) > 1 {
-			n += len(fitLines) - 1
-		}
-		charsRendered = n
+		charsRendered = wrappedLinesRuneCount(fitLines)
 	}
+	return renderWrappedLinesToPNG(fitLines, fitSlotLines, charsRendered, cols, style)
+}
 
+func renderWrappedLinesToPNG(fitLines, fitSlotLines []string, charsRendered, cols int, style RenderStyle) (*RenderedImage, error) {
+	useAA := style.AA
+	selected := atlasSet(style.Font)
+	atlasH := selected.Bit.CellH
+	atlasW := selected.Bit.CellW
+	if useAA {
+		atlasH = selected.Gray.CellH
+		atlasW = selected.Gray.CellW
+	}
+	markerScale := style.MarkerScale
+	if markerScale < 1 {
+		markerScale = 1
+	}
+	cellH := RenderCellHeight(style)
+	cellW := RenderCellWidth(style)
 	overhang := atlasW - cellW
 	if overhang < 0 {
 		overhang = 0
@@ -961,21 +973,20 @@ func RenderTextToPngsWithCharLimit(text string, cols, maxCharsPerImage int, styl
 	var images []*RenderedImage
 	slotCursor := 0
 	for _, page := range splitWrappedLinesIntoReadablePages(lines, linesPerImg, maxCharsPerImage) {
-		chunk := strings.Join(page, "\n")
-		var slotChunk *string
+		var pageSlotLines []string
 		if slotLines != nil {
 			end := slotCursor + len(page)
 			if end > len(slotLines) {
 				end = len(slotLines)
 			}
-			s := ""
 			if slotCursor < len(slotLines) {
-				s = strings.Join(slotLines[slotCursor:end], "\n")
+				pageSlotLines = slotLines[slotCursor:end]
+			} else {
+				pageSlotLines = slotLines[:0]
 			}
-			slotChunk = &s
 		}
 		slotCursor += len(page)
-		img, err := RenderChunkToPng(chunk, cols, style, maxHeightPx, slotChunk)
+		img, err := renderWrappedLinesToPNG(page, pageSlotLines, wrappedLinesRuneCount(page), cols, style)
 		if err != nil {
 			return nil, err
 		}
