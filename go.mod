@@ -2,7 +2,10 @@ module github.com/evan-choi/pxpipe-go
 
 go 1.26.3
 
-require github.com/bytedance/sonic v1.15.2
+require (
+	github.com/bytedance/sonic v1.15.2
+	github.com/klauspost/compress v1.19.1
+)
 
 require (
 	github.com/bytedance/gopkg v0.1.3 // indirect

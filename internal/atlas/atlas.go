@@ -28,10 +28,19 @@ type Atlas struct {
 	Offsets    []uint32
 	Wide       []byte
 	Pixels     []byte
+	// asciiRank caches Rank for cp < 128 — the hot path on code/log content.
+	asciiRank [128]int32
 }
 
 // Rank binary-searches the sparse codepoint table; -1 = not in atlas.
 func (a *Atlas) Rank(cp rune) int {
+	if cp >= 0 && cp < 128 {
+		return int(a.asciiRank[cp])
+	}
+	return a.rankSearch(cp)
+}
+
+func (a *Atlas) rankSearch(cp rune) int {
 	lo, hi := 0, len(a.Codepoints)-1
 	for lo <= hi {
 		mid := (lo + hi) >> 1
@@ -104,7 +113,7 @@ func load(meta map[string]atlasMeta, name string) *Atlas {
 	if !ok {
 		panic("atlas: unknown atlas " + name)
 	}
-	return &Atlas{
+	a := &Atlas{
 		CellW:      m.CellW,
 		CellH:      m.CellH,
 		Ascent:     m.Ascent,
@@ -113,6 +122,10 @@ func load(meta map[string]atlasMeta, name string) *Atlas {
 		Wide:       gunzip(name + ".wide.bin"),
 		Pixels:     gunzip(name + ".pixels.bin"),
 	}
+	for cp := rune(0); cp < 128; cp++ {
+		a.asciiRank[cp] = int32(a.rankSearch(cp))
+	}
+	return a
 }
 
 var (

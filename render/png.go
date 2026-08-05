@@ -2,9 +2,9 @@ package render
 
 import (
 	"bytes"
-	"compress/zlib"
 	"encoding/binary"
 	"fmt"
+	"github.com/klauspost/compress/zlib"
 	"hash/crc32"
 	"sync"
 )
@@ -19,7 +19,7 @@ type zlibEncoder struct {
 var zlibPool = sync.Pool{
 	New: func() any {
 		e := &zlibEncoder{}
-		e.zw, _ = zlib.NewWriterLevel(&e.buf, zlib.DefaultCompression)
+		e.zw, _ = zlib.NewWriterLevel(&e.buf, 7)
 		return e
 	},
 }
