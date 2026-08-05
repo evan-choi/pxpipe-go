@@ -103,12 +103,11 @@ type glyphRef struct {
 	rank  int
 }
 
-func bitGlyph(cp rune, font string) (glyphRef, bool) {
-	selected := atlasSet(font).Bit
-	if r := selected.Rank(cp); r >= 0 {
-		return glyphRef{selected, r}, true
+func bitGlyph(cp rune, selected *atlas.Set) (glyphRef, bool) {
+	if r := selected.Bit.Rank(cp); r >= 0 {
+		return glyphRef{selected.Bit, r}, true
 	}
-	if def := atlas.Default().Bit; selected != def {
+	if def := atlas.Default().Bit; selected.Bit != def {
 		if r := def.Rank(cp); r >= 0 {
 			return glyphRef{def, r}, true
 		}
@@ -116,12 +115,11 @@ func bitGlyph(cp rune, font string) (glyphRef, bool) {
 	return glyphRef{}, false
 }
 
-func grayGlyph(cp rune, font string) (glyphRef, bool) {
-	selected := atlasSet(font).Gray
-	if r := selected.Rank(cp); r >= 0 {
-		return glyphRef{selected, r}, true
+func grayGlyph(cp rune, selected *atlas.Set) (glyphRef, bool) {
+	if r := selected.Gray.Rank(cp); r >= 0 {
+		return glyphRef{selected.Gray, r}, true
 	}
-	if def := atlas.Default().Gray; selected != def {
+	if def := atlas.Default().Gray; selected.Gray != def {
 		if r := def.Rank(cp); r >= 0 {
 			return glyphRef{def, r}, true
 		}
@@ -147,11 +145,11 @@ func RenderCellHeight(style RenderStyle) int {
 
 // cellsFor mirrors TS cellsFor: visual width of a codepoint in cells
 // (missing codepoints advance 1 so wrap math stays stable).
-func cellsFor(cp rune, markerScale int, font string) int {
+func cellsFor(cp rune, markerScale int, selected *atlas.Set) int {
 	if cp == nlSentinelCp && markerScale > 1 {
 		return markerScale
 	}
-	g, ok := bitGlyph(cp, font)
+	g, ok := bitGlyph(cp, selected)
 	if !ok {
 		return 1
 	}
@@ -356,6 +354,7 @@ func ExpandTabsInLine(line string) string {
 	}
 	var b strings.Builder
 	b.Grow(len(line) + 8)
+	selected := atlasSet(DefaultRenderFont)
 	col := 0
 	for _, r := range line {
 		if r == '\t' {
@@ -367,7 +366,7 @@ func ExpandTabsInLine(line string) string {
 			col += span
 		} else {
 			b.WriteRune(r)
-			col += cellsFor(r, 1, DefaultRenderFont)
+			col += cellsFor(r, 1, selected)
 		}
 	}
 	return b.String()
@@ -375,8 +374,9 @@ func ExpandTabsInLine(line string) string {
 
 func MeasureLineCols(line string, markerScale int, font string) int {
 	w := 0
+	selected := atlasSet(font)
 	for _, r := range line {
-		w += cellsFor(r, markerScale, font)
+		w += cellsFor(r, markerScale, selected)
 	}
 	return w
 }
@@ -410,6 +410,7 @@ func MeasureContentCols(text string, maxCols, markerScale int, font string) int 
 
 func WrapLines(text string, cols, markerScale int, font string) []string {
 	var out []string
+	selected := atlasSet(font)
 	for _, rawWithTabs := range strings.Split(MinifyForRender(text), "\n") {
 		raw := EscapeMissingGlyphs(ExpandTabsInLine(rawWithTabs))
 		if len(raw) == 0 {
@@ -419,7 +420,7 @@ func WrapLines(text string, cols, markerScale int, font string) []string {
 		start := 0
 		curCols := 0
 		for i, r := range raw {
-			w := cellsFor(r, markerScale, font)
+			w := cellsFor(r, markerScale, selected)
 			if curCols+w > cols {
 				out = append(out, raw[start:i])
 				start = i
@@ -492,8 +493,8 @@ func fbSet(fb []byte, idx int, v byte) {
 	}
 }
 
-func blitGlyph(fb []byte, fbW, x, y int, cp rune, font string, markerMask []byte) int {
-	g, ok := bitGlyph(cp, font)
+func blitGlyph(fb []byte, fbW, x, y int, cp rune, selected *atlas.Set, markerMask []byte) int {
+	g, ok := bitGlyph(cp, selected)
 	if !ok {
 		return 0
 	}
@@ -504,7 +505,7 @@ func blitGlyph(fb []byte, fbW, x, y int, cp rune, font string, markerMask []byte
 		srcW *= 2
 	}
 	srcOff := int(a.Offsets[g.rank])
-	yOffset := atlasSet(font).Bit.Ascent - a.Ascent
+	yOffset := selected.Bit.Ascent - a.Ascent
 	for gy := 0; gy < a.CellH; gy++ {
 		dstRow := (y+yOffset+gy)*fbW + x
 		bitRowStart := srcOff + gy*srcW
@@ -524,8 +525,8 @@ func blitGlyph(fb []byte, fbW, x, y int, cp rune, font string, markerMask []byte
 	return 1
 }
 
-func blitGlyphGray(fb []byte, fbW, x, y int, cp rune, font string) int {
-	g, ok := grayGlyph(cp, font)
+func blitGlyphGray(fb []byte, fbW, x, y int, cp rune, selected *atlas.Set) int {
+	g, ok := grayGlyph(cp, selected)
 	if !ok {
 		return 0
 	}
@@ -536,7 +537,7 @@ func blitGlyphGray(fb []byte, fbW, x, y int, cp rune, font string) int {
 		srcW *= 2
 	}
 	srcOff := int(a.Offsets[g.rank])
-	yOffset := atlasSet(font).Gray.Ascent - a.Ascent
+	yOffset := selected.Gray.Ascent - a.Ascent
 	for gy := 0; gy < a.CellH; gy++ {
 		dstRow := (y+yOffset+gy)*fbW + x
 		srcRow := srcOff + gy*srcW
@@ -556,8 +557,8 @@ func blitGlyphGray(fb []byte, fbW, x, y int, cp rune, font string) int {
 	return 1
 }
 
-func blitGlyphScaled(fb, markerMask []byte, fbW, fbH, x, y int, cp rune, scaleX int, font string) int {
-	g, ok := bitGlyph(cp, font)
+func blitGlyphScaled(fb, markerMask []byte, fbW, fbH, x, y int, cp rune, scaleX int, selected *atlas.Set) int {
+	g, ok := bitGlyph(cp, selected)
 	if !ok {
 		return 0
 	}
@@ -568,7 +569,7 @@ func blitGlyphScaled(fb, markerMask []byte, fbW, fbH, x, y int, cp rune, scaleX 
 		srcW *= 2
 	}
 	srcOff := int(a.Offsets[g.rank])
-	yOffset := atlasSet(font).Bit.Ascent - a.Ascent
+	yOffset := selected.Bit.Ascent - a.Ascent
 	for gy := 0; gy < a.CellH; gy++ {
 		py := y + yOffset + gy
 		if py >= fbH {
@@ -807,19 +808,19 @@ func renderWrappedLinesToPNG(fitLines, fitSlotLines []string, charsRendered, col
 			}
 			var advance int
 			if isMarker && markerScale > 1 {
-				advance = blitGlyphScaled(fb, markerMask, width, height, baseX, baseY, cp, markerScale, style.Font)
+				advance = blitGlyphScaled(fb, markerMask, width, height, baseX, baseY, cp, markerScale, selected)
 				if colorMask != nil {
 					stampColorMask(baseX, baseY, advance*cellW, colorSlot)
 				}
 			} else {
 				if useAA {
-					advance = blitGlyphGray(fb, width, baseX, baseY, cp, style.Font)
+					advance = blitGlyphGray(fb, width, baseX, baseY, cp, selected)
 				} else {
 					var mm []byte
 					if isMarker {
 						mm = markerMask
 					}
-					advance = blitGlyph(fb, width, baseX, baseY, cp, style.Font, mm)
+					advance = blitGlyph(fb, width, baseX, baseY, cp, selected, mm)
 				}
 				if colorMask != nil && advance > 0 {
 					stampColorMask(baseX, baseY, advance*atlasW, colorSlot)
