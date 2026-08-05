@@ -184,7 +184,7 @@ func ExtractFactSheetEntries(text string) []FactSheetEntry {
 		scan = u16Slice(scan, 0, fsMaxScan)
 	}
 	oc := newOrderedCounts()
-	for _, chunk := range strings.FieldsFunc(scan, isJSSpace) {
+	for chunk := range strings.FieldsFuncSeq(scan, isJSSpace) {
 		cl := u16len(chunk)
 		if cl < fsMinLen || cl > fsMaxChunk {
 			continue
