@@ -66,6 +66,25 @@ func TestReflowFastPath(t *testing.T) {
 	}
 }
 
+func TestReflowForRender(t *testing.T) {
+	got, buf, ok := reflowForRender("a\nb")
+	if !ok || got != "a"+NLSentinel+"b" || buf == nil {
+		t.Fatalf("reflowForRender() = %q, %v, %v", got, buf, ok)
+	}
+	putReflowBuffer(buf)
+
+	if got, buf, ok = reflowForRender("ab"); !ok || got != "ab" || buf != nil {
+		t.Fatalf("reflowForRender(no newline) = %q, %v, %v", got, buf, ok)
+	}
+	want, wantOK := Reflow("a\tb")
+	if got, buf, ok = reflowForRender("a\tb"); ok != wantOK || got != want || buf != nil {
+		t.Fatalf("reflowForRender(tab) = %q, %v, %v", got, buf, ok)
+	}
+	if got, buf, ok = reflowForRender("a" + NLSentinel + "b"); ok || got != "" || buf != nil {
+		t.Fatalf("reflowForRender(sentinel) = %q, %v, %v", got, buf, ok)
+	}
+}
+
 func TestInvertBytes(t *testing.T) {
 	buf := []byte{0, 1, 2, 3, 4, 5, 6, 7, 8, 9}
 	want := append([]byte(nil), buf...)

@@ -1,5 +1,67 @@
 package render
 
+import (
+	"runtime"
+	"strings"
+	"unsafe"
+)
+
+var reflowBufferCache = make(chan []byte, runtime.GOMAXPROCS(0))
+
+func getReflowBuffer(size int) []byte {
+	select {
+	case buf := <-reflowBufferCache:
+		if cap(buf) >= size {
+			return buf[:size]
+		}
+	default:
+	}
+	return make([]byte, size)
+}
+
+func putReflowBuffer(buf []byte) {
+	clear(buf)
+	if cap(buf) > maxCachedBufferBytes {
+		return
+	}
+	select {
+	case reflowBufferCache <- buf[:0]:
+	default:
+	}
+}
+
+// reflowForRender returns a string view of buf; callers must return buf only
+// after every consumer of the string has finished.
+func reflowForRender(text string) (string, []byte, bool) {
+	if strings.Contains(text, NLSentinel) || strings.Contains(text, "\t") {
+		packed, ok := Reflow(text)
+		return packed, nil, ok
+	}
+	text = MinifyForRender(text)
+	newlines := strings.Count(text, "\n")
+	if newlines == 0 {
+		return text, nil, true
+	}
+	extra := len(NLSentinel) - 1
+	if newlines > (int(^uint(0)>>1)-len(text))/extra {
+		packed, ok := Reflow(text)
+		return packed, nil, ok
+	}
+	buf := getReflowBuffer(len(text) + newlines*extra)
+	out := buf[:0]
+	for {
+		i := strings.IndexByte(text, '\n')
+		if i < 0 {
+			out = append(out, text...)
+			break
+		}
+		out = append(out, text[:i]...)
+		out = append(out, NLSentinel...)
+		text = text[i+1:]
+	}
+	return unsafe.String(unsafe.SliceData(out), len(out)), out, true
+}
+
 // RenderOptions mirrors pxpipe's renderTextToImages options. Zero values mean
 // "use the production defaults" except Shrink, which defaults to true and is
 // only disabled when explicitly set to false.
@@ -49,8 +111,11 @@ func RenderTextToImages(text string, opts RenderOptions) (*RenderResult, error) 
 
 	source := text
 	if opts.Reflow {
-		if packed, ok := Reflow(text); ok {
+		if packed, buf, ok := reflowForRender(text); ok {
 			source = packed
+			if buf != nil {
+				defer putReflowBuffer(buf)
+			}
 		}
 	}
 
