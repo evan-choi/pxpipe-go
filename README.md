@@ -57,6 +57,29 @@ gateway/provider path segment, e.g. `/openai/v1/responses`) are rewritten;
 `count_tokens` and everything else — including SSE response streams — pass
 through untouched. Set `Upstream` to whichever provider the handler fronts.
 
+### Custom routes
+
+Set `ProtocolOf` to map your own paths to wire protocols; return
+`pxpipe.ProtocolNone` to pass a request through, or fall back to
+`pxpipe.DefaultProtocolOf` for the built-in rules:
+
+```go
+h := pxpipe.NewHandler(pxpipe.HandlerOptions{
+    Upstream: upstream,
+    ProtocolOf: func(path string) pxpipe.Protocol {
+        switch path {
+        case "/api/llm/claude":
+            return pxpipe.ProtocolAnthropicMessages
+        case "/api/llm/gpt/chat":
+            return pxpipe.ProtocolOpenAIChat
+        case "/api/llm/gpt/responses":
+            return pxpipe.ProtocolOpenAIResponses
+        }
+        return pxpipe.DefaultProtocolOf(strings.TrimPrefix(path, "/internal/ai-proxy"))
+    },
+})
+```
+
 ## Use as a pure transform
 
 ```go

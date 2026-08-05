@@ -215,3 +215,67 @@ func TestHandlerOpenAIUnsupportedModelPassesThrough(t *testing.T) {
 		t.Error("body must pass through untouched")
 	}
 }
+
+func TestHandlerCustomProtocolOf(t *testing.T) {
+	var upstreamBody []byte
+	up := upstreamEcho(t, &upstreamBody)
+	defer up.Close()
+
+	input, err := os.ReadFile(filepath.Join("testdata", "transform", "big-claude-code", "input.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var applied *TransformResult
+	u, _ := url.Parse(up.URL)
+	h := NewHandler(HandlerOptions{
+		Upstream: u,
+		OnResult: func(_ *http.Request, res *TransformResult) { applied = res },
+		ProtocolOf: func(path string) Protocol {
+			if path == "/api/llm/claude" {
+				return ProtocolAnthropicMessages
+			}
+			return ProtocolNone
+		},
+	})
+	srv := httptest.NewServer(h)
+	defer srv.Close()
+
+	resp, err := http.Post(srv.URL+"/api/llm/claude", "application/json", bytes.NewReader(input))
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp.Body.Close()
+	if applied == nil || !applied.Applied {
+		t.Fatalf("custom path not transformed: %+v", applied)
+	}
+
+	applied = nil
+	resp, err = http.Post(srv.URL+"/v1/messages", "application/json", bytes.NewReader(input))
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp.Body.Close()
+	if applied != nil {
+		t.Fatalf("built-in path should be overridden to pass through, got %+v", applied)
+	}
+	if !bytes.Equal(upstreamBody, input) {
+		t.Error("pass-through body was modified")
+	}
+}
+
+func TestDefaultProtocolOf(t *testing.T) {
+	cases := map[string]Protocol{
+		"/v1/messages":                ProtocolAnthropicMessages,
+		"/anthropic/v1/messages":      ProtocolAnthropicMessages,
+		"/v1/chat/completions":        ProtocolOpenAIChat,
+		"/openai/v1/chat/completions": ProtocolOpenAIChat,
+		"/v1/responses":               ProtocolOpenAIResponses,
+		"/v1/messages/count_tokens":   ProtocolNone,
+		"/healthz":                    ProtocolNone,
+	}
+	for path, want := range cases {
+		if got := DefaultProtocolOf(path); got != want {
+			t.Errorf("DefaultProtocolOf(%q) = %v, want %v", path, got, want)
+		}
+	}
+}
