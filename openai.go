@@ -68,6 +68,21 @@ type openaiResolvedOptions struct {
 	charsPerTokenSet bool
 	Reflow           bool
 	CollapseHistory  bool
+	tokenCounts      gptTokenCounter
+}
+
+type gptTokenCounter map[string]int
+
+func (c gptTokenCounter) count(text string) int {
+	if c == nil {
+		return gptTextTokens(text)
+	}
+	if n, ok := c[text]; ok {
+		return n
+	}
+	n := gptTextTokens(text)
+	c[text] = n
+	return n
 }
 
 func resolveOpenAIOpts(opts *TransformOptions) openaiResolvedOptions {
@@ -129,6 +144,7 @@ func gptHistoryOptsFor(model string, o openaiResolvedOptions, profile *GptModelP
 	h.MaxHeightPx = profile.MaxHeightPx
 	h.Style = profile.Style
 	h.MaxImages = configuredHistoryMaxImages(model)
+	h.tokenCounts = o.tokenCounts
 	return h
 }
 
@@ -642,23 +658,23 @@ func gptImageTokens(model string, images []*render.RenderedImage) int {
 	return n
 }
 
-func gptBaselineImagedTokens(systemTexts []string, originalTools []any, hasOriginal bool, strippedTools []any, hasStripped bool) int {
+func gptBaselineImagedTokens(systemTexts []string, originalTools []any, hasOriginal bool, strippedTools []any, hasStripped bool, tokenCounts gptTokenCounter) int {
 	n := 0
 	for _, t := range systemTexts {
-		n += gptTextTokens(t)
+		n += tokenCounts.count(t)
 	}
 	orig := 0
 	if hasOriginal && len(originalTools) > 0 {
-		orig = gptTextTokens(string(jsStringify(originalTools)))
+		orig = tokenCounts.count(string(jsStringify(originalTools)))
 	}
 	stripped := 0
 	if hasStripped && len(strippedTools) > 0 {
-		stripped = gptTextTokens(string(jsStringify(strippedTools)))
+		stripped = tokenCounts.count(string(jsStringify(strippedTools)))
 	}
 	return n + maxInt(0, orig-stripped)
 }
 
-func foldGptHistory(info *TransformInfo, model string, plan *gptCollapsePlan) {
+func foldGptHistory(info *TransformInfo, model string, plan *gptCollapsePlan, tokenCounts gptTokenCounter) {
 	allImages := append(append([]*render.RenderedImage(nil), plan.Images...), plan.ImagesAfter...)
 	if len(allImages) == 0 {
 		if plan.Reason != "" {
@@ -673,7 +689,7 @@ func foldGptHistory(info *TransformInfo, model string, plan *gptCollapsePlan) {
 	if plan.BaselineTokens >= 0 {
 		info.BaselineImagedTokens += plan.BaselineTokens
 	} else {
-		info.BaselineImagedTokens += gptTextTokens(plan.Text)
+		info.BaselineImagedTokens += tokenCounts.count(plan.Text)
 	}
 	info.ImageCount += len(allImages)
 	for _, img := range allImages {
@@ -716,7 +732,7 @@ func applyChatHistoryCollapse(req map[string]any, info *TransformInfo, o openaiR
 	if err != nil {
 		return false, err
 	}
-	foldGptHistory(info, model, &plan)
+	foldGptHistory(info, model, &plan, o.tokenCounts)
 	allImages := append(append([]*render.RenderedImage(nil), plan.Images...), plan.ImagesAfter...)
 	if len(allImages) == 0 {
 		return false, nil
@@ -806,7 +822,7 @@ func applyResponsesHistoryCollapse(req map[string]any, inputItems []any, info *T
 		rc.BarrierTypes = list
 	}
 
-	foldGptHistory(info, model, &plan)
+	foldGptHistory(info, model, &plan, o.tokenCounts)
 	if len(plan.Segments) == 0 {
 		return false, nil
 	}
@@ -862,16 +878,16 @@ func applyResponsesHistoryCollapse(req map[string]any, inputItems []any, info *T
 	return true, nil
 }
 
-func measureResponsesComposition(req map[string]any, inputWasString bool, originalInput string, inputItems []any) *ResponsesComposition {
+func measureResponsesComposition(req map[string]any, inputWasString bool, originalInput string, inputItems []any, tokenCounts gptTokenCounter) *ResponsesComposition {
 	c := &ResponsesComposition{}
 	if instructions, ok := req["instructions"].(string); ok {
-		c.Instructions = gptTextTokens(instructions)
+		c.Instructions = tokenCounts.count(instructions)
 	}
 	if tools, ok := req["tools"].([]any); ok {
-		c.ToolsJSON = gptTextTokens(string(jsStringify(tools)))
+		c.ToolsJSON = tokenCounts.count(string(jsStringify(tools)))
 	}
 	if inputWasString {
-		c.UserAssistant += gptTextTokens(originalInput)
+		c.UserAssistant += tokenCounts.count(originalInput)
 	}
 	countImages := func(content any) int {
 		arr, ok := content.([]any)
@@ -899,26 +915,26 @@ func measureResponsesComposition(req map[string]any, inputWasString bool, origin
 		c.ImageParts += countImages(o["content"])
 		switch {
 		case role == "system" || role == "developer":
-			c.SystemDeveloper += gptTextTokens(responsesContentText(o["content"]))
+			c.SystemDeveloper += tokenCounts.count(responsesContentText(o["content"]))
 		case role == "user" || role == "assistant":
-			c.UserAssistant += gptTextTokens(responsesContentText(o["content"]))
+			c.UserAssistant += tokenCounts.count(responsesContentText(o["content"]))
 		case itemType == "function_call":
-			c.FunctionCalls += gptTextTokens(string(jsStringify(o)))
+			c.FunctionCalls += tokenCounts.count(string(jsStringify(o)))
 		case itemType == "function_call_output":
 			if s, ok := o["output"].(string); ok {
-				c.FunctionOutputs += gptTextTokens(s)
+				c.FunctionOutputs += tokenCounts.count(s)
 			} else if v, present := o["output"]; present && v != nil {
-				c.FunctionOutputs += gptTextTokens(string(jsStringify(v)))
+				c.FunctionOutputs += tokenCounts.count(string(jsStringify(v)))
 			} else {
-				c.FunctionOutputs += gptTextTokens(string(jsStringify("")))
+				c.FunctionOutputs += tokenCounts.count(string(jsStringify("")))
 			}
 		case itemType == "reasoning":
-			c.ReasoningEncrypted += gptTextTokens(string(jsStringify(o)))
+			c.ReasoningEncrypted += tokenCounts.count(string(jsStringify(o)))
 		case itemType == "compaction" || itemType == "compaction_trigger" ||
 			itemType == "context_compaction" || itemType == "item_reference":
-			c.CompactionOpaque += gptTextTokens(string(jsStringify(o)))
+			c.CompactionOpaque += tokenCounts.count(string(jsStringify(o)))
 		case role == "" && itemType != "":
-			c.Other += gptTextTokens(string(jsStringify(o)))
+			c.Other += tokenCounts.count(string(jsStringify(o)))
 		}
 	}
 	c.TotalLocal = c.Instructions + c.SystemDeveloper + c.UserAssistant +
@@ -1038,7 +1054,7 @@ func TransformOpenAIChatCompletions(body []byte, opts *TransformOptions) ([]byte
 		profile.StripCols,
 	)
 
-	staticBaselineTokens := gptBaselineImagedTokens(systemTexts, origTools, hasTools, rewrittenTools, hasTools)
+	staticBaselineTokens := gptBaselineImagedTokens(systemTexts, origTools, hasTools, rewrittenTools, hasTools, o.tokenCounts)
 	gateBaseline := -1
 	if !o.charsPerTokenSet && profile.ExactStaticBaseline {
 		gateBaseline = staticBaselineTokens
@@ -1174,7 +1190,9 @@ func TransformOpenAIResponses(body []byte, opts *TransformOptions) ([]byte, *Tra
 		return body, info
 	}
 
-	info.ResponsesComposition = measureResponsesComposition(req, inputWasString, originalInput, inputItems)
+	// Composition metrics and history planning count the same payloads.
+	o.tokenCounts = make(gptTokenCounter)
+	info.ResponsesComposition = measureResponsesComposition(req, inputWasString, originalInput, inputItems, o.tokenCounts)
 
 	var authorityDocs, systemTexts []string
 	if instructions, ok := req["instructions"].(string); ok && instructions != "" {
@@ -1272,7 +1290,7 @@ func TransformOpenAIResponses(body []byte, opts *TransformOptions) ([]byte, *Tra
 		profile.StripCols,
 	)
 
-	staticBaselineTokens := gptBaselineImagedTokens(systemTexts, origTools, hasTools, rewrittenTools, hasTools)
+	staticBaselineTokens := gptBaselineImagedTokens(systemTexts, origTools, hasTools, rewrittenTools, hasTools, o.tokenCounts)
 	gateBaseline := -1
 	if !o.charsPerTokenSet && profile.ExactStaticBaseline {
 		gateBaseline = staticBaselineTokens

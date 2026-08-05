@@ -5,7 +5,6 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/evan-choi/pxpipe-go/internal/o200k"
 	"github.com/evan-choi/pxpipe-go/render"
 )
 
@@ -32,6 +31,7 @@ type gptHistoryOptions struct {
 	MaxHeightPx       int
 	Style             render.RenderStyle
 	Reflow            bool
+	tokenCounts       gptTokenCounter
 }
 
 func defaultGptHistoryOptions() gptHistoryOptions {
@@ -114,8 +114,6 @@ type gptCollapsePlan struct {
 func emptyGptPlan() gptCollapsePlan {
 	return gptCollapsePlan{BaselineTokens: -1, DroppedCodepoints: map[rune]int{}}
 }
-
-func gptCountTokens(text string) int { return o200k.CountTokens(text) }
 
 func safeJSONString(v any) string {
 	if s, ok := v.(string); ok {
@@ -236,7 +234,7 @@ func planGptCollapse(turns []historyTurn, protectedPrefix int, isProfitable gptP
 	}
 
 	text := joinTurns(turns, pp, rawEnd, pinIdx)
-	if text == "" || gptCountTokens(text) < o.MinCollapseTokens {
+	if text == "" || o.tokenCounts.count(text) < o.MinCollapseTokens {
 		base.Reason = "below_min_tokens"
 		base.CollapsedChars = u16len(text)
 		return base, nil
@@ -279,7 +277,7 @@ func planGptCollapse(turns []historyTurn, protectedPrefix int, isProfitable gptP
 				acc = 0
 				continue
 			}
-			acc += gptCountTokens(turns[i].Text)
+			acc += o.tokenCounts.count(turns[i].Text)
 			for _, id := range turns[i].OpenIds {
 				open[id] = struct{}{}
 			}
@@ -573,7 +571,7 @@ func responseReferencedIds(items []any) map[string]struct{} {
 
 // classifyResponsesPairs classifies tool state and returns old (imageable)
 // rounds plus counters.
-func classifyResponsesPairs(items []any, keepRecentPairs int) ([]responsesCompletedRound, responsesPairState) {
+func classifyResponsesPairs(items []any, keepRecentPairs int, tokenCounts gptTokenCounter) ([]responsesCompletedRound, responsesPairState) {
 	calls := map[string][]int{}
 	outputs := map[string][]int{}
 	missingIDItems := 0
@@ -614,15 +612,15 @@ func classifyResponsesPairs(items []any, keepRecentPairs int) ([]responsesComple
 			callJSON := jsStringify(call)
 			outTokens := 0
 			if s, ok := output["output"].(string); ok {
-				outTokens = gptCountTokens(s)
+				outTokens = tokenCounts.count(s)
 			} else {
-				outTokens = gptCountTokens(safeJSONString(output["output"]))
+				outTokens = tokenCounts.count(safeJSONString(output["output"]))
 			}
 			pairByCallIndex[callIndex] = responsesCompletedPair{
 				CallIndex:    callIndex,
 				OutputIndex:  outputIndex,
 				Text:         responseCallText(call) + "\n" + responseOutputText(output),
-				CallTokens:   gptCountTokens(string(callJSON)),
+				CallTokens:   tokenCounts.count(string(callJSON)),
 				OutputTokens: outTokens,
 			}
 		case len(cs) > 0 && len(os) == 0:
@@ -876,7 +874,7 @@ func planResponsesMixedCollapse(items []any, old []responsesCompletedRound, stat
 			current = append(current, responsesMixedUnit{
 				Indices:        []int{i},
 				Text:           text,
-				BaselineTokens: gptCountTokens(responseMessageText(items[i]).Text),
+				BaselineTokens: o.tokenCounts.count(responseMessageText(items[i]).Text),
 			})
 			continue
 		}
@@ -1062,7 +1060,7 @@ func finalizeResponsesPlan(base gptCollapsePlan, segments []responsesPairCollaps
 // planResponsesPairCollapse renders only old, unambiguously completed
 // Responses call/output rounds (or defers to the mixed planner per profile).
 func planResponsesPairCollapse(items []any, isProfitable gptProfitableFn, o gptHistoryOptions) (gptCollapsePlan, error) {
-	old, state := classifyResponsesPairs(items, o.KeepRecentPairs)
+	old, state := classifyResponsesPairs(items, o.KeepRecentPairs, o.tokenCounts)
 	if o.ResponsesMode == "mixed" {
 		return planResponsesMixedCollapse(items, old, state, isProfitable, o)
 	}
@@ -1077,7 +1075,7 @@ func planResponsesPairCollapse(items []any, isProfitable gptProfitableFn, o gptH
 		allTextParts = append(allTextParts, round.Text)
 	}
 	allText := strings.Join(allTextParts, "\n\n")
-	if allText == "" || gptCountTokens(allText) < o.MinCollapseTokens {
+	if allText == "" || o.tokenCounts.count(allText) < o.MinCollapseTokens {
 		base.Reason = "below_min_tokens"
 		base.CollapsedChars = u16len(allText)
 		return base, nil
