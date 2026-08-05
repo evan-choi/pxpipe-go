@@ -1,6 +1,7 @@
 package pxpipe
 
 import (
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"sort"
@@ -17,6 +18,8 @@ import (
 // (sorted), matching JS insertion semantics for single additions.
 
 const orderKey = "\x00keys"
+
+type pngDataURL []byte
 
 func objKeyOrder(m map[string]any) []string {
 	if ks, ok := m[orderKey].([]string); ok {
@@ -130,6 +133,10 @@ func appendJSValue(b []byte, v any) []byte {
 		return append(b, "false"...)
 	case string:
 		return appendJSString(b, tv)
+	case pngDataURL:
+		b = append(b, `"data:image/png;base64,`...)
+		b = base64.StdEncoding.AppendEncode(b, tv)
+		return append(b, '"')
 	case json.Number:
 		if tv == "" {
 			return append(b, '0')

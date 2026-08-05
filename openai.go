@@ -458,7 +458,7 @@ func rewriteFlatToolsForGpt(tools []any, hasTools bool) (rewritten []any, change
 
 func openAIImagePart(img *render.RenderedImage) map[string]any {
 	inner := map[string]any{
-		"url":    "data:image/png;base64," + base64.StdEncoding.EncodeToString(img.PNG),
+		"url":    pngDataURL(img.PNG),
 		"detail": "original",
 	}
 	setObjKeyOrder(inner, []string{"url", "detail"})
@@ -470,7 +470,7 @@ func openAIImagePart(img *render.RenderedImage) map[string]any {
 func responsesImagePart(img *render.RenderedImage) map[string]any {
 	part := map[string]any{
 		"type":      "input_image",
-		"image_url": "data:image/png;base64," + base64.StdEncoding.EncodeToString(img.PNG),
+		"image_url": pngDataURL(img.PNG),
 		"detail":    "original",
 	}
 	setObjKeyOrder(part, []string{"type", "image_url", "detail"})
