@@ -45,6 +45,25 @@ func BenchmarkRenderDensePage(b *testing.B) {
 	}
 }
 
+func BenchmarkRenderDensePageParallel(b *testing.B) {
+	input, err := os.ReadFile(filepath.Join("testdata", "render", "multi-page", "input.txt"))
+	if err != nil {
+		b.Fatal(err)
+	}
+	text := string(input)
+	b.SetBytes(int64(len(input)))
+	b.ReportAllocs()
+	b.ResetTimer()
+	b.RunParallel(func(pb *testing.PB) {
+		for pb.Next() {
+			if _, err := render.RenderTextToImages(text, render.RenderOptions{Reflow: true}); err != nil {
+				b.Error(err)
+				return
+			}
+		}
+	})
+}
+
 func BenchmarkFactSheetPatterns(b *testing.B) {
 	input, err := os.ReadFile(filepath.Join("testdata", "render", "multi-page", "input.txt"))
 	if err != nil {
