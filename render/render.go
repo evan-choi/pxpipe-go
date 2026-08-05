@@ -6,7 +6,9 @@ package render
 import (
 	"encoding/binary"
 	"math"
+	"runtime"
 	"strings"
+	"sync"
 
 	"github.com/evan-choi/pxpipe-go/internal/atlas"
 )
@@ -68,6 +70,9 @@ type RenderStyle struct {
 }
 
 var DenseRenderStyle = RenderStyle{AA: true}
+
+// Keep concurrent pages within the retained encoder and pixel-buffer budget.
+var pageRenderSlots = make(chan struct{}, runtime.GOMAXPROCS(0))
 
 type RenderedImage struct {
 	PNG               []byte
@@ -998,27 +1003,65 @@ func RenderTextToPngsWithCharLimit(text string, cols, maxCharsPerImage int, styl
 		linesPerImg = byChars
 	}
 
-	var images []*RenderedImage
+	pages := splitWrappedLinesIntoReadablePages(lines, linesPerImg, maxCharsPerImage)
+	var pageSlotLines [][]string
+	if slotLines != nil {
+		pageSlotLines = make([][]string, len(pages))
+	}
 	slotCursor := 0
-	for _, page := range splitWrappedLinesIntoReadablePages(lines, linesPerImg, maxCharsPerImage) {
-		var pageSlotLines []string
+	for i, page := range pages {
 		if slotLines != nil {
 			end := slotCursor + len(page)
 			if end > len(slotLines) {
 				end = len(slotLines)
 			}
 			if slotCursor < len(slotLines) {
-				pageSlotLines = slotLines[slotCursor:end]
+				pageSlotLines[i] = slotLines[slotCursor:end]
 			} else {
-				pageSlotLines = slotLines[:0]
+				pageSlotLines[i] = slotLines[:0]
 			}
 		}
 		slotCursor += len(page)
-		img, err := renderWrappedLinesToPNG(page, pageSlotLines, wrappedLinesRuneCount(page), cols, style)
+	}
+
+	images := make([]*RenderedImage, len(pages))
+	renderPage := func(i int) (*RenderedImage, error) {
+		var slots []string
+		if pageSlotLines != nil {
+			slots = pageSlotLines[i]
+		}
+		pageRenderSlots <- struct{}{}
+		defer func() { <-pageRenderSlots }()
+		return renderWrappedLinesToPNG(pages[i], slots, wrappedLinesRuneCount(pages[i]), cols, style)
+	}
+	workers := min(len(pages), runtime.GOMAXPROCS(0), cap(pageRenderSlots))
+	if workers == 1 {
+		for i := range pages {
+			var err error
+			images[i], err = renderPage(i)
+			if err != nil {
+				return nil, err
+			}
+		}
+		return images, nil
+	}
+
+	errs := make([]error, len(pages))
+	var wg sync.WaitGroup
+	wg.Add(workers)
+	for worker := 0; worker < workers; worker++ {
+		go func(start int) {
+			defer wg.Done()
+			for i := start; i < len(pages); i += workers {
+				images[i], errs[i] = renderPage(i)
+			}
+		}(worker)
+	}
+	wg.Wait()
+	for _, err := range errs {
 		if err != nil {
 			return nil, err
 		}
-		images = append(images, img)
 	}
 	return images, nil
 }
