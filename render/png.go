@@ -19,7 +19,7 @@ type zlibEncoder struct {
 var zlibPool = sync.Pool{
 	New: func() any {
 		e := &zlibEncoder{}
-		e.zw, _ = zlib.NewWriterLevel(&e.buf, 7)
+		e.zw, _ = zlib.NewWriterLevel(&e.buf, 6)
 		return e
 	},
 }
