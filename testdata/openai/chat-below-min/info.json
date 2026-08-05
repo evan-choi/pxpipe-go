@@ -1,0 +1,14 @@
+{
+  "compressed": false,
+  "reason": "below_min_tokens (13 < 500)",
+  "origChars": 56,
+  "compressedChars": 0,
+  "imageCount": 0,
+  "imageBytes": 0,
+  "staticChars": 38,
+  "dynamicChars": 0,
+  "dynamicBlockCount": 0,
+  "droppedChars": 0,
+  "firstUserSha8": "8f434346",
+  "historyReason": "prefix_too_short"
+}

@@ -54,6 +54,8 @@ type TransformOptions struct {
 	Reflow                     *bool
 	KeepSharp                  func(KeepSharpBlock) bool
 	EmitRecoverable            bool
+	// CollapseHistory gates GPT-path history imaging (default true).
+	CollapseHistory *bool
 }
 
 type resolvedOptions struct {
@@ -210,6 +212,42 @@ type TransformInfo struct {
 	CachePrefixSha8      string             `json:"cachePrefixSha8,omitempty"`
 	CachePrefixBytes     int                `json:"cachePrefixBytes,omitempty"`
 	HistoryReason        string             `json:"historyReason,omitempty"`
+
+	// GPT-path (OpenAI Chat/Responses) fields.
+	ImageTokens          int                   `json:"imageTokens,omitempty"`
+	BaselineImagedTokens int                   `json:"baselineImagedTokens,omitempty"`
+	NativeInjectedTokens int                   `json:"nativeInjectedTokens,omitempty"`
+	ImageSourceTexts     []string              `json:"imageSourceTexts,omitempty"`
+	ResponsesComposition *ResponsesComposition `json:"responsesComposition,omitempty"`
+}
+
+// ResponsesComposition is the local o200k decomposition of a Responses
+// request plus the planner's native-tool-state classification.
+type ResponsesComposition struct {
+	Instructions       int `json:"instructions"`
+	SystemDeveloper    int `json:"systemDeveloper"`
+	UserAssistant      int `json:"userAssistant"`
+	FunctionCalls      int `json:"functionCalls"`
+	FunctionOutputs    int `json:"functionOutputs"`
+	ReasoningEncrypted int `json:"reasoningEncrypted"`
+	CompactionOpaque   int `json:"compactionOpaque"`
+	ToolsJSON          int `json:"toolsJson"`
+	Other              int `json:"other"`
+	TotalLocal         int `json:"totalLocal"`
+	ImageParts         int `json:"imageParts"`
+
+	CompletedFunctionPairs    *int     `json:"completedFunctionPairs,omitempty"`
+	RecentNativeFunctionPairs *int     `json:"recentNativeFunctionPairs,omitempty"`
+	OldFunctionPairs          *int     `json:"oldFunctionPairs,omitempty"`
+	OpenFunctionCalls         *int     `json:"openFunctionCalls,omitempty"`
+	OrphanFunctionOutputs     *int     `json:"orphanFunctionOutputs,omitempty"`
+	MalformedFunctionItems    *int     `json:"malformedFunctionItems,omitempty"`
+	ImageableFunctionCalls    *int     `json:"imageableFunctionCalls,omitempty"`
+	ImageableFunctionOutputs  *int     `json:"imageableFunctionOutputs,omitempty"`
+	CollapsedFunctionPairs    *int     `json:"collapsedFunctionPairs,omitempty"`
+	CollapsedFunctionCalls    *int     `json:"collapsedFunctionCalls,omitempty"`
+	CollapsedFunctionOutputs  *int     `json:"collapsedFunctionOutputs,omitempty"`
+	BarrierTypes              []string `json:"barrierTypes,omitempty"`
 }
 
 type slabGateEval struct {

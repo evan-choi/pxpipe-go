@@ -1,0 +1,12 @@
+{
+  "compressed": false,
+  "reason": "compress=false",
+  "origChars": 0,
+  "compressedChars": 0,
+  "imageCount": 0,
+  "imageBytes": 0,
+  "staticChars": 0,
+  "dynamicChars": 0,
+  "dynamicBlockCount": 0,
+  "droppedChars": 0
+}

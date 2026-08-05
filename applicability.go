@@ -2,6 +2,7 @@ package pxpipe
 
 import (
 	"os"
+	"regexp"
 	"strings"
 	"sync"
 )
@@ -107,6 +108,25 @@ func isAllowed(model string) bool {
 
 // IsSupportedModel reports whether pxpipe may transform this Anthropic model.
 func IsSupportedModel(model string) bool { return isAllowed(model) }
+
+// IsSupportedGptModel reports whether pxpipe may transform this model on the
+// OpenAI Chat Completions / Responses surface (same allowlist scope).
+func IsSupportedGptModel(model string) bool { return isAllowed(model) }
+
+var providerSegmentChatRe = regexp.MustCompile(`^(?:/[a-z0-9][a-z0-9._-]*)?(?:/v1)?/chat/completions$`)
+var providerSegmentResponsesRe = regexp.MustCompile(`^(?:/[a-z0-9][a-z0-9._-]*)?(?:/v1)?/responses$`)
+
+// IsOpenAIChatPath matches OpenAI Chat Completions wire paths, including one
+// optional gateway/provider segment (mirrors OPENAI_CHAT_PATH in proxy.ts).
+func IsOpenAIChatPath(pathname string) bool {
+	return providerSegmentChatRe.MatchString(pathname)
+}
+
+// IsOpenAIResponsesPath matches OpenAI Responses wire paths (mirrors
+// OPENAI_RESPONSES_PATH in proxy.ts).
+func IsOpenAIResponsesPath(pathname string) bool {
+	return providerSegmentResponsesRe.MatchString(pathname)
+}
 
 // IsAnthropicMessagesPath matches exactly the Messages routes pxpipe
 // transforms (count_tokens excluded).

@@ -1,0 +1,951 @@
+{
+ "profiles": {
+  "gpt-5.6-sol": {
+   "vision": {
+    "regime": "patch",
+    "multiplier": 1
+   },
+   "cacheReadRate": 0.1,
+   "outputRate": 8,
+   "exactStaticBaseline": true,
+   "stripCols": 84,
+   "maxHeightPx": 1954,
+   "minCompressTokens": 500,
+   "factSheetFormat": "full",
+   "history": {
+    "maxImages": 64,
+    "keepTail": 1,
+    "keepRecentPairs": 1,
+    "minCollapseTokens": 1000,
+    "responsesMode": "mixed",
+    "framing": "compact",
+    "factSheetScope": "combined"
+   },
+   "style": {
+    "font": "jetbrains-mono-14",
+    "cellWBonus": 0,
+    "cellHBonus": 0,
+    "aa": true,
+    "grid": false,
+    "gridCols": 0,
+    "colorCycle": false,
+    "markerScale": 1,
+    "markerRed": false,
+    "inkDilate": 0
+   }
+  },
+  "gpt-5.6-sol-20260101": {
+   "vision": {
+    "regime": "patch",
+    "multiplier": 1
+   },
+   "cacheReadRate": 0.1,
+   "outputRate": 8,
+   "exactStaticBaseline": true,
+   "stripCols": 84,
+   "maxHeightPx": 1954,
+   "minCompressTokens": 500,
+   "factSheetFormat": "full",
+   "history": {
+    "maxImages": 64,
+    "keepTail": 1,
+    "keepRecentPairs": 1,
+    "minCollapseTokens": 1000,
+    "responsesMode": "mixed",
+    "framing": "compact",
+    "factSheetScope": "combined"
+   },
+   "style": {
+    "font": "jetbrains-mono-14",
+    "cellWBonus": 0,
+    "cellHBonus": 0,
+    "aa": true,
+    "grid": false,
+    "gridCols": 0,
+    "colorCycle": false,
+    "markerScale": 1,
+    "markerRed": false,
+    "inkDilate": 0
+   }
+  },
+  "gpt-5.6-terra": {
+   "vision": {
+    "regime": "patch",
+    "multiplier": 1,
+    "patchCap": 10000
+   },
+   "cacheReadRate": 0.1,
+   "outputRate": 8,
+   "stripCols": 152,
+   "maxHeightPx": 1932,
+   "minCompressTokens": 500,
+   "factSheetFormat": "full",
+   "history": {
+    "maxImages": 32,
+    "keepTail": 6,
+    "keepRecentPairs": 6,
+    "minCollapseTokens": 2000,
+    "responsesMode": "pairs",
+    "framing": "full",
+    "factSheetScope": "per-segment"
+   },
+   "style": {
+    "font": "spleen-5x8",
+    "cellWBonus": 0,
+    "cellHBonus": 0,
+    "aa": true,
+    "grid": false,
+    "gridCols": 0,
+    "colorCycle": false,
+    "markerScale": 1,
+    "markerRed": false,
+    "inkDilate": 0
+   }
+  },
+  "gpt-5.4": {
+   "vision": {
+    "regime": "patch",
+    "multiplier": 1,
+    "patchCap": 10000
+   },
+   "cacheReadRate": 0.1,
+   "outputRate": 8,
+   "stripCols": 152,
+   "maxHeightPx": 1932,
+   "minCompressTokens": 500,
+   "factSheetFormat": "full",
+   "history": {
+    "maxImages": 32,
+    "keepTail": 6,
+    "keepRecentPairs": 6,
+    "minCollapseTokens": 2000,
+    "responsesMode": "pairs",
+    "framing": "full",
+    "factSheetScope": "per-segment"
+   },
+   "style": {
+    "font": "spleen-5x8",
+    "cellWBonus": 0,
+    "cellHBonus": 0,
+    "aa": true,
+    "grid": false,
+    "gridCols": 0,
+    "colorCycle": false,
+    "markerScale": 1,
+    "markerRed": false,
+    "inkDilate": 0
+   }
+  },
+  "gpt-5.5-codex": {
+   "vision": {
+    "regime": "patch",
+    "multiplier": 1,
+    "patchCap": 10000
+   },
+   "cacheReadRate": 0.1,
+   "outputRate": 8,
+   "stripCols": 152,
+   "maxHeightPx": 1932,
+   "minCompressTokens": 500,
+   "factSheetFormat": "full",
+   "history": {
+    "maxImages": 32,
+    "keepTail": 6,
+    "keepRecentPairs": 6,
+    "minCollapseTokens": 2000,
+    "responsesMode": "pairs",
+    "framing": "full",
+    "factSheetScope": "per-segment"
+   },
+   "style": {
+    "font": "spleen-5x8",
+    "cellWBonus": 0,
+    "cellHBonus": 0,
+    "aa": true,
+    "grid": false,
+    "gridCols": 0,
+    "colorCycle": false,
+    "markerScale": 1,
+    "markerRed": false,
+    "inkDilate": 0
+   }
+  },
+  "gpt-5": {
+   "vision": {
+    "regime": "tile",
+    "base": 70,
+    "perTile": 140
+   },
+   "cacheReadRate": 0.1,
+   "outputRate": 8,
+   "stripCols": 152,
+   "maxHeightPx": 1932,
+   "minCompressTokens": 500,
+   "factSheetFormat": "full",
+   "history": {
+    "maxImages": 32,
+    "keepTail": 6,
+    "keepRecentPairs": 6,
+    "minCollapseTokens": 2000,
+    "responsesMode": "pairs",
+    "framing": "full",
+    "factSheetScope": "per-segment"
+   },
+   "style": {
+    "font": "spleen-5x8",
+    "cellWBonus": 0,
+    "cellHBonus": 0,
+    "aa": true,
+    "grid": false,
+    "gridCols": 0,
+    "colorCycle": false,
+    "markerScale": 1,
+    "markerRed": false,
+    "inkDilate": 0
+   }
+  },
+  "gpt-5-chat-latest": {
+   "vision": {
+    "regime": "tile",
+    "base": 70,
+    "perTile": 140
+   },
+   "cacheReadRate": 0.1,
+   "outputRate": 8,
+   "stripCols": 152,
+   "maxHeightPx": 1932,
+   "minCompressTokens": 500,
+   "factSheetFormat": "full",
+   "history": {
+    "maxImages": 32,
+    "keepTail": 6,
+    "keepRecentPairs": 6,
+    "minCollapseTokens": 2000,
+    "responsesMode": "pairs",
+    "framing": "full",
+    "factSheetScope": "per-segment"
+   },
+   "style": {
+    "font": "spleen-5x8",
+    "cellWBonus": 0,
+    "cellHBonus": 0,
+    "aa": true,
+    "grid": false,
+    "gridCols": 0,
+    "colorCycle": false,
+    "markerScale": 1,
+    "markerRed": false,
+    "inkDilate": 0
+   }
+  },
+  "gpt-5-mini": {
+   "vision": {
+    "regime": "patch",
+    "multiplier": 1.62,
+    "patchCap": 1536
+   },
+   "cacheReadRate": 0.1,
+   "outputRate": 8,
+   "stripCols": 152,
+   "maxHeightPx": 1932,
+   "minCompressTokens": 500,
+   "factSheetFormat": "full",
+   "history": {
+    "maxImages": 32,
+    "keepTail": 6,
+    "keepRecentPairs": 6,
+    "minCollapseTokens": 2000,
+    "responsesMode": "pairs",
+    "framing": "full",
+    "factSheetScope": "per-segment"
+   },
+   "style": {
+    "font": "spleen-5x8",
+    "cellWBonus": 0,
+    "cellHBonus": 0,
+    "aa": true,
+    "grid": false,
+    "gridCols": 0,
+    "colorCycle": false,
+    "markerScale": 1,
+    "markerRed": false,
+    "inkDilate": 0
+   }
+  },
+  "gpt-5.2-nano": {
+   "vision": {
+    "regime": "patch",
+    "multiplier": 2.46,
+    "patchCap": 1536
+   },
+   "cacheReadRate": 0.1,
+   "outputRate": 8,
+   "stripCols": 152,
+   "maxHeightPx": 1932,
+   "minCompressTokens": 500,
+   "factSheetFormat": "full",
+   "history": {
+    "maxImages": 32,
+    "keepTail": 6,
+    "keepRecentPairs": 6,
+    "minCollapseTokens": 2000,
+    "responsesMode": "pairs",
+    "framing": "full",
+    "factSheetScope": "per-segment"
+   },
+   "style": {
+    "font": "spleen-5x8",
+    "cellWBonus": 0,
+    "cellHBonus": 0,
+    "aa": true,
+    "grid": false,
+    "gridCols": 0,
+    "colorCycle": false,
+    "markerScale": 1,
+    "markerRed": false,
+    "inkDilate": 0
+   }
+  },
+  "gpt-4.1-mini": {
+   "vision": {
+    "regime": "patch",
+    "multiplier": 1.62,
+    "patchCap": 1536
+   },
+   "cacheReadRate": 0.5,
+   "outputRate": 4,
+   "stripCols": 152,
+   "maxHeightPx": 1932,
+   "minCompressTokens": 500,
+   "factSheetFormat": "full",
+   "history": {
+    "maxImages": 32,
+    "keepTail": 6,
+    "keepRecentPairs": 6,
+    "minCollapseTokens": 2000,
+    "responsesMode": "pairs",
+    "framing": "full",
+    "factSheetScope": "per-segment"
+   },
+   "style": {
+    "font": "spleen-5x8",
+    "cellWBonus": 0,
+    "cellHBonus": 0,
+    "aa": true,
+    "grid": false,
+    "gridCols": 0,
+    "colorCycle": false,
+    "markerScale": 1,
+    "markerRed": false,
+    "inkDilate": 0
+   }
+  },
+  "gpt-4.1-nano": {
+   "vision": {
+    "regime": "patch",
+    "multiplier": 2.46,
+    "patchCap": 1536
+   },
+   "cacheReadRate": 0.5,
+   "outputRate": 4,
+   "stripCols": 152,
+   "maxHeightPx": 1932,
+   "minCompressTokens": 500,
+   "factSheetFormat": "full",
+   "history": {
+    "maxImages": 32,
+    "keepTail": 6,
+    "keepRecentPairs": 6,
+    "minCollapseTokens": 2000,
+    "responsesMode": "pairs",
+    "framing": "full",
+    "factSheetScope": "per-segment"
+   },
+   "style": {
+    "font": "spleen-5x8",
+    "cellWBonus": 0,
+    "cellHBonus": 0,
+    "aa": true,
+    "grid": false,
+    "gridCols": 0,
+    "colorCycle": false,
+    "markerScale": 1,
+    "markerRed": false,
+    "inkDilate": 0
+   }
+  },
+  "o4-mini": {
+   "vision": {
+    "regime": "patch",
+    "multiplier": 1.62,
+    "patchCap": 1536
+   },
+   "cacheReadRate": 0.5,
+   "outputRate": 4,
+   "stripCols": 152,
+   "maxHeightPx": 1932,
+   "minCompressTokens": 500,
+   "factSheetFormat": "full",
+   "history": {
+    "maxImages": 32,
+    "keepTail": 6,
+    "keepRecentPairs": 6,
+    "minCollapseTokens": 2000,
+    "responsesMode": "pairs",
+    "framing": "full",
+    "factSheetScope": "per-segment"
+   },
+   "style": {
+    "font": "spleen-5x8",
+    "cellWBonus": 0,
+    "cellHBonus": 0,
+    "aa": true,
+    "grid": false,
+    "gridCols": 0,
+    "colorCycle": false,
+    "markerScale": 1,
+    "markerRed": false,
+    "inkDilate": 0
+   }
+  },
+  "o1": {
+   "vision": {
+    "regime": "tile",
+    "base": 75,
+    "perTile": 150
+   },
+   "cacheReadRate": 0.5,
+   "outputRate": 4,
+   "stripCols": 152,
+   "maxHeightPx": 1932,
+   "minCompressTokens": 500,
+   "factSheetFormat": "full",
+   "history": {
+    "maxImages": 32,
+    "keepTail": 6,
+    "keepRecentPairs": 6,
+    "minCollapseTokens": 2000,
+    "responsesMode": "pairs",
+    "framing": "full",
+    "factSheetScope": "per-segment"
+   },
+   "style": {
+    "font": "spleen-5x8",
+    "cellWBonus": 0,
+    "cellHBonus": 0,
+    "aa": true,
+    "grid": false,
+    "gridCols": 0,
+    "colorCycle": false,
+    "markerScale": 1,
+    "markerRed": false,
+    "inkDilate": 0
+   }
+  },
+  "o3-mini": {
+   "vision": {
+    "regime": "tile",
+    "base": 75,
+    "perTile": 150
+   },
+   "cacheReadRate": 0.5,
+   "outputRate": 4,
+   "stripCols": 152,
+   "maxHeightPx": 1932,
+   "minCompressTokens": 500,
+   "factSheetFormat": "full",
+   "history": {
+    "maxImages": 32,
+    "keepTail": 6,
+    "keepRecentPairs": 6,
+    "minCollapseTokens": 2000,
+    "responsesMode": "pairs",
+    "framing": "full",
+    "factSheetScope": "per-segment"
+   },
+   "style": {
+    "font": "spleen-5x8",
+    "cellWBonus": 0,
+    "cellHBonus": 0,
+    "aa": true,
+    "grid": false,
+    "gridCols": 0,
+    "colorCycle": false,
+    "markerScale": 1,
+    "markerRed": false,
+    "inkDilate": 0
+   }
+  },
+  "gpt-4o": {
+   "vision": {
+    "regime": "tile",
+    "base": 85,
+    "perTile": 170
+   },
+   "cacheReadRate": 0.5,
+   "outputRate": 4,
+   "stripCols": 152,
+   "maxHeightPx": 1932,
+   "minCompressTokens": 500,
+   "factSheetFormat": "full",
+   "history": {
+    "maxImages": 32,
+    "keepTail": 6,
+    "keepRecentPairs": 6,
+    "minCollapseTokens": 2000,
+    "responsesMode": "pairs",
+    "framing": "full",
+    "factSheetScope": "per-segment"
+   },
+   "style": {
+    "font": "spleen-5x8",
+    "cellWBonus": 0,
+    "cellHBonus": 0,
+    "aa": true,
+    "grid": false,
+    "gridCols": 0,
+    "colorCycle": false,
+    "markerScale": 1,
+    "markerRed": false,
+    "inkDilate": 0
+   }
+  },
+  "gpt-4.1": {
+   "vision": {
+    "regime": "tile",
+    "base": 85,
+    "perTile": 170
+   },
+   "cacheReadRate": 0.5,
+   "outputRate": 4,
+   "stripCols": 152,
+   "maxHeightPx": 1932,
+   "minCompressTokens": 500,
+   "factSheetFormat": "full",
+   "history": {
+    "maxImages": 32,
+    "keepTail": 6,
+    "keepRecentPairs": 6,
+    "minCollapseTokens": 2000,
+    "responsesMode": "pairs",
+    "framing": "full",
+    "factSheetScope": "per-segment"
+   },
+   "style": {
+    "font": "spleen-5x8",
+    "cellWBonus": 0,
+    "cellHBonus": 0,
+    "aa": true,
+    "grid": false,
+    "gridCols": 0,
+    "colorCycle": false,
+    "markerScale": 1,
+    "markerRed": false,
+    "inkDilate": 0
+   }
+  },
+  "grok-4.5": {
+   "vision": {
+    "regime": "mpix",
+    "tokensPerMegapixel": 1000
+   },
+   "cacheReadRate": 0.25,
+   "outputRate": 3,
+   "stripCols": 84,
+   "maxHeightPx": 512,
+   "minCompressTokens": 500,
+   "factSheetFormat": "full",
+   "history": {
+    "maxImages": 24,
+    "keepTail": 6,
+    "keepRecentPairs": 6,
+    "minCollapseTokens": 2000,
+    "responsesMode": "pairs",
+    "framing": "full",
+    "factSheetScope": "per-segment"
+   },
+   "style": {
+    "font": "jetbrains-mono-14",
+    "cellWBonus": 0,
+    "cellHBonus": 0,
+    "aa": true,
+    "grid": false,
+    "gridCols": 0,
+    "colorCycle": false,
+    "markerScale": 1,
+    "markerRed": false,
+    "inkDilate": 0
+   }
+  },
+  "grok-3": {
+   "vision": {
+    "regime": "mpix",
+    "tokensPerMegapixel": 1000
+   },
+   "cacheReadRate": 0.25,
+   "outputRate": 3,
+   "stripCols": 84,
+   "maxHeightPx": 512,
+   "minCompressTokens": 500,
+   "factSheetFormat": "full",
+   "history": {
+    "maxImages": 24,
+    "keepTail": 6,
+    "keepRecentPairs": 6,
+    "minCollapseTokens": 2000,
+    "responsesMode": "pairs",
+    "framing": "full",
+    "factSheetScope": "per-segment"
+   },
+   "style": {
+    "font": "jetbrains-mono-14",
+    "cellWBonus": 0,
+    "cellHBonus": 0,
+    "aa": true,
+    "grid": false,
+    "gridCols": 0,
+    "colorCycle": false,
+    "markerScale": 1,
+    "markerRed": false,
+    "inkDilate": 0
+   }
+  },
+  "gemini-3.6-flash": {
+   "vision": {
+    "regime": "flat",
+    "tokens": 1120,
+    "exact": {
+     "widthPx": 1568,
+     "heightPx": 728,
+     "tokens": 1078
+    }
+   },
+   "cacheReadRate": 0.5,
+   "outputRate": 4,
+   "stripCols": 312,
+   "maxHeightPx": 728,
+   "minCompressTokens": 500,
+   "factSheetFormat": "full",
+   "history": {
+    "maxImages": 32,
+    "keepTail": 6,
+    "keepRecentPairs": 6,
+    "minCollapseTokens": 2000,
+    "responsesMode": "pairs",
+    "framing": "full",
+    "factSheetScope": "per-segment"
+   },
+   "style": {
+    "font": "spleen-5x8",
+    "cellWBonus": 0,
+    "cellHBonus": 0,
+    "aa": true,
+    "grid": false,
+    "gridCols": 0,
+    "colorCycle": false,
+    "markerScale": 1,
+    "markerRed": false,
+    "inkDilate": 0
+   }
+  },
+  "google/gemini-3.6-flash": {
+   "vision": {
+    "regime": "flat",
+    "tokens": 1120,
+    "exact": {
+     "widthPx": 1568,
+     "heightPx": 728,
+     "tokens": 1078
+    }
+   },
+   "cacheReadRate": 0.5,
+   "outputRate": 4,
+   "stripCols": 312,
+   "maxHeightPx": 728,
+   "minCompressTokens": 500,
+   "factSheetFormat": "full",
+   "history": {
+    "maxImages": 32,
+    "keepTail": 6,
+    "keepRecentPairs": 6,
+    "minCollapseTokens": 2000,
+    "responsesMode": "pairs",
+    "framing": "full",
+    "factSheetScope": "per-segment"
+   },
+   "style": {
+    "font": "spleen-5x8",
+    "cellWBonus": 0,
+    "cellHBonus": 0,
+    "aa": true,
+    "grid": false,
+    "gridCols": 0,
+    "colorCycle": false,
+    "markerScale": 1,
+    "markerRed": false,
+    "inkDilate": 0
+   }
+  },
+  "gemini-3.6-pro": {
+   "vision": {
+    "regime": "tile",
+    "base": 85,
+    "perTile": 170
+   },
+   "cacheReadRate": 0.5,
+   "outputRate": 4,
+   "stripCols": 152,
+   "maxHeightPx": 1932,
+   "minCompressTokens": 500,
+   "factSheetFormat": "full",
+   "history": {
+    "maxImages": 32,
+    "keepTail": 6,
+    "keepRecentPairs": 6,
+    "minCollapseTokens": 2000,
+    "responsesMode": "pairs",
+    "framing": "full",
+    "factSheetScope": "per-segment"
+   },
+   "style": {
+    "font": "spleen-5x8",
+    "cellWBonus": 0,
+    "cellHBonus": 0,
+    "aa": true,
+    "grid": false,
+    "gridCols": 0,
+    "colorCycle": false,
+    "markerScale": 1,
+    "markerRed": false,
+    "inkDilate": 0
+   }
+  },
+  "claude-fable-5": {
+   "vision": {
+    "regime": "patch28"
+   },
+   "cacheReadRate": 0.1,
+   "outputRate": 5,
+   "stripCols": 312,
+   "maxHeightPx": 728,
+   "visionTier": "high-res",
+   "factSheetFormat": "full",
+   "history": {
+    "maxImages": 96,
+    "keepTail": 6,
+    "keepRecentPairs": 6,
+    "minCollapseTokens": 2000,
+    "responsesMode": "mixed",
+    "framing": "compact",
+    "factSheetScope": "combined"
+   },
+   "style": {
+    "font": "spleen-5x8",
+    "cellWBonus": 0,
+    "cellHBonus": 0,
+    "aa": true,
+    "grid": false,
+    "gridCols": 0,
+    "colorCycle": false,
+    "markerScale": 1,
+    "markerRed": false,
+    "inkDilate": 0
+   }
+  },
+  "claude-3-5-sonnet": {
+   "vision": {
+    "regime": "patch28"
+   },
+   "cacheReadRate": 0.1,
+   "outputRate": 5,
+   "stripCols": 312,
+   "maxHeightPx": 728,
+   "visionTier": "standard",
+   "factSheetFormat": "full",
+   "history": {
+    "maxImages": 96,
+    "keepTail": 6,
+    "keepRecentPairs": 6,
+    "minCollapseTokens": 2000,
+    "responsesMode": "mixed",
+    "framing": "compact",
+    "factSheetScope": "combined"
+   },
+   "style": {
+    "font": "spleen-5x8",
+    "cellWBonus": 0,
+    "cellHBonus": 0,
+    "aa": true,
+    "grid": false,
+    "gridCols": 0,
+    "colorCycle": false,
+    "markerScale": 1,
+    "markerRed": false,
+    "inkDilate": 0
+   }
+  },
+  "anthropic/claude-opus-5": {
+   "vision": {
+    "regime": "patch28"
+   },
+   "cacheReadRate": 0.1,
+   "outputRate": 5,
+   "stripCols": 312,
+   "maxHeightPx": 728,
+   "visionTier": "high-res",
+   "factSheetFormat": "full",
+   "history": {
+    "maxImages": 96,
+    "keepTail": 6,
+    "keepRecentPairs": 6,
+    "minCollapseTokens": 2000,
+    "responsesMode": "mixed",
+    "framing": "compact",
+    "factSheetScope": "combined"
+   },
+   "style": {
+    "font": "spleen-5x8",
+    "cellWBonus": 0,
+    "cellHBonus": 0,
+    "aa": true,
+    "grid": false,
+    "gridCols": 0,
+    "colorCycle": false,
+    "markerScale": 1,
+    "markerRed": false,
+    "inkDilate": 0
+   }
+  },
+  "moonshotai/kimi-k3": {
+   "vision": {
+    "regime": "tile",
+    "base": 85,
+    "perTile": 170
+   },
+   "cacheReadRate": 0.5,
+   "outputRate": 4,
+   "stripCols": 152,
+   "maxHeightPx": 1932,
+   "minCompressTokens": 500,
+   "factSheetFormat": "full",
+   "history": {
+    "maxImages": 32,
+    "keepTail": 6,
+    "keepRecentPairs": 6,
+    "minCollapseTokens": 2000,
+    "responsesMode": "pairs",
+    "framing": "full",
+    "factSheetScope": "per-segment"
+   },
+   "style": {
+    "font": "spleen-5x8",
+    "cellWBonus": 0,
+    "cellHBonus": 0,
+    "aa": true,
+    "grid": false,
+    "gridCols": 0,
+    "colorCycle": false,
+    "markerScale": 1,
+    "markerRed": false,
+    "inkDilate": 0
+   }
+  },
+  "openrouter/gpt-5.4": {
+   "vision": {
+    "regime": "patch",
+    "multiplier": 1,
+    "patchCap": 10000
+   },
+   "cacheReadRate": 0.1,
+   "outputRate": 8,
+   "stripCols": 152,
+   "maxHeightPx": 1932,
+   "minCompressTokens": 500,
+   "factSheetFormat": "full",
+   "history": {
+    "maxImages": 32,
+    "keepTail": 6,
+    "keepRecentPairs": 6,
+    "minCollapseTokens": 2000,
+    "responsesMode": "pairs",
+    "framing": "full",
+    "factSheetScope": "per-segment"
+   },
+   "style": {
+    "font": "spleen-5x8",
+    "cellWBonus": 0,
+    "cellHBonus": 0,
+    "aa": true,
+    "grid": false,
+    "gridCols": 0,
+    "colorCycle": false,
+    "markerScale": 1,
+    "markerRed": false,
+    "inkDilate": 0
+   }
+  },
+  "unknown-model": {
+   "vision": {
+    "regime": "tile",
+    "base": 85,
+    "perTile": 170
+   },
+   "cacheReadRate": 0.5,
+   "outputRate": 4,
+   "stripCols": 152,
+   "maxHeightPx": 1932,
+   "minCompressTokens": 500,
+   "factSheetFormat": "full",
+   "history": {
+    "maxImages": 32,
+    "keepTail": 6,
+    "keepRecentPairs": 6,
+    "minCollapseTokens": 2000,
+    "responsesMode": "pairs",
+    "framing": "full",
+    "factSheetScope": "per-segment"
+   },
+   "style": {
+    "font": "spleen-5x8",
+    "cellWBonus": 0,
+    "cellHBonus": 0,
+    "aa": true,
+    "grid": false,
+    "gridCols": 0,
+    "colorCycle": false,
+    "markerScale": 1,
+    "markerRed": false,
+    "inkDilate": 0
+   }
+  }
+ },
+ "misresolved": {
+  "gpt-5.6-sol": false,
+  "gpt-5.6-sol-20260101": false,
+  "gpt-5.6-terra": false,
+  "gpt-5.4": false,
+  "gpt-5.5-codex": false,
+  "gpt-5": false,
+  "gpt-5-chat-latest": false,
+  "gpt-5-mini": false,
+  "gpt-5.2-nano": false,
+  "gpt-4.1-mini": false,
+  "gpt-4.1-nano": false,
+  "o4-mini": false,
+  "o1": false,
+  "o3-mini": false,
+  "gpt-4o": false,
+  "gpt-4.1": false,
+  "grok-4.5": false,
+  "grok-3": false,
+  "gemini-3.6-flash": false,
+  "google/gemini-3.6-flash": false,
+  "gemini-3.6-pro": true,
+  "claude-fable-5": false,
+  "claude-3-5-sonnet": false,
+  "anthropic/claude-opus-5": false,
+  "moonshotai/kimi-k3": false,
+  "openrouter/gpt-5.4": false,
+  "unknown-model": false
+ }
+}
