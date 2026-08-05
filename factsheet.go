@@ -12,35 +12,51 @@ import (
 // the image as plain text. Deterministic by construction (fixed pattern order,
 // total-order sorts) so the emitted text is byte-stable across turns.
 
+type fsFeature uint16
+
+const (
+	fsHasEqual fsFeature = 1 << iota
+	fsHasAt
+	fsHasDot
+	fsHasSlash
+	fsHasDash
+	fsHasUnderscore
+	fsHasDigit
+	fsHasUpper
+	fsHasLower
+	fsHasColon
+)
+
 type fsPattern struct {
 	re *regexp.Regexp
 	// group is the submatch index carrying the token (0 = whole match).
 	group int
 	// verify emulates a JS lookahead at the match start: it must match the
 	// chunk remainder beginning at the token's start offset.
-	verify *regexp.Regexp
+	verify   *regexp.Regexp
+	required fsFeature
 }
 
 var fsPatterns = []fsPattern{
-	{re: regexp.MustCompile(`\b[A-Z][A-Z0-9_]{2,}=[^\s)"'<>]+`)},
-	{re: regexp.MustCompile(`\b[A-Za-z][A-Za-z0-9_]{2,}=[A-Za-z0-9_.:/+-]{1,64}`)},
-	{re: regexp.MustCompile(`\bhttps?://[^\s)"'<>]+`)},
-	{re: regexp.MustCompile("\\b[A-Za-z0-9.!#$%&'*+/=?^_`{|}~-]+@[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?(?:\\.[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?)+\\b")},
-	{re: regexp.MustCompile(`\b[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}\b`)},
-	{re: regexp.MustCompile(`\b[A-Z]{2}\d{2}[A-Z0-9]{8,30}\b`)},
-	{re: regexp.MustCompile(`(?:[$€£¥]|(?:USD|EUR|GBP|CAD|AUD|CHF|JPY))\d(?:[\d,_]*\d)?(?:\.\d{2})?\b`)},
-	{re: regexp.MustCompile(`(?:[\w@~+-]+)?(?:/[\w.@+-]+)+\.[A-Za-z]\w{0,8}\b`)},
-	{re: regexp.MustCompile(`/[\w.@+-]+(?:/[\w.@+-]+)+/?`)},
+	{re: regexp.MustCompile(`\b[A-Z][A-Z0-9_]{2,}=[^\s)"'<>]+`), required: fsHasEqual | fsHasUpper},
+	{re: regexp.MustCompile(`\b[A-Za-z][A-Za-z0-9_]{2,}=[A-Za-z0-9_.:/+-]{1,64}`), required: fsHasEqual},
+	{re: regexp.MustCompile(`\bhttps?://[^\s)"'<>]+`), required: fsHasColon | fsHasSlash | fsHasLower},
+	{re: regexp.MustCompile("\\b[A-Za-z0-9.!#$%&'*+/=?^_`{|}~-]+@[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?(?:\\.[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?)+\\b"), required: fsHasAt | fsHasDot},
+	{re: regexp.MustCompile(`\b[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}\b`), required: fsHasDash},
+	{re: regexp.MustCompile(`\b[A-Z]{2}\d{2}[A-Z0-9]{8,30}\b`), required: fsHasUpper | fsHasDigit},
+	{re: regexp.MustCompile(`(?:[$€£¥]|(?:USD|EUR|GBP|CAD|AUD|CHF|JPY))\d(?:[\d,_]*\d)?(?:\.\d{2})?\b`), required: fsHasDigit},
+	{re: regexp.MustCompile(`(?:[\w@~+-]+)?(?:/[\w.@+-]+)+\.[A-Za-z]\w{0,8}\b`), required: fsHasSlash | fsHasDot},
+	{re: regexp.MustCompile(`/[\w.@+-]+(?:/[\w.@+-]+)+/?`), required: fsHasSlash},
 	// git sha / long hex: JS `(?=[0-9a-f]*\d)` emulated via verify.
-	{re: regexp.MustCompile(`\b[0-9a-f]{7,40}\b`), verify: regexp.MustCompile(`^[0-9a-f]*\d`)},
-	{re: regexp.MustCompile(`\bv?\d+\.\d+(?:\.\d+)?(?:[-+][\w.]+)?\b`)},
-	{re: regexp.MustCompile(`(?:^|[^\w-])(--?[A-Za-z][\w-]+)`), group: 1},
-	{re: regexp.MustCompile(`\b\d[\d,_]{3,}\b`)},
-	{re: regexp.MustCompile(`\b\d+\.\d+\b`)},
-	{re: regexp.MustCompile(`\b[A-Z][A-Z0-9]{2,}(?:_[A-Z0-9]+)+\b`)},
-	{re: regexp.MustCompile(`\b(?:[a-z]+|[A-Z][a-z0-9]+)(?:[A-Z][a-z0-9]*)+\b`)},
+	{re: regexp.MustCompile(`\b[0-9a-f]{7,40}\b`), verify: regexp.MustCompile(`^[0-9a-f]*\d`), required: fsHasDigit},
+	{re: regexp.MustCompile(`\bv?\d+\.\d+(?:\.\d+)?(?:[-+][\w.]+)?\b`), required: fsHasDigit | fsHasDot},
+	{re: regexp.MustCompile(`(?:^|[^\w-])(--?[A-Za-z][\w-]+)`), group: 1, required: fsHasDash},
+	{re: regexp.MustCompile(`\b\d[\d,_]{3,}\b`), required: fsHasDigit},
+	{re: regexp.MustCompile(`\b\d+\.\d+\b`), required: fsHasDigit | fsHasDot},
+	{re: regexp.MustCompile(`\b[A-Z][A-Z0-9]{2,}(?:_[A-Z0-9]+)+\b`), required: fsHasUpper | fsHasUnderscore},
+	{re: regexp.MustCompile(`\b(?:[a-z]+|[A-Z][a-z0-9]+)(?:[A-Z][a-z0-9]*)+\b`), required: fsHasUpper | fsHasLower},
 	// ticket/advisory codes: JS `(?=[A-Z0-9-]{0,119}\d)` emulated via verify.
-	{re: regexp.MustCompile(`\b[A-Z][A-Z0-9]+(?:-[A-Z0-9]+)+\b`), verify: regexp.MustCompile(`^[A-Z0-9-]{0,119}\d`)},
+	{re: regexp.MustCompile(`\b[A-Z][A-Z0-9]+(?:-[A-Z0-9]+)+\b`), verify: regexp.MustCompile(`^[A-Z0-9-]{0,119}\d`), required: fsHasUpper | fsHasDash | fsHasDigit},
 }
 
 const (
@@ -70,8 +86,39 @@ var (
 	shapeURL        = regexp.MustCompile(`^https?://`)
 	shapeCamel      = regexp.MustCompile(`^(?:[a-z]+|[A-Z][a-z0-9]+)(?:[A-Z][a-z0-9]*)+$`)
 	shapeAssignment = regexp.MustCompile(`^[A-Z][A-Z0-9_]{2,}=\S+$`)
-	trailingPunct   = regexp.MustCompile(`[.,;:!?]+$`)
 )
+
+func factSheetFeatures(s string) fsFeature {
+	var features fsFeature
+	for i := 0; i < len(s); i++ {
+		switch c := s[i]; c {
+		case '=':
+			features |= fsHasEqual
+		case '@':
+			features |= fsHasAt
+		case '.':
+			features |= fsHasDot
+		case '/':
+			features |= fsHasSlash
+		case '-':
+			features |= fsHasDash
+		case '_':
+			features |= fsHasUnderscore
+		case ':':
+			features |= fsHasColon
+		default:
+			switch {
+			case c >= '0' && c <= '9':
+				features |= fsHasDigit
+			case c >= 'A' && c <= 'Z':
+				features |= fsHasUpper
+			case c >= 'a' && c <= 'z':
+				features |= fsHasLower
+			}
+		}
+	}
+	return features
+}
 
 func priorityTier(tok string) int {
 	switch {
@@ -112,6 +159,11 @@ type orderedCounts struct {
 	counts map[string]int
 }
 
+type factSheetSpan struct {
+	offset int
+	token  string
+}
+
 func newOrderedCounts() *orderedCounts {
 	return &orderedCounts{counts: map[string]int{}}
 }
@@ -137,8 +189,12 @@ func ExtractFactSheetEntries(text string) []FactSheetEntry {
 		if cl < fsMinLen || cl > fsMaxChunk {
 			continue
 		}
-		spanSeen := map[string]struct{}{}
+		features := factSheetFeatures(chunk)
+		spanSeen := map[factSheetSpan]struct{}{}
 		for _, p := range fsPatterns {
+			if features&p.required != p.required {
+				continue
+			}
 			for _, idx := range p.re.FindAllStringSubmatchIndex(chunk, -1) {
 				gs, ge := idx[0], idx[1]
 				if p.group > 0 {
@@ -150,12 +206,12 @@ func ExtractFactSheetEntries(text string) []FactSheetEntry {
 				if p.verify != nil && !p.verify.MatchString(chunk[idx[0]:]) {
 					continue
 				}
-				tok := trailingPunct.ReplaceAllString(strings.TrimSpace(chunk[gs:ge]), "")
+				tok := strings.TrimRight(strings.TrimSpace(chunk[gs:ge]), ".,;:!?")
 				tl := u16len(tok)
 				if tl < fsMinLen || tl > fsMaxLen {
 					continue
 				}
-				key := strconv.Itoa(idx[0]) + "\x00" + tok
+				key := factSheetSpan{idx[0], tok}
 				if _, seen := spanSeen[key]; seen {
 					continue
 				}
