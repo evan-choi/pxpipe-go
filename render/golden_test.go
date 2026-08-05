@@ -51,6 +51,18 @@ func TestReflowFastPath(t *testing.T) {
 	}
 }
 
+func TestInvertBytes(t *testing.T) {
+	buf := []byte{0, 1, 2, 3, 4, 5, 6, 7, 8, 9}
+	want := append([]byte(nil), buf...)
+	for i := range want {
+		want[i] = 255 - want[i]
+	}
+	invertBytes(buf)
+	if !bytes.Equal(buf, want) {
+		t.Fatalf("invertBytes() = %v, want %v", buf, want)
+	}
+}
+
 type goldenPage struct {
 	File   string `json:"file"`
 	Width  int    `json:"width"`

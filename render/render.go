@@ -4,6 +4,7 @@
 package render
 
 import (
+	"encoding/binary"
 	"math"
 	"strings"
 
@@ -497,6 +498,16 @@ func fbSet(fb []byte, idx int, v byte) {
 	}
 }
 
+func invertBytes(buf []byte) {
+	for len(buf) >= 8 {
+		binary.LittleEndian.PutUint64(buf, ^binary.LittleEndian.Uint64(buf))
+		buf = buf[8:]
+	}
+	for i := range buf {
+		buf[i] = ^buf[i]
+	}
+}
+
 func blitGlyph(fb []byte, fbW, x, y int, cp rune, selected *atlas.Set, markerMask []byte) int {
 	g, ok := bitGlyph(cp, selected)
 	if !ok {
@@ -873,9 +884,7 @@ func renderWrappedLinesToPNG(fitLines, fitSlotLines []string, charsRendered, col
 	}
 
 	if style.Invert == nil || *style.Invert {
-		for i := range fb {
-			fb[i] = 255 - fb[i]
-		}
+		invertBytes(fb)
 	}
 
 	paper := 255
