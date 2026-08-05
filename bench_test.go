@@ -88,3 +88,35 @@ func BenchmarkFactSheetPatterns(b *testing.B) {
 		})
 	}
 }
+
+func BenchmarkTransformOpenAIChat(b *testing.B) {
+	input, err := os.ReadFile(filepath.Join("testdata", "openai", "chat-big-slab", "input.json"))
+	if err != nil {
+		b.Fatal(err)
+	}
+	b.SetBytes(int64(len(input)))
+	b.ReportAllocs()
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		_, info := TransformOpenAIChatCompletions(input, nil)
+		if !info.Compressed {
+			b.Fatal("expected compression")
+		}
+	}
+}
+
+func BenchmarkTransformOpenAIResponses(b *testing.B) {
+	input, err := os.ReadFile(filepath.Join("testdata", "openai", "responses-codex-pairs", "input.json"))
+	if err != nil {
+		b.Fatal(err)
+	}
+	b.SetBytes(int64(len(input)))
+	b.ReportAllocs()
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		_, info := TransformOpenAIResponses(input, nil)
+		if !info.Compressed {
+			b.Fatal("expected compression")
+		}
+	}
+}

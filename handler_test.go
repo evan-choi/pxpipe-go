@@ -139,3 +139,143 @@ func TestHandlerStreamsSSE(t *testing.T) {
 		t.Errorf("got %d events, want 3", events)
 	}
 }
+
+func TestHandlerTransformsOpenAIRoutes(t *testing.T) {
+	SetAllowedModelBases([]string{"gpt-5.4", "gpt-5"})
+	defer SetAllowedModelBases(nil)
+
+	cases := []struct {
+		fixture string
+		path    string
+	}{
+		{"chat-big-slab", "/v1/chat/completions"},
+		{"responses-codex-pairs", "/v1/responses"},
+		{"responses-codex-pairs", "/openai/v1/responses"},
+	}
+	for _, c := range cases {
+		t.Run(c.path, func(t *testing.T) {
+			var upstreamBody []byte
+			up := upstreamEcho(t, &upstreamBody)
+			defer up.Close()
+			input, err := os.ReadFile(filepath.Join("testdata", "openai", c.fixture, "input.json"))
+			if err != nil {
+				t.Fatal(err)
+			}
+			var applied *TransformResult
+			u, _ := url.Parse(up.URL)
+			h := NewHandler(HandlerOptions{
+				Upstream: u,
+				OnResult: func(_ *http.Request, res *TransformResult) { applied = res },
+			})
+			srv := httptest.NewServer(h)
+			defer srv.Close()
+			resp, err := http.Post(srv.URL+c.path, "application/json", bytes.NewReader(input))
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer resp.Body.Close()
+			if resp.StatusCode != 200 {
+				t.Fatalf("status %d", resp.StatusCode)
+			}
+			if applied == nil || !applied.Applied {
+				t.Fatalf("transform not applied: %+v", applied)
+			}
+			if !bytes.Contains(upstreamBody, []byte("data:image/png;base64,")) {
+				t.Error("upstream body has no rendered image part")
+			}
+		})
+	}
+}
+
+func TestHandlerOpenAIUnsupportedModelPassesThrough(t *testing.T) {
+	var upstreamBody []byte
+	up := upstreamEcho(t, &upstreamBody)
+	defer up.Close()
+	input, err := os.ReadFile(filepath.Join("testdata", "openai", "chat-big-slab", "input.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var applied *TransformResult
+	u, _ := url.Parse(up.URL)
+	h := NewHandler(HandlerOptions{
+		Upstream: u,
+		OnResult: func(_ *http.Request, res *TransformResult) { applied = res },
+	})
+	srv := httptest.NewServer(h)
+	defer srv.Close()
+	resp, err := http.Post(srv.URL+"/v1/chat/completions", "application/json", bytes.NewReader(input))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	if applied == nil || applied.Applied || applied.Reason != ReasonUnsupportedModel {
+		t.Fatalf("expected unsupported-model passthrough, got %+v", applied)
+	}
+	if !bytes.Equal(upstreamBody, input) {
+		t.Error("body must pass through untouched")
+	}
+}
+
+func TestHandlerCustomProtocolOf(t *testing.T) {
+	var upstreamBody []byte
+	up := upstreamEcho(t, &upstreamBody)
+	defer up.Close()
+
+	input, err := os.ReadFile(filepath.Join("testdata", "transform", "big-claude-code", "input.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var applied *TransformResult
+	u, _ := url.Parse(up.URL)
+	h := NewHandler(HandlerOptions{
+		Upstream: u,
+		OnResult: func(_ *http.Request, res *TransformResult) { applied = res },
+		ProtocolOf: func(path string) Protocol {
+			if path == "/api/llm/claude" {
+				return ProtocolAnthropicMessages
+			}
+			return ProtocolNone
+		},
+	})
+	srv := httptest.NewServer(h)
+	defer srv.Close()
+
+	resp, err := http.Post(srv.URL+"/api/llm/claude", "application/json", bytes.NewReader(input))
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp.Body.Close()
+	if applied == nil || !applied.Applied {
+		t.Fatalf("custom path not transformed: %+v", applied)
+	}
+
+	applied = nil
+	resp, err = http.Post(srv.URL+"/v1/messages", "application/json", bytes.NewReader(input))
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp.Body.Close()
+	if applied != nil {
+		t.Fatalf("built-in path should be overridden to pass through, got %+v", applied)
+	}
+	if !bytes.Equal(upstreamBody, input) {
+		t.Error("pass-through body was modified")
+	}
+}
+
+func TestDefaultProtocolOf(t *testing.T) {
+	cases := map[string]Protocol{
+		"/v1/messages":                ProtocolAnthropicMessages,
+		"/anthropic/v1/messages":      ProtocolAnthropicMessages,
+		"/v1/chat/completions":        ProtocolOpenAIChat,
+		"/openai/v1/chat/completions": ProtocolOpenAIChat,
+		"/v1/responses":               ProtocolOpenAIResponses,
+		"/v1/messages/count_tokens":   ProtocolNone,
+		"/healthz":                    ProtocolNone,
+	}
+	for path, want := range cases {
+		if got := DefaultProtocolOf(path); got != want {
+			t.Errorf("DefaultProtocolOf(%q) = %v, want %v", path, got, want)
+		}
+	}
+}

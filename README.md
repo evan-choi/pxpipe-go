@@ -7,8 +7,11 @@ PNG pages, cutting input tokens by reading them through the vision channel.
 
 This port is a **library**: embed it into your own Go server either as an
 `http.Handler` reverse proxy or as pure functions over request bodies. It
-deliberately omits the TS project's dashboard, savings measurement, `warp`
-MITM mode, offline export CLI, and the OpenAI/Gemini surfaces.
+covers the Anthropic Messages surface **and** the OpenAI Chat Completions /
+Responses surfaces (the GPT path, including the o200k-exact profitability
+gate and GPT history imaging). It deliberately omits the TS project's
+dashboard, savings measurement, `warp` MITM mode, offline export CLI, and the
+Gemini/Google surface.
 
 ## Install
 
@@ -48,9 +51,34 @@ Then point Claude Code at it:
 ANTHROPIC_BASE_URL=http://127.0.0.1:47821 claude
 ```
 
-Only `POST /v1/messages` (and `/anthropic/messages` variants) are rewritten;
+`POST /v1/messages` (and `/anthropic/messages` variants),
+`POST /v1/chat/completions`, and `POST /v1/responses` (with one optional
+gateway/provider path segment, e.g. `/openai/v1/responses`) are rewritten;
 `count_tokens` and everything else — including SSE response streams — pass
-through untouched.
+through untouched. Set `Upstream` to whichever provider the handler fronts.
+
+### Custom routes
+
+Set `ProtocolOf` to map your own paths to wire protocols; return
+`pxpipe.ProtocolNone` to pass a request through, or fall back to
+`pxpipe.DefaultProtocolOf` for the built-in rules:
+
+```go
+h := pxpipe.NewHandler(pxpipe.HandlerOptions{
+    Upstream: upstream,
+    ProtocolOf: func(path string) pxpipe.Protocol {
+        switch path {
+        case "/api/llm/claude":
+            return pxpipe.ProtocolAnthropicMessages
+        case "/api/llm/gpt/chat":
+            return pxpipe.ProtocolOpenAIChat
+        case "/api/llm/gpt/responses":
+            return pxpipe.ProtocolOpenAIResponses
+        }
+        return pxpipe.DefaultProtocolOf(strings.TrimPrefix(path, "/internal/ai-proxy"))
+    },
+})
+```
 
 ## Use as a pure transform
 
@@ -66,6 +94,17 @@ if res.Applied {
 }
 ```
 
+For the OpenAI surfaces:
+
+```go
+body, info := pxpipe.TransformOpenAIChatCompletions(bodyBytes, nil)
+body, info  = pxpipe.TransformOpenAIResponses(bodyBytes, nil)
+```
+
+Per-model GPT render/pricing profiles (gpt-5.x, o-series, Grok, …) resolve via
+`pxpipe.ResolveGptProfile`; unknown models can be declared without a code
+change through the `PXPIPE_GPT_PROFILES` env JSON, exactly as upstream.
+
 Or render arbitrary text to the same dense pages:
 
 ```go
@@ -78,9 +117,9 @@ for _, page := range out.Pages { os.WriteFile("page.png", page.PNG, 0o644) }
 ## Model scope
 
 Same semantics as upstream pxpipe: the built-in allowlist is
-`claude-fable-5` (plus `gemini-3.6-flash`, which this port's Anthropic-only
-surface never renders). Override with the `PXPIPE_MODELS` env CSV or at
-runtime via `pxpipe.SetAllowedModelBases`. Unlisted models pass through
+`claude-fable-5` plus `gemini-3.6-flash`; GPT models are opt-in. Override with
+the `PXPIPE_MODELS` env CSV (e.g. `PXPIPE_MODELS=claude-fable-5,gpt-5.6-sol`)
+or at runtime via `pxpipe.SetAllowedModelBases`. Unlisted models pass through
 untransformed — that is the escape hatch for byte-exact work.
 
 ## Fidelity
@@ -90,8 +129,15 @@ reference implementation (`testdata/`, tooling in `tools/`):
 
 - 17 render cases pass **pixel-exact** (PNG bytes differ only by deflate
   implementation; decoded pixels are identical).
-- 9 transform cases match on every text output, hash, gate verdict, page
-  count, and page dimensions; image blocks are compared by decoded pixels.
+- 9 Anthropic transform cases match on every text output, hash, gate
+  verdict, page count, and page dimensions; image blocks are compared by
+  decoded pixels.
+- 15 OpenAI (Chat + Responses) cases match on every text output, hash, gate
+  verdict (including exact o200k token counts), history-collapse plan, page
+  count, and page dimensions; the embedded o200k tokenizer reproduces
+  gpt-tokenizer counts exactly.
+- GPT model-profile resolution (27 ids incl. env overrides and misresolution
+  guards) matches the TS table verbatim.
 - TS UTF-16 string-length semantics are reproduced for every char gate and
   telemetry counter; JSON object key order is preserved through parse →
   imaged-text serialization so rendered tool schemas match the reference
@@ -105,8 +151,8 @@ Known deviations:
   stability requires.
 - Keys *added* by the transform to objects it did not create serialize after
   the object's original keys in sorted order (TS appends in insertion order).
-- Anthropic Messages surface only; no OpenAI/Gemini bridges, no savings
-  measurement or tokenizer.
+- No Gemini/Google surface, Messages↔OpenAI bridges, or savings
+  measurement.
 
 ## Performance
 
@@ -115,6 +161,8 @@ Apple M1 Pro, `go test -bench .`:
 | benchmark | time/op | notes |
 |---|---|---|
 | TransformBigClaudeCode | ~114 ms | 142 KB Claude-Code-shaped request → 6 PNG pages incl. history collapse |
+| TransformOpenAIChat | ~80 ms | 49 KB GPT-5.4 chat request → slab pages (TS reference: ~138 ms) |
+| TransformOpenAIResponses | ~448 ms | 113 KB Codex-shaped request → slab + pair-collapse images (TS: ~664 ms) |
 | RenderDensePage | ~176 ms | 275 KB log text → 9 dense 1568×728 pages |
 
 ~80% of the remaining time is deflate (klauspost/compress level 7, chosen to
@@ -129,6 +177,8 @@ Requires the TS repo checked out as a sibling `../pxpipe`:
 cd ../pxpipe
 pnpm exec tsx ../pxpipe-go/tools/dump-atlas.ts
 pnpm exec tsx ../pxpipe-go/tools/gen-fixtures.ts
+pnpm exec tsx ../pxpipe-go/tools/gen-fixtures-openai.ts
+pnpm exec tsx ../pxpipe-go/tools/dump-gpt-profiles.ts > ../pxpipe-go/testdata/openai/profiles.json
 ```
 
 ## License

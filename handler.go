@@ -26,6 +26,10 @@ type HandlerOptions struct {
 	// MaxBodyBytes caps buffered request bodies (0 = 256 MiB default). Bodies
 	// over the cap pass through untransformed.
 	MaxBodyBytes int64
+	// ProtocolOf overrides wire-protocol detection by request path. Nil uses
+	// DefaultProtocolOf. Return ProtocolNone to pass a request through
+	// untransformed.
+	ProtocolOf func(path string) Protocol
 }
 
 const defaultMaxBodyBytes = 256 << 20
@@ -71,8 +75,77 @@ func extractModel(body []byte) string {
 	return model
 }
 
+// Protocol identifies the wire protocol of a request body, i.e. which API
+// shape pxpipe should transform it as.
+type Protocol int
+
+const (
+	// ProtocolNone marks requests pxpipe forwards untransformed.
+	ProtocolNone Protocol = iota
+	// ProtocolAnthropicMessages is the Anthropic Messages API.
+	ProtocolAnthropicMessages
+	// ProtocolOpenAIChat is the OpenAI Chat Completions API.
+	ProtocolOpenAIChat
+	// ProtocolOpenAIResponses is the OpenAI Responses API.
+	ProtocolOpenAIResponses
+)
+
+// DefaultProtocolOf is the built-in path matcher used when
+// HandlerOptions.ProtocolOf is nil. It recognizes the Anthropic Messages
+// routes plus the OpenAI Chat Completions / Responses routes (with one
+// optional gateway/provider prefix segment).
+func DefaultProtocolOf(pathname string) Protocol {
+	switch {
+	case IsAnthropicMessagesPath(pathname):
+		return ProtocolAnthropicMessages
+	case IsOpenAIChatPath(pathname):
+		return ProtocolOpenAIChat
+	case IsOpenAIResponsesPath(pathname):
+		return ProtocolOpenAIResponses
+	}
+	return ProtocolNone
+}
+
+func (h *handler) transformFor(surface Protocol, body []byte) *TransformResult {
+	var base TransformOptions
+	if h.opts.Transform != nil {
+		base = *h.opts.Transform
+	}
+	model := extractModel(body)
+	if surface == ProtocolAnthropicMessages {
+		return TransformAnthropicMessages(TransformInput{Body: body, Model: model, Options: &base})
+	}
+	res := &TransformResult{}
+	if !IsSupportedGptModel(model) {
+		res.Body = body
+		res.Reason = ReasonUnsupportedModel
+		res.Detail = model
+		res.Info = &TransformInfo{Reason: "unsupported_model"}
+		return res
+	}
+	base.Model = model
+	var out []byte
+	var info *TransformInfo
+	if surface == ProtocolOpenAIChat {
+		out, info = TransformOpenAIChatCompletions(body, &base)
+	} else {
+		out, info = TransformOpenAIResponses(body, &base)
+	}
+	res.Body = out
+	res.Applied = info.Compressed
+	res.Reason = classifyReason(info)
+	res.Detail = info.Reason
+	res.Info = info
+	return res
+}
+
 func (h *handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	if r.Method == http.MethodPost && IsAnthropicMessagesPath(r.URL.Path) && r.Body != nil {
+	protocolOf := h.opts.ProtocolOf
+	if protocolOf == nil {
+		protocolOf = DefaultProtocolOf
+	}
+	surface := protocolOf(r.URL.Path)
+	if r.Method == http.MethodPost && surface != ProtocolNone && r.Body != nil {
 		body, err := io.ReadAll(io.LimitReader(r.Body, h.opts.MaxBodyBytes+1))
 		if err != nil {
 			http.Error(w, "pxpipe: failed to read request body", http.StatusBadGateway)
@@ -80,15 +153,7 @@ func (h *handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		}
 		r.Body.Close()
 		if int64(len(body)) <= h.opts.MaxBodyBytes {
-			var base TransformOptions
-			if h.opts.Transform != nil {
-				base = *h.opts.Transform
-			}
-			res := TransformAnthropicMessages(TransformInput{
-				Body:    body,
-				Model:   extractModel(body),
-				Options: &base,
-			})
+			res := h.transformFor(surface, body)
 			if h.opts.OnResult != nil {
 				h.opts.OnResult(r, res)
 			}
