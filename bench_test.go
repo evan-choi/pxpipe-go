@@ -17,6 +17,7 @@ var benchmarkCachePrefixOK bool
 var factSheetEntries []FactSheetEntry
 var benchmarkGptEnvProfiles map[string]*GptModelProfile
 var benchmarkGptEnvOrder []string
+var benchmarkGptProfile *GptModelProfile
 var benchmarkModelAllowed bool
 
 func BenchmarkGptEnvProfilesStableHit(b *testing.B) {
@@ -39,6 +40,14 @@ func BenchmarkGptEnvProfilesStableHitParallel(b *testing.B) {
 			gptEnvProfiles()
 		}
 	})
+}
+
+func BenchmarkResolveGptProfileStableHit(b *testing.B) {
+	b.Setenv("PXPIPE_GPT_PROFILES", "")
+	b.ReportAllocs()
+	for range b.N {
+		benchmarkGptProfile = ResolveGptProfile("openai/gpt-5.6-sol-20260101")
+	}
 }
 
 func BenchmarkIsSupportedGptModelStableHit(b *testing.B) {
