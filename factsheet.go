@@ -28,7 +28,8 @@ const (
 )
 
 type fsPattern struct {
-	re *regexp.Regexp
+	re   *regexp.Regexp
+	scan func(string, int) (int, int)
 	// group is the submatch index carrying the token (0 = whole match).
 	group int
 	// verify emulates a JS lookahead at the match start: it must match the
@@ -39,7 +40,7 @@ type fsPattern struct {
 
 var fsPatterns = []fsPattern{
 	{re: regexp.MustCompile(`\b[A-Z][A-Z0-9_]{2,}=[^\s)"'<>]+`), required: fsHasEqual | fsHasUpper},
-	{re: regexp.MustCompile(`\b[A-Za-z][A-Za-z0-9_]{2,}=[A-Za-z0-9_.:/+-]{1,64}`), required: fsHasEqual},
+	{scan: nextFactSheetAssignment, required: fsHasEqual},
 	{re: regexp.MustCompile(`\bhttps?://[^\s)"'<>]+`), required: fsHasColon | fsHasSlash | fsHasLower},
 	{re: regexp.MustCompile("\\b[A-Za-z0-9.!#$%&'*+/=?^_`{|}~-]+@[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?(?:\\.[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?)+\\b"), required: fsHasAt | fsHasDot},
 	{re: regexp.MustCompile(`\b[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}\b`), required: fsHasDash},
@@ -51,12 +52,70 @@ var fsPatterns = []fsPattern{
 	{re: regexp.MustCompile(`\b[0-9a-f]{7,40}\b`), verify: regexp.MustCompile(`^[0-9a-f]*\d`), required: fsHasDigit},
 	{re: regexp.MustCompile(`\bv?\d+\.\d+(?:\.\d+)?(?:[-+][\w.]+)?\b`), required: fsHasDigit | fsHasDot},
 	{re: regexp.MustCompile(`(?:^|[^\w-])(--?[A-Za-z][\w-]+)`), group: 1, required: fsHasDash},
-	{re: regexp.MustCompile(`\b\d[\d,_]{3,}\b`), required: fsHasDigit},
+	{scan: nextFactSheetLargeNumber, required: fsHasDigit},
 	{re: regexp.MustCompile(`\b\d+\.\d+\b`), required: fsHasDigit | fsHasDot},
 	{re: regexp.MustCompile(`\b[A-Z][A-Z0-9]{2,}(?:_[A-Z0-9]+)+\b`), required: fsHasUpper | fsHasUnderscore},
 	{re: regexp.MustCompile(`\b(?:[a-z]+|[A-Z][a-z0-9]+)(?:[A-Z][a-z0-9]*)+\b`), required: fsHasUpper | fsHasLower},
 	// ticket/advisory codes: JS `(?=[A-Z0-9-]{0,119}\d)` emulated via verify.
 	{re: regexp.MustCompile(`\b[A-Z][A-Z0-9]+(?:-[A-Z0-9]+)+\b`), verify: regexp.MustCompile(`^[A-Z0-9-]{0,119}\d`), required: fsHasUpper | fsHasDash | fsHasDigit},
+}
+
+func isFactSheetASCIIAlpha(c byte) bool {
+	return c >= 'A' && c <= 'Z' || c >= 'a' && c <= 'z'
+}
+
+func isFactSheetASCIIWord(c byte) bool {
+	return isFactSheetASCIIAlpha(c) || c >= '0' && c <= '9' || c == '_'
+}
+
+func isFactSheetAssignmentValue(c byte) bool {
+	return isFactSheetASCIIWord(c) || c == '.' || c == ':' || c == '/' || c == '+' || c == '-'
+}
+
+func nextFactSheetAssignment(s string, from int) (int, int) {
+	for i := from; i < len(s); i++ {
+		if !isFactSheetASCIIAlpha(s[i]) || i > 0 && isFactSheetASCIIWord(s[i-1]) {
+			continue
+		}
+		nameEnd := i + 1
+		for nameEnd < len(s) && isFactSheetASCIIWord(s[nameEnd]) {
+			nameEnd++
+		}
+		if nameEnd-i < 3 || nameEnd == len(s) || s[nameEnd] != '=' {
+			continue
+		}
+		valueStart := nameEnd + 1
+		if valueStart == len(s) || !isFactSheetAssignmentValue(s[valueStart]) {
+			continue
+		}
+		end := valueStart + 1
+		for end < len(s) && end-valueStart < 64 && isFactSheetAssignmentValue(s[end]) {
+			end++
+		}
+		return i, end
+	}
+	return -1, -1
+}
+
+func nextFactSheetLargeNumber(s string, from int) (int, int) {
+	for i := from; i < len(s); i++ {
+		if s[i] < '0' || s[i] > '9' || i > 0 && isFactSheetASCIIWord(s[i-1]) {
+			continue
+		}
+		end := i + 1
+		for end < len(s) && (s[end] >= '0' && s[end] <= '9' || s[end] == ',' || s[end] == '_') {
+			end++
+		}
+		for end >= i+4 {
+			leftWord := isFactSheetASCIIWord(s[end-1])
+			rightWord := end < len(s) && isFactSheetASCIIWord(s[end])
+			if leftWord != rightWord {
+				return i, end
+			}
+			end--
+		}
+	}
+	return -1, -1
 }
 
 const (
@@ -175,6 +234,20 @@ func (o *orderedCounts) add(tok string, n int) {
 	o.counts[tok] += n
 }
 
+func addFactSheetSpan(oc *orderedCounts, seen map[factSheetSpan]struct{}, chunk string, offset, start, end int) {
+	tok := strings.TrimRight(strings.TrimSpace(chunk[start:end]), ".,;:!?")
+	tl := u16len(tok)
+	if tl < fsMinLen || tl > fsMaxLen {
+		return
+	}
+	key := factSheetSpan{offset, tok}
+	if _, ok := seen[key]; ok {
+		return
+	}
+	seen[key] = struct{}{}
+	oc.add(tok, 1)
+}
+
 // ExtractFactSheetEntries mirrors TS extractFactSheetEntries: whitespace-split
 // chunks, fixed pattern order, offset-level dedup within a chunk, then
 // substring collapse (length-desc) and tier-budgeted selection.
@@ -195,6 +268,17 @@ func ExtractFactSheetEntries(text string) []FactSheetEntry {
 			if features&p.required != p.required {
 				continue
 			}
+			if p.scan != nil {
+				for from := 0; ; {
+					start, end := p.scan(chunk, from)
+					if start < 0 {
+						break
+					}
+					addFactSheetSpan(oc, spanSeen, chunk, start, start, end)
+					from = end
+				}
+				continue
+			}
 			for _, idx := range p.re.FindAllStringSubmatchIndex(chunk, -1) {
 				gs, ge := idx[0], idx[1]
 				if p.group > 0 {
@@ -206,17 +290,7 @@ func ExtractFactSheetEntries(text string) []FactSheetEntry {
 				if p.verify != nil && !p.verify.MatchString(chunk[idx[0]:]) {
 					continue
 				}
-				tok := strings.TrimRight(strings.TrimSpace(chunk[gs:ge]), ".,;:!?")
-				tl := u16len(tok)
-				if tl < fsMinLen || tl > fsMaxLen {
-					continue
-				}
-				key := factSheetSpan{idx[0], tok}
-				if _, seen := spanSeen[key]; seen {
-					continue
-				}
-				spanSeen[key] = struct{}{}
-				oc.add(tok, 1)
+				addFactSheetSpan(oc, spanSeen, chunk, idx[0], gs, ge)
 			}
 		}
 		if len(oc.counts) >= fsMaxSeen {

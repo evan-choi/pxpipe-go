@@ -14,6 +14,7 @@ var factSheetPatternMatches int
 var benchmarkCachePrefixSHA string
 var benchmarkCachePrefixBytes int
 var benchmarkCachePrefixOK bool
+var factSheetEntries []FactSheetEntry
 
 func BenchmarkTransformBigClaudeCode(b *testing.B) {
 	input, err := os.ReadFile(filepath.Join("testdata", "transform", "big-claude-code", "input.json"))
@@ -107,11 +108,36 @@ func BenchmarkFactSheetPatterns(b *testing.B) {
 			matches := 0
 			for range b.N {
 				for _, chunk := range chunks {
+					if pattern.scan != nil {
+						for from := 0; ; {
+							_, end := pattern.scan(chunk, from)
+							if end < 0 {
+								break
+							}
+							matches++
+							from = end
+						}
+						continue
+					}
 					matches += len(pattern.re.FindAllStringSubmatchIndex(chunk, -1))
 				}
 			}
 			factSheetPatternMatches = matches
 		})
+	}
+}
+
+func BenchmarkExtractFactSheetEntries(b *testing.B) {
+	input, err := os.ReadFile(filepath.Join("testdata", "render", "multi-page", "input.txt"))
+	if err != nil {
+		b.Fatal(err)
+	}
+	text := string(input)
+	b.SetBytes(int64(len(input)))
+	b.ReportAllocs()
+	b.ResetTimer()
+	for range b.N {
+		factSheetEntries = ExtractFactSheetEntries(text)
 	}
 }
 
