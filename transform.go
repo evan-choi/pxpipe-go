@@ -7,6 +7,7 @@ import (
 	"encoding/hex"
 	"fmt"
 	"regexp"
+	"runtime"
 	"sort"
 	"strconv"
 	"strings"
@@ -1064,6 +1065,30 @@ func relocateAnchorToHistoryImage(messages []any, anchorOrdinal int, hasOrdinal 
 	delete(slabAnchor, "cache_control")
 }
 
+const maxCachePrefixScratchBytes = 1 << 20
+
+var cachePrefixScratchCache = make(chan []byte, runtime.GOMAXPROCS(0))
+
+func getCachePrefixScratch() []byte {
+	select {
+	case scratch := <-cachePrefixScratchCache:
+		return scratch[:0]
+	default:
+		return make([]byte, 0, 4096)
+	}
+}
+
+func putCachePrefixScratch(scratch []byte) {
+	if cap(scratch) > maxCachePrefixScratchBytes {
+		return
+	}
+	clear(scratch)
+	select {
+	case cachePrefixScratchCache <- scratch[:0]:
+	default:
+	}
+}
+
 func cachePrefixDigest(req map[string]any) (string, int, bool) {
 	msgs, _ := asArr(req["messages"])
 	boundary := -1
@@ -1102,7 +1127,7 @@ func cachePrefixDigest(req map[string]any) (string, int, bool) {
 	}
 	h := sha256.New()
 	var separator [1]byte
-	scratch := make([]byte, 0, 4096)
+	scratch := getCachePrefixScratch()
 	partCount := 0
 	prefixUnits := 0
 	appendString := func(s string) {
@@ -1148,7 +1173,9 @@ func cachePrefixDigest(req map[string]any) (string, int, bool) {
 		}
 	}
 	var sum [sha256.Size]byte
-	return hex.EncodeToString(h.Sum(sum[:0])[:4]), prefixUnits, true
+	digest := hex.EncodeToString(h.Sum(sum[:0])[:4])
+	putCachePrefixScratch(scratch)
+	return digest, prefixUnits, true
 }
 
 func countOutgoingTextChars(req map[string]any) int {
