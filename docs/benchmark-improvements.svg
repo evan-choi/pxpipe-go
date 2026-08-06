@@ -1,0 +1,131 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 960 480" role="img" aria-labelledby="title desc">
+  <title id="title">pxpipe-go benchmark improvements over main</title>
+  <desc id="desc">Latency fell by 70.5 to 86.3 percent and allocated bytes fell by 56.7 to 95.2 percent across four representative benchmarks.</desc>
+  <style>
+    :root {
+      color-scheme: light dark;
+      --fg: #1f2328;
+      --muted-fg: #59636e;
+      --grid: #d0d7de;
+      --track: #eaeef2;
+      --latency: #1f883d;
+      --memory: #0969da;
+    }
+    @media (prefers-color-scheme: dark) {
+      :root {
+        --fg: #f0f6fc;
+        --muted-fg: #9198a1;
+        --grid: #3d444d;
+        --track: #212830;
+        --latency: #3fb950;
+        --memory: #58a6ff;
+      }
+    }
+    text {
+      fill: var(--fg);
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    }
+    .title { font-size: 24px; font-weight: 600; }
+    .subtitle, .axis, .detail, .footnote { fill: var(--muted-fg); }
+    .subtitle { font-size: 13px; }
+    .panel-title { font-size: 16px; font-weight: 600; }
+    .label { font-size: 13px; font-weight: 600; }
+    .value { font-size: 13px; font-weight: 600; }
+    .detail { font-size: 12px; }
+    .axis, .footnote { font-size: 11px; }
+    .grid { stroke: var(--grid); stroke-width: 1; }
+    .divider { stroke: var(--grid); stroke-width: 1; }
+    .track { fill: var(--track); }
+    .latency { fill: var(--latency); }
+    .memory { fill: var(--memory); }
+  </style>
+
+  <text class="title" x="40" y="34">Benchmark improvements vs main</text>
+  <text class="subtitle" x="40" y="58">Reduction in time/op and B/op · higher is better</text>
+
+  <line class="divider" x1="480" y1="82" x2="480" y2="430"/>
+  <text class="panel-title" x="50" y="95">Latency reduction</text>
+  <text class="panel-title" x="510" y="95">Allocated bytes reduction</text>
+
+  <g aria-hidden="true">
+    <line class="grid" x1="50" y1="112" x2="50" y2="402"/>
+    <line class="grid" x1="132.5" y1="112" x2="132.5" y2="402"/>
+    <line class="grid" x1="215" y1="112" x2="215" y2="402"/>
+    <line class="grid" x1="297.5" y1="112" x2="297.5" y2="402"/>
+    <line class="grid" x1="380" y1="112" x2="380" y2="402"/>
+
+    <line class="grid" x1="510" y1="112" x2="510" y2="402"/>
+    <line class="grid" x1="592.5" y1="112" x2="592.5" y2="402"/>
+    <line class="grid" x1="675" y1="112" x2="675" y2="402"/>
+    <line class="grid" x1="757.5" y1="112" x2="757.5" y2="402"/>
+    <line class="grid" x1="840" y1="112" x2="840" y2="402"/>
+  </g>
+
+  <g>
+    <text class="label" x="50" y="126">Claude transform</text>
+    <rect class="track" x="50" y="135" width="330" height="18" rx="4"/>
+    <rect class="latency" x="50" y="135" width="233" height="18" rx="4"/>
+    <text class="value" x="390" y="149">70.5%</text>
+    <text class="detail" x="50" y="171">113.22 → 33.39 ms/op</text>
+
+    <text class="label" x="50" y="195">Dense render</text>
+    <rect class="track" x="50" y="204" width="330" height="18" rx="4"/>
+    <rect class="latency" x="50" y="204" width="285" height="18" rx="4"/>
+    <text class="value" x="390" y="218">86.3%</text>
+    <text class="detail" x="50" y="240">171.69 → 23.52 ms/op</text>
+
+    <text class="label" x="50" y="264">OpenAI Chat</text>
+    <rect class="track" x="50" y="273" width="330" height="18" rx="4"/>
+    <rect class="latency" x="50" y="273" width="246" height="18" rx="4"/>
+    <text class="value" x="390" y="287">74.5%</text>
+    <text class="detail" x="50" y="309">86.93 → 22.18 ms/op</text>
+
+    <text class="label" x="50" y="333">OpenAI Responses</text>
+    <rect class="track" x="50" y="342" width="330" height="18" rx="4"/>
+    <rect class="latency" x="50" y="342" width="252" height="18" rx="4"/>
+    <text class="value" x="390" y="356">76.4%</text>
+    <text class="detail" x="50" y="378">445.85 → 105.08 ms/op</text>
+  </g>
+
+  <g>
+    <text class="label" x="510" y="126">Claude transform</text>
+    <rect class="track" x="510" y="135" width="330" height="18" rx="4"/>
+    <rect class="memory" x="510" y="135" width="210" height="18" rx="4"/>
+    <text class="value" x="850" y="149">63.7%</text>
+    <text class="detail" x="510" y="171">25.44 → 9.23 MB/op</text>
+
+    <text class="label" x="510" y="195">Dense render</text>
+    <rect class="track" x="510" y="204" width="330" height="18" rx="4"/>
+    <rect class="memory" x="510" y="204" width="314" height="18" rx="4"/>
+    <text class="value" x="850" y="218">95.2%</text>
+    <text class="detail" x="510" y="240">16.80 → 0.80 MB/op</text>
+
+    <text class="label" x="510" y="264">OpenAI Chat</text>
+    <rect class="track" x="510" y="273" width="330" height="18" rx="4"/>
+    <rect class="memory" x="510" y="273" width="187" height="18" rx="4"/>
+    <text class="value" x="850" y="287">56.7%</text>
+    <text class="detail" x="510" y="309">24.08 → 10.42 MB/op</text>
+
+    <text class="label" x="510" y="333">OpenAI Responses</text>
+    <rect class="track" x="510" y="342" width="330" height="18" rx="4"/>
+    <rect class="memory" x="510" y="342" width="229" height="18" rx="4"/>
+    <text class="value" x="850" y="356">69.5%</text>
+    <text class="detail" x="510" y="378">123.88 → 37.82 MB/op</text>
+  </g>
+
+  <g aria-hidden="true">
+    <text class="axis" x="50" y="421" text-anchor="middle">0%</text>
+    <text class="axis" x="132.5" y="421" text-anchor="middle">25%</text>
+    <text class="axis" x="215" y="421" text-anchor="middle">50%</text>
+    <text class="axis" x="297.5" y="421" text-anchor="middle">75%</text>
+    <text class="axis" x="380" y="421" text-anchor="middle">100%</text>
+
+    <text class="axis" x="510" y="421" text-anchor="middle">0%</text>
+    <text class="axis" x="592.5" y="421" text-anchor="middle">25%</text>
+    <text class="axis" x="675" y="421" text-anchor="middle">50%</text>
+    <text class="axis" x="757.5" y="421" text-anchor="middle">75%</text>
+    <text class="axis" x="840" y="421" text-anchor="middle">100%</text>
+  </g>
+
+  <text class="footnote" x="40" y="458">main@9df7eea → f464a22 · Linux arm64 · 2 vCPU · Go 1.26.5 · median of five runs</text>
+</svg>

@@ -156,18 +156,30 @@ Known deviations:
 
 ## Performance
 
-Apple M1 Pro, `go test -bench .`:
+![Benchmark reductions versus main: 70–86% lower latency and 57–95% fewer allocated bytes](docs/benchmark-improvements.svg)
 
-| benchmark | time/op | notes |
-|---|---|---|
-| TransformBigClaudeCode | ~114 ms | 142 KB Claude-Code-shaped request → 6 PNG pages incl. history collapse |
-| TransformOpenAIChat | ~80 ms | 49 KB GPT-5.4 chat request → slab pages (TS reference: ~138 ms) |
-| TransformOpenAIResponses | ~448 ms | 113 KB Codex-shaped request → slab + pair-collapse images (TS: ~664 ms) |
-| RenderDensePage | ~176 ms | 275 KB log text → 9 dense 1568×728 pages |
+Measured on Linux arm64 with 2 vCPUs and Go 1.26.5. Values are medians of five
+runs with three iterations per run, comparing `main@9df7eea` with `f464a22`
+(2026-08-06). Actual latency varies with CPU architecture and request content.
 
-~80% of the remaining time is deflate (klauspost/compress level 7, chosen to
-match the reference CompressionStream output sizes). Framebuffers and zlib
-encoders are pooled; the glyph atlases (~3.3 MB) load once via `go:embed`.
+| benchmark | main time/op | optimized time/op | latency | B/op reduction |
+|---|---:|---:|---:|---:|
+| TransformBigClaudeCode | 113.22 ms | 33.39 ms | -70.5% | -63.7% |
+| RenderDensePage | 171.69 ms | 23.52 ms | -86.3% | -95.2% |
+| TransformOpenAIChat | 86.93 ms | 22.18 ms | -74.5% | -56.7% |
+| TransformOpenAIResponses | 445.85 ms | 105.08 ms | -76.4% | -69.5% |
+
+Reproduce the comparison with:
+
+```bash
+GOMAXPROCS=2 go test -run '^$' \
+  -bench '^(BenchmarkTransformBigClaudeCode|BenchmarkRenderDensePage|BenchmarkTransformOpenAIChat|BenchmarkTransformOpenAIResponses)$' \
+  -benchtime=3x -benchmem -count=5 .
+```
+
+At the optimized commit, the Responses profile is dominated by PNG rendering
+and zlib (~35%), exact o200k tokenization (~29%), and fact-sheet extraction
+(~21%). The renderer uses zlib level 6; framebuffers and encoders are pooled.
 
 ## Regenerating fixtures
 
