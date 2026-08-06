@@ -83,7 +83,7 @@ type RenderedImage struct {
 	DroppedCodepoints map[rune]int
 }
 
-var glyphPalette = [][3]int{
+var glyphPalette = [...][3]int{
 	{20, 20, 20},
 	{20, 40, 160},
 	{150, 20, 20},
@@ -737,6 +737,27 @@ func drawGrid(fb []byte, fbW, fbH, rows, gridCols, cellH, cellW, glyphH int) {
 
 func jsRound(f float64) int { return int(math.Floor(f + 0.5)) }
 
+func fillColorLUT(lut *[len(glyphPalette)][256][3]byte, palette [][3]int, paper int) {
+	for slot := range lut {
+		p := palette[slot%len(palette)]
+		for g := range 256 {
+			cov := 0
+			if paper > 0 {
+				cov = jsRound(float64((paper-g)*255) / float64(paper))
+			}
+			if cov < 0 {
+				cov = 0
+			}
+			if cov > 255 {
+				cov = 255
+			}
+			lut[slot][g][0] = byte(jsRound(float64(paper) - float64(cov*(paper-p[0]))/255))
+			lut[slot][g][1] = byte(jsRound(float64(paper) - float64(cov*(paper-p[1]))/255))
+			lut[slot][g][2] = byte(jsRound(float64(paper) - float64(cov*(paper-p[2]))/255))
+		}
+	}
+}
+
 func wrappedLinesRuneCount(lines []string) int {
 	n := 0
 	for _, line := range lines {
@@ -843,7 +864,7 @@ func renderWrappedLinesToPNG(fitLines, fitSlotLines []string, charsRendered, col
 	if markerMask != nil || colorMask != nil {
 		rgb = scratch[nextScratch : nextScratch+3*pixelCount]
 	}
-	inkPalette := glyphPalette
+	inkPalette := glyphPalette[:]
 	if useColorByRole {
 		inkPalette = RolePalette
 	}
@@ -973,24 +994,16 @@ func renderWrappedLinesToPNG(fitLines, fitSlotLines []string, charsRendered, col
 	var err error
 	switch {
 	case colorMask != nil:
+		var colorLUT [len(glyphPalette)][256][3]byte
+		fillColorLUT(&colorLUT, inkPalette, paper)
 		for i := range fb {
 			g := int(fb[i])
 			slot := int(colorMask[i])
 			if slot > 0 {
-				cov := 0
-				if paper > 0 {
-					cov = jsRound(float64((paper-g)*255) / float64(paper))
-				}
-				if cov < 0 {
-					cov = 0
-				}
-				if cov > 255 {
-					cov = 255
-				}
-				p := inkPalette[(slot-1)%len(inkPalette)]
-				rgb[i*3] = byte(jsRound(float64(paper) - float64(cov*(paper-p[0]))/255))
-				rgb[i*3+1] = byte(jsRound(float64(paper) - float64(cov*(paper-p[1]))/255))
-				rgb[i*3+2] = byte(jsRound(float64(paper) - float64(cov*(paper-p[2]))/255))
+				color := colorLUT[slot-1][g]
+				rgb[i*3] = color[0]
+				rgb[i*3+1] = color[1]
+				rgb[i*3+2] = color[2]
 			} else {
 				rgb[i*3] = byte(g)
 				rgb[i*3+1] = byte(g)
