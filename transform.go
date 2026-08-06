@@ -855,6 +855,9 @@ func renderToolDoc(t map[string]any) string {
 
 func approxBlockBytes(blk map[string]any) int {
 	src, _ := asMap(blk["source"])
+	if png, ok := src["data"].(pngBase64); ok {
+		return len(png)
+	}
 	b64, _ := getStr(src, "data")
 	pad := 0
 	if strings.HasSuffix(b64, "==") {
@@ -885,7 +888,7 @@ func textToImageBlocks(text string, cols int, shrinkWidth bool, style render.Ren
 	}
 	out := &renderedBlocks{droppedCodepoints: map[rune]int{}}
 	for _, img := range imgs {
-		out.blocks = append(out.blocks, makeImageBlock(base64.StdEncoding.EncodeToString(img.PNG)))
+		out.blocks = append(out.blocks, makeImageBlock(img.PNG))
 		out.pngs = append(out.pngs, img.PNG)
 		out.dims = append(out.dims, imageDim{img.Width, img.Height})
 		out.droppedChars += img.DroppedChars
@@ -919,22 +922,25 @@ func historyImageSha8(messages []any) string {
 	if !ok {
 		return ""
 	}
-	var concat strings.Builder
+	var concat []byte
 	for _, bv := range arr {
 		if blockType(bv) == "image" {
 			if bm, ok := asMap(bv); ok {
 				if src, ok := asMap(bm["source"]); ok {
-					if data, ok := getStr(src, "data"); ok {
-						concat.WriteString(data)
+					switch data := src["data"].(type) {
+					case string:
+						concat = append(concat, data...)
+					case pngBase64:
+						concat = base64.StdEncoding.AppendEncode(concat, data)
 					}
 				}
 			}
 		}
 	}
-	if concat.Len() == 0 {
+	if len(concat) == 0 {
 		return ""
 	}
-	return sha8(concat.String())
+	return sha8(unsafe.String(unsafe.SliceData(concat), len(concat)))
 }
 
 func relocateAnchorToHistoryImage(messages []any, anchorOrdinal int, hasOrdinal bool) {
@@ -1528,14 +1534,13 @@ func transformParsed(req map[string]any, body []byte, o *resolvedOptions, info *
 	}
 	var imageBlocks []any
 	for i, img := range images {
-		b64 := base64.StdEncoding.EncodeToString(img.PNG)
 		info.ImageBytes += len(img.PNG)
 		info.ImagePixels += img.Width * img.Height
 		info.DroppedChars += img.DroppedChars
 		for cp, n := range img.DroppedCodepoints {
 			droppedCodepoints[cp] += n
 		}
-		block := makeImageBlock(b64)
+		block := makeImageBlock(img.PNG)
 		if i == len(images)-1 && hasSystemStaticCC {
 			block["cache_control"] = demoteRelocatedCacheControl(systemStaticCC)
 		}

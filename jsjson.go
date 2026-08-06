@@ -22,6 +22,7 @@ import (
 const orderKey = "\x00keys"
 
 type pngDataURL []byte
+type pngBase64 []byte
 
 func objKeyOrder(m map[string]any) []string {
 	if ks, ok := m[orderKey].([]string); ok {
@@ -157,6 +158,10 @@ func appendJSValue(b []byte, v any) []byte {
 		return appendJSString(b, tv)
 	case pngDataURL:
 		b = append(b, `"data:image/png;base64,`...)
+		b = base64.StdEncoding.AppendEncode(b, tv)
+		return append(b, '"')
+	case pngBase64:
+		b = append(b, '"')
 		b = base64.StdEncoding.AppendEncode(b, tv)
 		return append(b, '"')
 	case json.Number:

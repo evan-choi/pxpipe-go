@@ -1,7 +1,6 @@
 package pxpipe
 
 import (
-	"encoding/base64"
 	"regexp"
 	"sort"
 	"strconv"
@@ -545,7 +544,7 @@ func userTurnBlocks(messages []any, fromInclusive, upToExclusive int, onImage fu
 		}
 		out = append(out, textBlock(`[<user t="`+strconv.Itoa(i)+`"> was too long to carry as text (`+strconv.Itoa(u16len(typed))+` chars); it is rendered verbatim in the image(s) immediately below, separate from the history transcript. PRIOR context, not the current request. Preview: `+compactPreview(typed)+`]`))
 		for _, img := range imgs {
-			out = append(out, makeImageBlock(base64.StdEncoding.EncodeToString(img.PNG)))
+			out = append(out, makeImageBlock(img.PNG))
 			onImage(img)
 		}
 	}
@@ -711,7 +710,7 @@ func collapseHistory(messages []any, isProfitable profitableFn, o historyCollaps
 		}
 		markerCC, hasMarker := markerByEnd[chunkEnd]
 		for k, img := range imgs {
-			block := makeImageBlock(base64.StdEncoding.EncodeToString(img.PNG))
+			block := makeImageBlock(img.PNG)
 			if hasMarker && k == len(imgs)-1 {
 				block["cache_control"] = markerCC
 			}
@@ -766,11 +765,11 @@ func floorDiv(a, b int) int {
 	return q
 }
 
-func makeImageBlock(pngB64 string) map[string]any {
+func makeImageBlock(png []byte) map[string]any {
 	src := map[string]any{
 		"type":       "base64",
 		"media_type": "image/png",
-		"data":       pngB64,
+		"data":       pngBase64(png),
 	}
 	setObjKeyOrder(src, []string{"type", "media_type", "data"})
 	m := map[string]any{"type": "image", "source": src}
