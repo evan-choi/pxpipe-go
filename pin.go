@@ -267,6 +267,9 @@ func reminderBlocks(text string) []string {
 }
 
 func filePathOf(block string) string {
+	if !strings.Contains(block, "Contents of ") {
+		return ""
+	}
 	m := filePathOfRe.FindStringSubmatch(block)
 	if m == nil {
 		return ""
