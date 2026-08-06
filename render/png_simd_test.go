@@ -14,8 +14,11 @@ func TestSIMDAdlerPNGMatchesZlib(t *testing.T) {
 		width, height, bytesPerPixel int
 		colorType                    byte
 	}{
-		{"gray", 1568, 720, 1, 0},
-		{"rgb", 1568, 96, 3, 2},
+		{"empty_gray", 0, 0, 1, 0},
+		{"zero_width_gray", 0, 7, 1, 0},
+		{"single_gray", 1, 1, 1, 0},
+		{"dense_gray", 1568, 720, 1, 0},
+		{"dense_rgb", 1568, 720, 3, 2},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			pixels := make([]byte, tc.width*tc.height*tc.bytesPerPixel)
