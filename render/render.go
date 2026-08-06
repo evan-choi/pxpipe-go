@@ -868,9 +868,33 @@ func renderWrappedLinesToPNG(fitLines, fitSlotLines []string, charsRendered, col
 	if useColorByRole {
 		inkPalette = RolePalette
 	}
+	solidColorCells := cellW >= atlasW && !style.Grid && style.InkDilate <= 0 && (style.Invert == nil || *style.Invert)
 
 	stampColorMask := func(baseX, baseY, spanW, colorSlot int) {
 		if colorMask == nil {
+			return
+		}
+		if solidColorCells && baseX >= 0 && baseX+spanW <= width && baseY >= 0 && baseY+atlasH <= height {
+			if colorSlot == 0 {
+				return
+			}
+			fill := uint64(byte(colorSlot)) * 0x0101010101010101
+			row := baseY*width + baseX
+			for range atlasH {
+				switch spanW {
+				case 5:
+					binary.LittleEndian.PutUint32(colorMask[row:], uint32(fill))
+					colorMask[row+4] = byte(fill)
+				case 10:
+					binary.LittleEndian.PutUint64(colorMask[row:], fill)
+					binary.LittleEndian.PutUint16(colorMask[row+8:], uint16(fill))
+				default:
+					for i := range spanW {
+						colorMask[row+i] = byte(fill)
+					}
+				}
+				row += width
+			}
 			return
 		}
 		for gy := 0; gy < atlasH; gy++ {
