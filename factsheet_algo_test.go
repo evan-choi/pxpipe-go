@@ -3,10 +3,13 @@ package pxpipe
 import (
 	"math/rand"
 	"reflect"
+	"regexp"
 	"sort"
 	"strings"
 	"testing"
 )
+
+var shapeNumReference = regexp.MustCompile(`^\d[\d,_]*$|^\d+\.\d+$`)
 
 func priorityTierReference(tok string) int {
 	switch {
@@ -19,7 +22,7 @@ func priorityTierReference(tok string) int {
 		shapeConst.MatchString(tok),
 		shapeTicket.MatchString(tok) && shapeTicketDig.MatchString(tok),
 		shapeFlag.MatchString(tok),
-		shapeNum.MatchString(tok),
+		shapeNumReference.MatchString(tok),
 		shapeCamel.MatchString(tok) && u16len(tok) >= 8:
 		return 0
 	case shapeURL.MatchString(tok):
@@ -101,7 +104,8 @@ func TestPriorityTierMatchesReference(t *testing.T) {
 		"ABC=1", "abc1234", "123e4567-e89b-12d3-a456-426614174000",
 		"dev@example.com", "GB82WEST12345698765432", "$1,234.56",
 		"CONST_ID", "CVE-2026-1234", "--verbose", "1234", "CamelCaseName",
-		"https://example.com/path", "plain", "한글😀",
+		"https://example.com/path", "plain", "한글😀", "0", "1,", "1_",
+		"1,2", "1__2", "1.2", "1,.2", "1_2.3", "1.", "1.2.3", "1a", "١",
 	}
 	rng := rand.New(rand.NewSource(2))
 	alphabet := []rune("abcXYZ019_-/.:@=$\x00한글😀")
@@ -111,6 +115,18 @@ func TestPriorityTierMatchesReference(t *testing.T) {
 			chars[i] = alphabet[rng.Intn(len(alphabet))]
 		}
 		tokens = append(tokens, string(chars))
+	}
+	numericAlphabet := "01,_.a"
+	for range 10000 {
+		chars := make([]byte, rng.Intn(32))
+		for i := range chars {
+			chars[i] = numericAlphabet[rng.Intn(len(numericAlphabet))]
+		}
+		token := string(chars)
+		if got, want := isFactSheetNumber(token), shapeNumReference.MatchString(token); got != want {
+			t.Fatalf("isFactSheetNumber(%q) = %v, want %v", token, got, want)
+		}
+		tokens = append(tokens, token)
 	}
 	for _, token := range tokens {
 		if got, want := priorityTier(token), priorityTierReference(token); got != want {

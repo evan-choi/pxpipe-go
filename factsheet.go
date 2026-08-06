@@ -395,7 +395,6 @@ var (
 	shapeTicket     = regexp.MustCompile(`^[A-Z][A-Z0-9]+(?:-[A-Z0-9]+)+$`)
 	shapeTicketDig  = regexp.MustCompile(`^[A-Z0-9-]*\d`)
 	shapeFlag       = regexp.MustCompile(`^--?[A-Za-z][\w-]+$`)
-	shapeNum        = regexp.MustCompile(`^\d[\d,_]*$|^\d+\.\d+$`)
 	shapeURL        = regexp.MustCompile(`^https?://`)
 	shapeCamel      = regexp.MustCompile(`^(?:[a-z]+|[A-Z][a-z0-9]+)(?:[A-Z][a-z0-9]*)+$`)
 	shapeAssignment = regexp.MustCompile(`^[A-Z][A-Z0-9_]{2,}=\S+$`)
@@ -433,6 +432,38 @@ func factSheetFeatures(s string) fsFeature {
 	return features
 }
 
+func isFactSheetNumber(s string) bool {
+	if len(s) == 0 || !isFactSheetASCIIDigit(s[0]) {
+		return false
+	}
+	digitsOnly := true
+	for i := 1; i < len(s); i++ {
+		switch s[i] {
+		case ',', '_':
+			digitsOnly = false
+		case '.':
+			if !digitsOnly {
+				return false
+			}
+			i++
+			if i == len(s) {
+				return false
+			}
+			for ; i < len(s); i++ {
+				if !isFactSheetASCIIDigit(s[i]) {
+					return false
+				}
+			}
+			return true
+		default:
+			if !isFactSheetASCIIDigit(s[i]) {
+				return false
+			}
+		}
+	}
+	return true
+}
+
 func priorityTier(tok string) int {
 	features := factSheetFeatures(tok)
 	switch {
@@ -445,7 +476,7 @@ func priorityTier(tok string) int {
 		features&(fsHasUpper|fsHasUnderscore) == fsHasUpper|fsHasUnderscore && shapeConst.MatchString(tok),
 		features&(fsHasUpper|fsHasDash|fsHasDigit) == fsHasUpper|fsHasDash|fsHasDigit && shapeTicket.MatchString(tok) && shapeTicketDig.MatchString(tok),
 		features&fsHasDash != 0 && shapeFlag.MatchString(tok),
-		features&fsHasDigit != 0 && shapeNum.MatchString(tok),
+		features&fsHasDigit != 0 && isFactSheetNumber(tok),
 		features&(fsHasUpper|fsHasLower) == fsHasUpper|fsHasLower && shapeCamel.MatchString(tok) && u16len(tok) >= 8:
 		return 0
 	case features&(fsHasColon|fsHasSlash|fsHasLower) == fsHasColon|fsHasSlash|fsHasLower && shapeURL.MatchString(tok):
