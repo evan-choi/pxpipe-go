@@ -156,30 +156,35 @@ Known deviations:
 
 ## Performance
 
-![Benchmark reductions versus main: 70–86% lower latency and 57–95% fewer allocated bytes](docs/benchmark-improvements.png)
+![pxpipe versus pxpipe-go benchmark: pxpipe-go is 6.2 to 45.9 times faster across four workloads](docs/benchmark-improvements.png)
 
-Measured on Linux arm64 with 2 vCPUs and Go 1.26.5. Values are medians of five
-runs with three iterations per run, comparing `main@9df7eea` with `f464a22`
-(2026-08-06). Actual latency varies with CPU architecture and request content.
+Measured on an Apple M1 Pro with Node 26.5.0 and Go 1.26.3. Values are medians
+of five runs with three timed iterations per run, comparing `pxpipe@508fc9d`
+with `pxpipe-go@f464a22` (2026-08-06). Actual latency varies with CPU
+architecture and request content.
 
-| benchmark | main time/op | optimized time/op | latency | B/op reduction |
-|---|---:|---:|---:|---:|
-| TransformBigClaudeCode | 113.22 ms | 33.39 ms | -70.5% | -63.7% |
-| RenderDensePage | 171.69 ms | 23.52 ms | -86.3% | -95.2% |
-| TransformOpenAIChat | 86.93 ms | 22.18 ms | -74.5% | -56.7% |
-| TransformOpenAIResponses | 445.85 ms | 105.08 ms | -76.4% | -69.5% |
+| benchmark | pxpipe time/op | pxpipe-go time/op | speedup |
+|---|---:|---:|---:|
+| TransformBigClaudeCode | 158.30 ms | 25.63 ms | 6.2× |
+| RenderDensePage | 397.80 ms | 8.67 ms | 45.9× |
+| TransformOpenAIChat | 120.60 ms | 18.32 ms | 6.6× |
+| TransformOpenAIResponses | 646.80 ms | 89.36 ms | 7.2× |
 
 Reproduce the comparison with:
 
 ```bash
-GOMAXPROCS=2 go test -run '^$' \
+for benchmark_run in 1 2 3 4 5; do
+  (cd ../pxpipe && pnpm exec tsx ../pxpipe-go/tools/bench-ts.ts)
+done
+
+go test -run '^$' \
   -bench '^(BenchmarkTransformBigClaudeCode|BenchmarkRenderDensePage|BenchmarkTransformOpenAIChat|BenchmarkTransformOpenAIResponses)$' \
   -benchtime=3x -benchmem -count=5 .
 ```
 
-At the optimized commit, the Responses profile is dominated by PNG rendering
-and zlib (~35%), exact o200k tokenization (~29%), and fact-sheet extraction
-(~21%). The renderer uses zlib level 6; framebuffers and encoders are pooled.
+At `pxpipe-go@f464a22`, the Responses profile is dominated by PNG rendering and
+zlib (~35%), exact o200k tokenization (~29%), and fact-sheet extraction (~21%).
+The renderer uses zlib level 6; framebuffers and encoders are pooled.
 
 ## Regenerating fixtures
 
