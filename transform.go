@@ -2,7 +2,9 @@ package pxpipe
 
 import (
 	"container/list"
+	"crypto/sha256"
 	"encoding/base64"
+	"encoding/hex"
 	"fmt"
 	"regexp"
 	"sort"
@@ -922,25 +924,40 @@ func historyImageSha8(messages []any) string {
 	if !ok {
 		return ""
 	}
-	var concat []byte
+	h := sha256.New()
+	var scratch [16 << 10]byte
+	hasData := false
 	for _, bv := range arr {
 		if blockType(bv) == "image" {
 			if bm, ok := asMap(bv); ok {
 				if src, ok := asMap(bm["source"]); ok {
 					switch data := src["data"].(type) {
 					case string:
-						concat = append(concat, data...)
+						if len(data) > 0 {
+							hasData = true
+							_, _ = h.Write(unsafe.Slice(unsafe.StringData(data), len(data)))
+						}
 					case pngBase64:
-						concat = base64.StdEncoding.AppendEncode(concat, data)
+						if len(data) > 0 {
+							hasData = true
+							for len(data) > 0 {
+								n := minInt(len(data), 12<<10)
+								encoded := base64.StdEncoding.EncodedLen(n)
+								base64.StdEncoding.Encode(scratch[:encoded], data[:n])
+								_, _ = h.Write(scratch[:encoded])
+								data = data[n:]
+							}
+						}
 					}
 				}
 			}
 		}
 	}
-	if len(concat) == 0 {
+	if !hasData {
 		return ""
 	}
-	return sha8(unsafe.String(unsafe.SliceData(concat), len(concat)))
+	var sum [sha256.Size]byte
+	return hex.EncodeToString(h.Sum(sum[:0])[:4])
 }
 
 func relocateAnchorToHistoryImage(messages []any, anchorOrdinal int, hasOrdinal bool) {

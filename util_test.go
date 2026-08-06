@@ -28,3 +28,32 @@ func TestU16Slice(t *testing.T) {
 		t.Fatalf("aligned slice allocated %v times: %q", allocs, got)
 	}
 }
+
+func TestHistoryImageSha8ConcatSemantics(t *testing.T) {
+	imageBlock := func(data string) map[string]any {
+		return map[string]any{"type": "image", "source": map[string]any{"data": data}}
+	}
+	content := []any{
+		textBlock(HistorySyntheticIntro),
+		imageBlock("ab"),
+		map[string]any{"type": "image", "source": map[string]any{}},
+		imageBlock("c"),
+	}
+	messages := []any{
+		map[string]any{"role": "user", "content": content},
+		map[string]any{"role": "user", "content": []any{imageBlock("ignored")}},
+	}
+	if got := historyImageSha8(messages); got != "ba7816bf" {
+		t.Fatalf("historyImageSha8() = %q, want SHA-256 prefix of delimiter-free abc", got)
+	}
+
+	content[1] = imageBlock("a")
+	content[3] = imageBlock("bc")
+	if got := historyImageSha8(messages); got != "ba7816bf" {
+		t.Fatalf("historyImageSha8() changed across equivalent concatenation: %q", got)
+	}
+
+	if got := historyImageSha8([]any{map[string]any{"content": []any{imageBlock("")}}}); got != "" {
+		t.Fatalf("historyImageSha8(empty data) = %q, want empty", got)
+	}
+}

@@ -14,6 +14,7 @@ var factSheetPatternMatches int
 var benchmarkCachePrefixSHA string
 var benchmarkCachePrefixBytes int
 var benchmarkCachePrefixOK bool
+var benchmarkHistoryImageSHA string
 var factSheetEntries []FactSheetEntry
 var benchmarkGptEnvProfiles map[string]*GptModelProfile
 var benchmarkGptEnvOrder []string
@@ -123,6 +124,40 @@ func BenchmarkCachePrefixDigest(b *testing.B) {
 	b.ResetTimer()
 	for range b.N {
 		benchmarkCachePrefixSHA, benchmarkCachePrefixBytes, benchmarkCachePrefixOK = cachePrefixDigest(req)
+	}
+}
+
+func BenchmarkHistoryImageSha8(b *testing.B) {
+	encoded := []string{
+		strings.Repeat("A", 96<<10),
+		strings.Repeat("B", 96<<10),
+		strings.Repeat("C", 96<<10),
+		strings.Repeat("D", 96<<10),
+	}
+	stringContent := []any{textBlock(HistorySyntheticIntro)}
+	for _, data := range encoded {
+		stringContent = append(stringContent,
+			map[string]any{"type": "image", "source": map[string]any{"data": data}})
+	}
+	rawContent := []any{textBlock(HistorySyntheticIntro)}
+	for i := range encoded {
+		rawContent = append(rawContent, makeImageBlock([]byte(strings.Repeat(string(rune('A'+i)), 72<<10))))
+	}
+	for _, tc := range []struct {
+		name    string
+		content []any
+	}{
+		{"encoded_string", stringContent},
+		{"raw_png", rawContent},
+	} {
+		b.Run(tc.name, func(b *testing.B) {
+			messages := []any{map[string]any{"role": "user", "content": tc.content}}
+			b.SetBytes(int64(len(encoded) * len(encoded[0])))
+			b.ReportAllocs()
+			for range b.N {
+				benchmarkHistoryImageSHA = historyImageSha8(messages)
+			}
+		})
 	}
 }
 
