@@ -812,6 +812,7 @@ type responsesMixedUnit struct {
 type renderedUnits struct {
 	Source       string
 	RenderedText string
+	Reflowed     bool
 	Images       []*render.RenderedImage
 }
 
@@ -828,19 +829,58 @@ func joinTextPrefixes(texts []string) (string, []int) {
 	return strings.Join(texts, "\n\n"), ends
 }
 
+func reflowedTextPrefixes(source string, sourceEnds []int, sourceOffset int) (string, []int, bool) {
+	if strings.Contains(source, render.NLSentinel) || strings.Contains(source, "\t") || render.MinifyForRender(source) != source {
+		return "", nil, false
+	}
+	packed := strings.ReplaceAll(source, "\n", render.NLSentinel)
+	packedEnds := make([]int, len(sourceEnds))
+	previousEnd := 0
+	newlines := 0
+	for i, absoluteEnd := range sourceEnds {
+		end := absoluteEnd - sourceOffset
+		newlines += strings.Count(source[previousEnd:end], "\n")
+		packedEnds[i] = end + newlines*(len(render.NLSentinel)-1)
+		previousEnd = end
+	}
+	return packed, packedEnds, true
+}
+
+func prepareUnitTextPrefix(source string, sourceEnd int, packed string, packedEnds []int, count int, o gptHistoryOptions) renderedUnits {
+	if packedEnds != nil {
+		return renderedUnits{Source: source[:sourceEnd], RenderedText: packed[:packedEnds[count-1]], Reflowed: true}
+	}
+	return prepareUnitText(source[:sourceEnd], o)
+}
+
 func prepareUnitText(source string, o gptHistoryOptions) renderedUnits {
 	safe := render.NeutralizeSentinel(source)
 	renderedText := safe
+	reflowed := false
 	if o.Reflow {
 		if packed, ok := render.Reflow(safe); ok {
 			renderedText = packed
+			reflowed = true
 		}
 	}
-	return renderedUnits{Source: source, RenderedText: renderedText}
+	return renderedUnits{Source: source, RenderedText: renderedText, Reflowed: reflowed}
+}
+
+func (u *renderedUnits) fits(o gptHistoryOptions, maxPages int) bool {
+	if u.Reflowed {
+		return render.FitsReflowedTextPages(u.RenderedText, o.Cols, o.Style, o.MaxHeightPx, maxPages)
+	}
+	return render.FitsTextPages(u.RenderedText, o.Cols, o.Style, o.MaxHeightPx, maxPages)
 }
 
 func (u *renderedUnits) render(o gptHistoryOptions) error {
-	images, err := render.RenderTextToPngs(u.RenderedText, o.Cols, o.Style, o.MaxHeightPx, nil)
+	var images []*render.RenderedImage
+	var err error
+	if u.Reflowed {
+		images, err = render.RenderReflowedTextToPngs(u.RenderedText, o.Cols, o.Style, o.MaxHeightPx)
+	} else {
+		images, err = render.RenderTextToPngs(u.RenderedText, o.Cols, o.Style, o.MaxHeightPx, nil)
+	}
 	u.Images = images
 	return err
 }
@@ -989,13 +1029,19 @@ func planResponsesMixedCollapse(items []any, old []responsesCompletedRound, stat
 		if runStart > 0 {
 			sourceStart = allTextEnds[runStart-1] + 2
 		}
+		source := allText[sourceStart:allTextEnds[unitCursor-1]]
+		var packed string
+		var packedEnds []int
+		if o.Reflow {
+			packed, packedEnds, _ = reflowedTextPrefixes(source, allTextEnds[runStart:unitCursor], sourceStart)
+		}
 		low, high := 0, len(run)+1
 		var best renderedUnits
 		for low+1 < high {
 			count := (low + high) / 2
-			planned := prepareUnitText(allText[sourceStart:allTextEnds[runStart+count-1]], o)
-			imageCount := render.CountTextPages(planned.RenderedText, o.Cols, o.Style, o.MaxHeightPx)
-			if imageCount > 0 && imageCount <= remainingImages {
+			prefixEnd := allTextEnds[runStart+count-1] - sourceStart
+			planned := prepareUnitTextPrefix(source, prefixEnd, packed, packedEnds, count, o)
+			if planned.fits(o, remainingImages) {
 				low = count
 				best = planned
 			} else {
@@ -1147,6 +1193,10 @@ func planResponsesPairCollapse(items []any, isProfitable gptProfitableFn, o gptH
 		base.CollapsedChars = u16len(allText)
 		return base, nil
 	}
+	allTextEnds := make([]int, len(old))
+	for i := range old {
+		allTextEnds[i] = old[i].textEnd
+	}
 
 	var runs [][]responsesCompletedRound
 	for _, round := range old {
@@ -1173,15 +1223,21 @@ func planResponsesPairCollapse(items []any, isProfitable gptProfitableFn, o gptH
 		}
 		sourceStart := 0
 		if runStart > 0 {
-			sourceStart = old[runStart-1].textEnd + 2
+			sourceStart = allTextEnds[runStart-1] + 2
+		}
+		source := allText[sourceStart:allTextEnds[roundCursor-1]]
+		var packed string
+		var packedEnds []int
+		if o.Reflow {
+			packed, packedEnds, _ = reflowedTextPrefixes(source, allTextEnds[runStart:roundCursor], sourceStart)
 		}
 		low, high := 0, len(run)+1
 		var best renderedUnits
 		for low+1 < high {
 			count := (low + high) / 2
-			planned := prepareUnitText(allText[sourceStart:old[runStart+count-1].textEnd], o)
-			imageCount := render.CountTextPages(planned.RenderedText, o.Cols, o.Style, o.MaxHeightPx)
-			if imageCount > 0 && imageCount <= remainingImages {
+			prefixEnd := allTextEnds[runStart+count-1] - sourceStart
+			planned := prepareUnitTextPrefix(source, prefixEnd, packed, packedEnds, count, o)
+			if planned.fits(o, remainingImages) {
 				low = count
 				best = planned
 			} else {

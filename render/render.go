@@ -471,6 +471,28 @@ func WrapLines(text string, cols, markerScale int, font string) []string {
 	return out
 }
 
+func wrapReflowedLines(text string, cols, markerScale int, font string) []string {
+	raw := EscapeMissingGlyphs(text)
+	if len(raw) == 0 {
+		return []string{""}
+	}
+	var out []string
+	selected := atlasSet(font)
+	start := 0
+	curCols := 0
+	for i, r := range raw {
+		w := cellsFor(r, markerScale, selected)
+		if curCols+w > cols {
+			out = append(out, raw[start:i])
+			start = i
+			curCols = w
+		} else {
+			curCols += w
+		}
+	}
+	return append(out, raw[start:])
+}
+
 // utf16Len counts UTF-16 code units, matching TS String.prototype.length.
 func utf16Len(s string) int {
 	n := 0
@@ -538,10 +560,119 @@ func textPages(text string, cols, maxCharsPerImage int, style RenderStyle, maxHe
 	return splitWrappedLinesIntoReadablePages(lines, min(hardLinesPerImg, byChars), maxCharsPerImage)
 }
 
+func reflowedTextPages(text string, cols, maxCharsPerImage int, style RenderStyle, maxHeightPx int) [][]string {
+	markerScale := style.MarkerScale
+	if markerScale < 1 {
+		markerScale = 1
+	}
+	lines := wrapReflowedLines(text, cols, markerScale, style.Font)
+	hardLinesPerImg := (maxHeightPx - 2*PadY) / RenderCellHeight(style)
+	if hardLinesPerImg < 1 {
+		hardLinesPerImg = 1
+	}
+	byChars := maxCharsPerImage / cols
+	if byChars < 1 {
+		byChars = 1
+	}
+	return splitWrappedLinesIntoReadablePages(lines, min(hardLinesPerImg, byChars), maxCharsPerImage)
+}
+
+type textPageCounter struct {
+	pages, lines, chars int
+	maxLines, maxChars  int
+	stopAfter           int
+}
+
+func (c *textPageCounter) addLine(chars int) bool {
+	nextChars := chars
+	if c.lines > 0 {
+		nextChars++
+	}
+	if c.lines > 0 && (c.lines >= c.maxLines || c.chars+nextChars > c.maxChars) {
+		c.pages++
+		if c.stopAfter > 0 && c.pages >= c.stopAfter {
+			return false
+		}
+		c.lines = 0
+		c.chars = 0
+		nextChars = chars
+	}
+	c.lines++
+	c.chars += nextChars
+	return true
+}
+
+func countTextPages(text string, cols, maxCharsPerImage int, style RenderStyle, maxHeightPx, stopAfter int, reflowed bool) int {
+	markerScale := style.MarkerScale
+	if markerScale < 1 {
+		markerScale = 1
+	}
+	hardLinesPerImg := (maxHeightPx - 2*PadY) / RenderCellHeight(style)
+	if hardLinesPerImg < 1 {
+		hardLinesPerImg = 1
+	}
+	byChars := maxCharsPerImage / cols
+	if byChars < 1 {
+		byChars = 1
+	}
+	counter := textPageCounter{
+		maxLines:  min(hardLinesPerImg, byChars),
+		maxChars:  max(1, maxCharsPerImage),
+		stopAfter: stopAfter,
+	}
+	selected := atlasSet(style.Font)
+	countLine := func(raw string) bool {
+		if len(raw) == 0 {
+			return counter.addLine(0)
+		}
+		lineCols := 0
+		lineChars := 0
+		for _, r := range raw {
+			w := cellsFor(r, markerScale, selected)
+			if lineCols+w > cols {
+				if !counter.addLine(lineChars) {
+					return false
+				}
+				lineCols = w
+				lineChars = 0
+			} else {
+				lineCols += w
+			}
+			lineChars++
+			if r >= 0x10000 {
+				lineChars++
+			}
+		}
+		return counter.addLine(lineChars)
+	}
+	if reflowed {
+		if !countLine(EscapeMissingGlyphs(text)) {
+			return stopAfter + 1
+		}
+	} else {
+		for rawWithTabs := range strings.SplitSeq(MinifyForRender(text), "\n") {
+			if !countLine(EscapeMissingGlyphs(ExpandTabsInLine(rawWithTabs))) {
+				return stopAfter + 1
+			}
+		}
+	}
+	return counter.pages + 1
+}
+
 // CountTextPages returns the exact number of pages RenderTextToPngs would
 // produce without rasterizing or encoding them.
 func CountTextPages(text string, cols int, style RenderStyle, maxHeightPx int) int {
-	return len(textPages(text, cols, ReadableCharsPerImage, style, maxHeightPx))
+	return countTextPages(text, cols, ReadableCharsPerImage, style, maxHeightPx, 0, false)
+}
+
+// FitsTextPages reports whether the exact render fits within maxPages.
+func FitsTextPages(text string, cols int, style RenderStyle, maxHeightPx, maxPages int) bool {
+	return maxPages > 0 && countTextPages(text, cols, ReadableCharsPerImage, style, maxHeightPx, maxPages, false) <= maxPages
+}
+
+// FitsReflowedTextPages is FitsTextPages for output already produced by Reflow.
+func FitsReflowedTextPages(text string, cols int, style RenderStyle, maxHeightPx, maxPages int) bool {
+	return maxPages > 0 && countTextPages(text, cols, ReadableCharsPerImage, style, maxHeightPx, maxPages, true) <= maxPages
 }
 
 func fbSet(fb []byte, idx int, v byte) {
@@ -1098,7 +1229,7 @@ func RenderTextToPngsReflow(text string, cols int, style RenderStyle) ([]*Render
 
 // RenderTextToPngsWithCharLimit splits text into pages each ≤ maxHeightPx
 // tall, respecting the per-image char budget.
-func RenderTextToPngsWithCharLimit(text string, cols, maxCharsPerImage int, style RenderStyle, maxHeightPx int, slotText *string) ([]*RenderedImage, error) {
+func renderTextToPngsWithCharLimit(text string, cols, maxCharsPerImage int, style RenderStyle, maxHeightPx int, slotText *string, reflowed bool) ([]*RenderedImage, error) {
 	markerScale := style.MarkerScale
 	if markerScale < 1 {
 		markerScale = 1
@@ -1107,7 +1238,12 @@ func RenderTextToPngsWithCharLimit(text string, cols, maxCharsPerImage int, styl
 	if style.ColorByRole && slotText != nil {
 		slotLines = WrapLines(*slotText, cols, markerScale, style.Font)
 	}
-	pages := textPages(text, cols, maxCharsPerImage, style, maxHeightPx)
+	var pages [][]string
+	if reflowed {
+		pages = reflowedTextPages(text, cols, maxCharsPerImage, style, maxHeightPx)
+	} else {
+		pages = textPages(text, cols, maxCharsPerImage, style, maxHeightPx)
+	}
 	var pageSlotLines [][]string
 	if slotLines != nil {
 		pageSlotLines = make([][]string, len(pages))
@@ -1168,6 +1304,15 @@ func RenderTextToPngsWithCharLimit(text string, cols, maxCharsPerImage int, styl
 		}
 	}
 	return images, nil
+}
+
+func RenderTextToPngsWithCharLimit(text string, cols, maxCharsPerImage int, style RenderStyle, maxHeightPx int, slotText *string) ([]*RenderedImage, error) {
+	return renderTextToPngsWithCharLimit(text, cols, maxCharsPerImage, style, maxHeightPx, slotText, false)
+}
+
+// RenderReflowedTextToPngs renders output already produced by Reflow.
+func RenderReflowedTextToPngs(text string, cols int, style RenderStyle, maxHeightPx int) ([]*RenderedImage, error) {
+	return renderTextToPngsWithCharLimit(text, cols, ReadableCharsPerImage, style, maxHeightPx, nil, true)
 }
 
 func RenderTextToPngs(text string, cols int, style RenderStyle, maxHeightPx int, slotText *string) ([]*RenderedImage, error) {
