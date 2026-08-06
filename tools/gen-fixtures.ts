@@ -1,11 +1,11 @@
 /**
  * Golden fixture generator for the Go port.
  *
- * Runs the TS reference implementation (../pxpipe) and dumps inputs/outputs
- * under ../pxpipe-go/testdata so the Go tests can diff against them.
+ * Runs the TS reference implementation from the pxpipe submodule and dumps
+ * inputs/outputs under testdata so the Go tests can diff against them.
  *
- * Run from the pxpipe (TS) repo root:
- *   pnpm exec tsx ../pxpipe-go/tools/gen-fixtures.ts
+ * Run from the pxpipe submodule root:
+ *   pnpm exec tsx ../tools/gen-fixtures.ts
  *
  * PNG bytes are NOT expected to match byte-for-byte (different deflate
  * implementations); the Go tests decode both sides and compare pixels.
@@ -14,9 +14,9 @@ import { mkdirSync, writeFileSync, rmSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-import { renderTextToImages, type RenderTextToImagesOptions } from '../../pxpipe/src/core/library.js';
-import { transformRequest, type TransformOptions } from '../../pxpipe/src/core/transform.js';
-import { synthesizeText, PRODUCTION_SLAB_161K, BELOW_MIN_CHARS_TINY } from '../../pxpipe/tests/fixtures/real-shapes.js';
+import { renderTextToImages, type RenderTextToImagesOptions } from '../pxpipe/src/core/library.js';
+import { transformRequest, type TransformOptions } from '../pxpipe/src/core/transform.js';
+import { synthesizeText, PRODUCTION_SLAB_161K, BELOW_MIN_CHARS_TINY } from '../pxpipe/tests/fixtures/real-shapes.js';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..', 'testdata');
 
