@@ -96,10 +96,14 @@ func BenchmarkFactSheetPatterns(b *testing.B) {
 	if err != nil {
 		b.Fatal(err)
 	}
-	var chunks []string
+	type factSheetBenchChunk struct {
+		text     string
+		features fsFeature
+	}
+	var chunks []factSheetBenchChunk
 	for _, chunk := range strings.FieldsFunc(string(input), isJSSpace) {
 		if n := u16len(chunk); n >= fsMinLen && n <= fsMaxChunk {
-			chunks = append(chunks, chunk)
+			chunks = append(chunks, factSheetBenchChunk{chunk, factSheetFeatures(chunk)})
 		}
 	}
 	for i, pattern := range fsPatterns {
@@ -108,9 +112,12 @@ func BenchmarkFactSheetPatterns(b *testing.B) {
 			matches := 0
 			for range b.N {
 				for _, chunk := range chunks {
+					if chunk.features&pattern.required != pattern.required {
+						continue
+					}
 					if pattern.scan != nil {
 						for from := 0; ; {
-							_, end := pattern.scan(chunk, from)
+							_, end := pattern.scan(chunk.text, from)
 							if end < 0 {
 								break
 							}
@@ -119,7 +126,7 @@ func BenchmarkFactSheetPatterns(b *testing.B) {
 						}
 						continue
 					}
-					matches += len(pattern.re.FindAllStringSubmatchIndex(chunk, -1))
+					matches += len(pattern.re.FindAllStringSubmatchIndex(chunk.text, -1))
 				}
 			}
 			factSheetPatternMatches = matches

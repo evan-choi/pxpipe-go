@@ -25,6 +25,17 @@ func TestFactSheetScannersMatchRegex(t *testing.T) {
 			},
 		},
 		{
+			name: "currency",
+			re:   regexp.MustCompile(`(?:[$€£¥]|(?:USD|EUR|GBP|CAD|AUD|CHF|JPY))\d(?:[\d,_]*\d)?(?:\.\d{2})?\b`),
+			scan: nextFactSheetCurrency,
+			inputs: []string{
+				"", "$1", "$12", "$1,234", "$1,234.56", "$1,234.5",
+				"$1,234.567", "$1,234x", "$1,234x.56", "USD1", "abcUSD1",
+				"CHF9_999.00", "€42", "£1,", "¥1__2", "CAD1_", "AUD1,234x",
+				"USD1.23x", "USD1.23-", "USD1.23_", "US1", "USDx", "€x", "USD1 EUR2",
+			},
+		},
+		{
 			name: "large-number",
 			re:   regexp.MustCompile(`\b\d[\d,_]{3,}\b`),
 			scan: nextFactSheetLargeNumber,

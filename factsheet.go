@@ -45,7 +45,7 @@ var fsPatterns = []fsPattern{
 	{re: regexp.MustCompile("\\b[A-Za-z0-9.!#$%&'*+/=?^_`{|}~-]+@[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?(?:\\.[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?)+\\b"), required: fsHasAt | fsHasDot},
 	{re: regexp.MustCompile(`\b[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}\b`), required: fsHasDash},
 	{re: regexp.MustCompile(`\b[A-Z]{2}\d{2}[A-Z0-9]{8,30}\b`), required: fsHasUpper | fsHasDigit},
-	{re: regexp.MustCompile(`(?:[$€£¥]|(?:USD|EUR|GBP|CAD|AUD|CHF|JPY))\d(?:[\d,_]*\d)?(?:\.\d{2})?\b`), required: fsHasDigit},
+	{scan: nextFactSheetCurrency, required: fsHasDigit},
 	{re: regexp.MustCompile(`(?:[\w@~+-]+)?(?:/[\w.@+-]+)+\.[A-Za-z]\w{0,8}\b`), required: fsHasSlash | fsHasDot},
 	{re: regexp.MustCompile(`/[\w.@+-]+(?:/[\w.@+-]+)+/?`), required: fsHasSlash},
 	// git sha / long hex: JS `(?=[0-9a-f]*\d)` emulated via verify.
@@ -93,6 +93,62 @@ func nextFactSheetAssignment(s string, from int) (int, int) {
 			end++
 		}
 		return i, end
+	}
+	return -1, -1
+}
+
+func factSheetCurrencyMarkerLen(s string, i int) int {
+	switch s[i] {
+	case '$':
+		return 1
+	case 0xc2:
+		if i+1 < len(s) && (s[i+1] == 0xa3 || s[i+1] == 0xa5) { // £, ¥
+			return 2
+		}
+	case 0xe2:
+		if i+2 < len(s) && s[i+1] == 0x82 && s[i+2] == 0xac { // €
+			return 3
+		}
+	}
+	if i+3 > len(s) {
+		return 0
+	}
+	switch s[i : i+3] {
+	case "USD", "EUR", "GBP", "CAD", "AUD", "CHF", "JPY":
+		return 3
+	}
+	return 0
+}
+
+func nextFactSheetCurrency(s string, from int) (int, int) {
+	for i := from; i < len(s); i++ {
+		markerLen := factSheetCurrencyMarkerLen(s, i)
+		digitStart := i + markerLen
+		if markerLen == 0 || digitStart == len(s) || s[digitStart] < '0' || s[digitStart] > '9' {
+			continue
+		}
+		runEnd := digitStart + 1
+		for runEnd < len(s) {
+			c := s[runEnd]
+			if c < '0' || c > '9' {
+				if c != ',' && c != '_' {
+					break
+				}
+			}
+			runEnd++
+		}
+		for end := runEnd; end > digitStart; end-- {
+			if s[end-1] < '0' || s[end-1] > '9' || end < len(s) && isFactSheetASCIIWord(s[end]) {
+				continue
+			}
+			decimalEnd := end + 3
+			if decimalEnd <= len(s) && s[end] == '.' &&
+				s[end+1] >= '0' && s[end+1] <= '9' && s[end+2] >= '0' && s[end+2] <= '9' &&
+				(decimalEnd == len(s) || !isFactSheetASCIIWord(s[decimalEnd])) {
+				return i, decimalEnd
+			}
+			return i, end
+		}
 	}
 	return -1, -1
 }
