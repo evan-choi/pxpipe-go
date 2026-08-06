@@ -24,7 +24,7 @@ func reliabilityTestHandler(t *testing.T, upstream string, options HandlerOption
 	if err != nil {
 		t.Fatal(err)
 	}
-	options.Upstream = u
+	options.AnthropicUpstream = u
 	options.OpenAIUpstream = u
 	return NewHandler(options)
 }

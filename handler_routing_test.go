@@ -51,13 +51,50 @@ func requestRoute(t *testing.T, client *http.Client, target string, headers http
 	return <-seen
 }
 
+func TestHandlerAnthropicUpstreamResolution(t *testing.T) {
+	defaultHandler := NewHandler(HandlerOptions{}).(*handler)
+	if got := defaultHandler.opts.AnthropicUpstream.String(); got != "https://api.anthropic.com" {
+		t.Fatalf("default AnthropicUpstream = %q", got)
+	}
+
+	seen := make(chan routeObservation, 1)
+	legacy, legacyURL := routeUpstream(t, "legacy", seen)
+	defer legacy.Close()
+	canonical, canonicalURL := routeUpstream(t, "canonical", seen)
+	defer canonical.Close()
+	tests := []struct {
+		name    string
+		options HandlerOptions
+		want    string
+	}{
+		{name: "legacy fallback", options: HandlerOptions{Upstream: legacyURL}, want: "legacy"},
+		{
+			name: "canonical precedence",
+			options: HandlerOptions{
+				AnthropicUpstream: canonicalURL,
+				Upstream:          legacyURL,
+			},
+			want: "canonical",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			proxy := httptest.NewServer(NewHandler(tt.options))
+			defer proxy.Close()
+			if got := requestRoute(t, proxy.Client(), proxy.URL+"/v1/messages", nil, seen); got.provider != tt.want {
+				t.Fatalf("provider = %q, want %q", got.provider, tt.want)
+			}
+		})
+	}
+}
+
 func TestHandlerRoutesProviderUpstreams(t *testing.T) {
 	seen := make(chan routeObservation, 1)
 	anthropic, anthropicURL := routeUpstream(t, "anthropic", seen)
 	defer anthropic.Close()
 	openAI, openAIURL := routeUpstream(t, "openai", seen)
 	defer openAI.Close()
-	proxy := httptest.NewServer(NewHandler(HandlerOptions{Upstream: anthropicURL, OpenAIUpstream: openAIURL}))
+	proxy := httptest.NewServer(NewHandler(HandlerOptions{AnthropicUpstream: anthropicURL, OpenAIUpstream: openAIURL}))
 	defer proxy.Close()
 
 	tests := []struct {
@@ -107,7 +144,7 @@ func TestHandlerRoutesModelsByAuthStyle(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			proxy := httptest.NewServer(NewHandler(HandlerOptions{
-				Upstream: anthropicURL, OpenAIUpstream: openAIURL, OpenAIAPIKey: tt.openAIKey,
+				AnthropicUpstream: anthropicURL, OpenAIUpstream: openAIURL, OpenAIAPIKey: tt.openAIKey,
 			}))
 			defer proxy.Close()
 			got := requestRoute(t, proxy.Client(), proxy.URL+"/v1/models", tt.headers, seen)
@@ -126,9 +163,9 @@ func TestHandlerAppliesProviderCredentials(t *testing.T) {
 	defer openAI.Close()
 	authCalls := 0
 	proxy := httptest.NewServer(NewHandler(HandlerOptions{
-		Upstream:       anthropicURL,
-		OpenAIUpstream: openAIURL,
-		APIKey:         "anthropic-key",
+		AnthropicUpstream: anthropicURL,
+		OpenAIUpstream:    openAIURL,
+		APIKey:            "anthropic-key",
 		AuthTokenFunc: func() string {
 			authCalls++
 			return "anthropic-token-" + strconv.Itoa(authCalls)
@@ -176,7 +213,7 @@ func TestHandlerRewritesCustomProtocolPath(t *testing.T) {
 	openAI, openAIURL := routeUpstream(t, "openai", seen)
 	defer openAI.Close()
 	proxy := httptest.NewServer(NewHandler(HandlerOptions{
-		Upstream: anthropicURL, OpenAIUpstream: openAIURL,
+		AnthropicUpstream: anthropicURL, OpenAIUpstream: openAIURL,
 		ProtocolOf: func(path string) Protocol {
 			if path == "/custom/chat" {
 				return ProtocolOpenAIChat

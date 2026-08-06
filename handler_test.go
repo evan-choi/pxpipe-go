@@ -30,7 +30,7 @@ func newTestHandler(t *testing.T, upstream string, opts *TransformOptions) http.
 	if err != nil {
 		t.Fatal(err)
 	}
-	return NewHandler(HandlerOptions{Upstream: u, Transform: opts})
+	return NewHandler(HandlerOptions{AnthropicUpstream: u, Transform: opts})
 }
 
 func TestHandlerTransformsMessagesRoute(t *testing.T) {
@@ -45,8 +45,8 @@ func TestHandlerTransformsMessagesRoute(t *testing.T) {
 	var applied *TransformResult
 	u, _ := url.Parse(up.URL)
 	h := NewHandler(HandlerOptions{
-		Upstream: u,
-		OnResult: func(_ *http.Request, res *TransformResult) { applied = res },
+		AnthropicUpstream: u,
+		OnResult:          func(_ *http.Request, res *TransformResult) { applied = res },
 	})
 	srv := httptest.NewServer(h)
 	defer srv.Close()
@@ -164,9 +164,9 @@ func TestHandlerTransformsOpenAIRoutes(t *testing.T) {
 			var applied *TransformResult
 			u, _ := url.Parse(up.URL)
 			h := NewHandler(HandlerOptions{
-				Upstream:       u,
-				OpenAIUpstream: u,
-				OnResult:       func(_ *http.Request, res *TransformResult) { applied = res },
+				AnthropicUpstream: u,
+				OpenAIUpstream:    u,
+				OnResult:          func(_ *http.Request, res *TransformResult) { applied = res },
 			})
 			srv := httptest.NewServer(h)
 			defer srv.Close()
@@ -199,9 +199,9 @@ func TestHandlerOpenAIUnsupportedModelPassesThrough(t *testing.T) {
 	var applied *TransformResult
 	u, _ := url.Parse(up.URL)
 	h := NewHandler(HandlerOptions{
-		Upstream:       u,
-		OpenAIUpstream: u,
-		OnResult:       func(_ *http.Request, res *TransformResult) { applied = res },
+		AnthropicUpstream: u,
+		OpenAIUpstream:    u,
+		OnResult:          func(_ *http.Request, res *TransformResult) { applied = res },
 	})
 	srv := httptest.NewServer(h)
 	defer srv.Close()
@@ -230,8 +230,8 @@ func TestHandlerCustomProtocolOf(t *testing.T) {
 	var applied *TransformResult
 	u, _ := url.Parse(up.URL)
 	h := NewHandler(HandlerOptions{
-		Upstream: u,
-		OnResult: func(_ *http.Request, res *TransformResult) { applied = res },
+		AnthropicUpstream: u,
+		OnResult:          func(_ *http.Request, res *TransformResult) { applied = res },
 		ProtocolOf: func(path string) Protocol {
 			if path == "/api/llm/claude" {
 				return ProtocolAnthropicMessages
@@ -297,8 +297,8 @@ func TestHandlerOversizedBodyPassesThroughUnchanged(t *testing.T) {
 			u, _ := url.Parse(up.URL)
 			called := false
 			srv := httptest.NewServer(NewHandler(HandlerOptions{
-				Upstream:     u,
-				MaxBodyBytes: 32,
+				AnthropicUpstream: u,
+				MaxBodyBytes:      32,
 				OnResult: func(_ *http.Request, _ *TransformResult) {
 					called = true
 				},
@@ -350,7 +350,7 @@ func TestHandlerBypassSkipsTransformAndStripsHeader(t *testing.T) {
 	u, _ := url.Parse(up.URL)
 	called := false
 	srv := httptest.NewServer(NewHandler(HandlerOptions{
-		Upstream: u,
+		AnthropicUpstream: u,
 		OnResult: func(_ *http.Request, _ *TransformResult) {
 			called = true
 		},
@@ -392,7 +392,7 @@ func TestHandlerFalseyBypassStillTransforms(t *testing.T) {
 	u, _ := url.Parse(up.URL)
 	var result *TransformResult
 	srv := httptest.NewServer(NewHandler(HandlerOptions{
-		Upstream: u,
+		AnthropicUpstream: u,
 		OnResult: func(_ *http.Request, got *TransformResult) {
 			result = got
 		},

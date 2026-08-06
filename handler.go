@@ -16,7 +16,10 @@ import (
 
 // HandlerOptions configures the embeddable reverse-proxy handler.
 type HandlerOptions struct {
-	// Upstream is the Anthropic API base. Default https://api.anthropic.com.
+	// AnthropicUpstream is the Anthropic API base. Default https://api.anthropic.com.
+	AnthropicUpstream *url.URL
+	// Upstream is the legacy Anthropic API base, used only when AnthropicUpstream is nil.
+	// Deprecated: use AnthropicUpstream.
 	Upstream *url.URL
 	// OpenAIUpstream is the OpenAI API base. Default https://api.openai.com.
 	OpenAIUpstream *url.URL
@@ -78,8 +81,11 @@ var passthroughPrefixes = []string{
 // configured provider upstream, rewriting POST bodies on supported Anthropic
 // and OpenAI routes. Responses (including SSE streams) pass through untouched.
 func NewHandler(opts HandlerOptions) http.Handler {
-	if opts.Upstream == nil {
-		opts.Upstream = &url.URL{Scheme: "https", Host: "api.anthropic.com"}
+	if opts.AnthropicUpstream == nil {
+		opts.AnthropicUpstream = opts.Upstream
+	}
+	if opts.AnthropicUpstream == nil {
+		opts.AnthropicUpstream = &url.URL{Scheme: "https", Host: "api.anthropic.com"}
 	}
 	if opts.OpenAIUpstream == nil {
 		opts.OpenAIUpstream = &url.URL{Scheme: "https", Host: "api.openai.com"}
@@ -101,7 +107,7 @@ func NewHandler(opts HandlerOptions) http.Handler {
 			}
 			providerPrefixed := isProviderPrefixedPath(originalPath)
 			openAI := !providerPrefixed && isCanonicalOpenAIPath(outPath, pr.In.Header, opts.OpenAIAPIKey != "")
-			target := opts.Upstream
+			target := opts.AnthropicUpstream
 			if openAI {
 				target = opts.OpenAIUpstream
 			}
