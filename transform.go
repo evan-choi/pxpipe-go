@@ -9,6 +9,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"unsafe"
 
 	"github.com/evan-choi/pxpipe-go/render"
 )
@@ -1031,17 +1032,32 @@ func cachePrefixDigest(req map[string]any) (string, int, bool) {
 	if boundary < 0 {
 		return "", 0, false
 	}
-	var parts []string
+	prefix := make([]byte, 0, 4096)
+	partCount := 0
+	appendString := func(s string) {
+		if partCount > 0 {
+			prefix = append(prefix, 0)
+		}
+		prefix = append(prefix, s...)
+		partCount++
+	}
+	appendValue := func(v any) {
+		if partCount > 0 {
+			prefix = append(prefix, 0)
+		}
+		prefix = appendJSValue(prefix, v)
+		partCount++
+	}
 	if tools, ok := asArr(req["tools"]); ok {
 		for _, t := range tools {
-			parts = append(parts, string(jsStringify(t)))
+			appendValue(t)
 		}
 	}
 	if s, ok := req["system"].(string); ok {
-		parts = append(parts, s)
+		appendString(s)
 	} else if arr, ok := asArr(req["system"]); ok {
 		for _, b := range arr {
-			parts = append(parts, string(jsStringify(b)))
+			appendValue(b)
 		}
 	}
 	for i := 0; i <= boundary; i++ {
@@ -1050,19 +1066,22 @@ func cachePrefixDigest(req map[string]any) (string, int, bool) {
 			continue
 		}
 		if s, ok := m["content"].(string); ok {
-			parts = append(parts, s)
+			appendString(s)
 		} else if arr, ok := asArr(m["content"]); ok {
 			for _, bv := range arr {
 				if s, ok := bv.(string); ok {
-					parts = append(parts, s)
+					appendString(s)
 				} else {
-					parts = append(parts, string(jsStringify(bv)))
+					appendValue(bv)
 				}
 			}
 		}
 	}
-	prefix := strings.Join(parts, "\x00")
-	return sha8(prefix), u16len(prefix), true
+	prefixText := ""
+	if len(prefix) > 0 {
+		prefixText = unsafe.String(unsafe.SliceData(prefix), len(prefix))
+	}
+	return sha8(prefixText), u16len(prefixText), true
 }
 
 func countOutgoingTextChars(req map[string]any) int {

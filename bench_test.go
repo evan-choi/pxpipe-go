@@ -11,6 +11,9 @@ import (
 )
 
 var factSheetPatternMatches int
+var benchmarkCachePrefixSHA string
+var benchmarkCachePrefixBytes int
+var benchmarkCachePrefixOK bool
 
 func BenchmarkTransformBigClaudeCode(b *testing.B) {
 	input, err := os.ReadFile(filepath.Join("testdata", "transform", "big-claude-code", "input.json"))
@@ -26,6 +29,29 @@ func BenchmarkTransformBigClaudeCode(b *testing.B) {
 		if !info.Compressed {
 			b.Fatal("expected compression")
 		}
+	}
+}
+
+func BenchmarkCachePrefixDigest(b *testing.B) {
+	input, err := os.ReadFile(filepath.Join("testdata", "transform", "big-claude-code", "input.json"))
+	if err != nil {
+		b.Fatal(err)
+	}
+	body, info := TransformRequest(input, &TransformOptions{Model: "claude-fable-5"})
+	if !info.Compressed {
+		b.Fatal("expected compression")
+	}
+	req, err := parseOrderedJSON(body)
+	if err != nil {
+		b.Fatal(err)
+	}
+	if _, _, ok := cachePrefixDigest(req); !ok {
+		b.Fatal("expected cache prefix")
+	}
+	b.ReportAllocs()
+	b.ResetTimer()
+	for range b.N {
+		benchmarkCachePrefixSHA, benchmarkCachePrefixBytes, benchmarkCachePrefixOK = cachePrefixDigest(req)
 	}
 }
 

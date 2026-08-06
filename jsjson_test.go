@@ -2,6 +2,7 @@ package pxpipe
 
 import (
 	"strconv"
+	"strings"
 	"testing"
 )
 
@@ -37,6 +38,39 @@ func TestJSStringifyObjectOrderAndExtras(t *testing.T) {
 	unordered := map[string]any{"second": 2, "first": 1}
 	if got, want := string(jsStringify(unordered)), `{"first":1,"second":2}`; got != want {
 		t.Fatalf("unordered jsStringify() = %s, want %s", got, want)
+	}
+}
+
+func TestCachePrefixDigestJoinsSerializedParts(t *testing.T) {
+	tool := map[string]any{"name": "lookup", "description": "도구"}
+	setObjKeyOrder(tool, []string{"name", "description"})
+	system := textBlock("시스템")
+	history := textBlock(HistorySyntheticIntro)
+	tail := textBlock("끝")
+	message := map[string]any{"role": "assistant", "content": []any{history, "raw", tail}}
+	setObjKeyOrder(message, []string{"role", "content"})
+	req := map[string]any{
+		"tools":    []any{tool},
+		"system":   []any{system},
+		"messages": []any{message, map[string]any{"role": "user", "content": "ignored"}},
+	}
+
+	prefix := strings.Join([]string{
+		string(jsStringify(tool)),
+		string(jsStringify(system)),
+		string(jsStringify(history)),
+		"raw",
+		string(jsStringify(tail)),
+	}, "\x00")
+	gotSHA, gotBytes, ok := cachePrefixDigest(req)
+	if !ok {
+		t.Fatal("cachePrefixDigest() did not find history boundary")
+	}
+	if want := sha8(prefix); gotSHA != want {
+		t.Fatalf("cachePrefixDigest() sha = %q, want %q", gotSHA, want)
+	}
+	if want := u16len(prefix); gotBytes != want {
+		t.Fatalf("cachePrefixDigest() bytes = %d, want %d", gotBytes, want)
 	}
 }
 
