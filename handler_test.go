@@ -164,8 +164,9 @@ func TestHandlerTransformsOpenAIRoutes(t *testing.T) {
 			var applied *TransformResult
 			u, _ := url.Parse(up.URL)
 			h := NewHandler(HandlerOptions{
-				Upstream: u,
-				OnResult: func(_ *http.Request, res *TransformResult) { applied = res },
+				Upstream:       u,
+				OpenAIUpstream: u,
+				OnResult:       func(_ *http.Request, res *TransformResult) { applied = res },
 			})
 			srv := httptest.NewServer(h)
 			defer srv.Close()
@@ -198,8 +199,9 @@ func TestHandlerOpenAIUnsupportedModelPassesThrough(t *testing.T) {
 	var applied *TransformResult
 	u, _ := url.Parse(up.URL)
 	h := NewHandler(HandlerOptions{
-		Upstream: u,
-		OnResult: func(_ *http.Request, res *TransformResult) { applied = res },
+		Upstream:       u,
+		OpenAIUpstream: u,
+		OnResult:       func(_ *http.Request, res *TransformResult) { applied = res },
 	})
 	srv := httptest.NewServer(h)
 	defer srv.Close()

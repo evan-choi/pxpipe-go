@@ -2,6 +2,7 @@ package pxpipe
 
 import (
 	"bytes"
+	"context"
 	"io"
 	"net/http"
 	"net/http/httputil"
@@ -16,6 +17,17 @@ import (
 type HandlerOptions struct {
 	// Upstream is the Anthropic API base. Default https://api.anthropic.com.
 	Upstream *url.URL
+	// OpenAIUpstream is the OpenAI API base. Default https://api.openai.com.
+	OpenAIUpstream *url.URL
+	// APIKey overrides or supplies the Anthropic x-api-key header.
+	APIKey string
+	// AuthToken overrides or supplies the Anthropic authorization bearer.
+	AuthToken string
+	// AuthTokenFunc resolves the Anthropic authorization bearer per request.
+	// When set, it takes precedence over AuthToken.
+	AuthTokenFunc func() string
+	// OpenAIAPIKey overrides or supplies the OpenAI authorization bearer.
+	OpenAIAPIKey string
 	// Transform supplies per-request transform options; Model is filled from
 	// the request body. Nil = defaults.
 	Transform *TransformOptions
@@ -31,6 +43,9 @@ type HandlerOptions struct {
 	// DefaultProtocolOf. Return ProtocolNone to pass a request through
 	// untransformed.
 	ProtocolOf func(path string) Protocol
+	// RewritePath optionally maps the outbound path after protocol detection and
+	// before upstream selection. It is useful with custom ProtocolOf routes.
+	RewritePath func(path string, protocol Protocol) string
 }
 
 const defaultMaxBodyBytes = 256 << 20
@@ -40,13 +55,24 @@ type handler struct {
 	proxy *httputil.ReverseProxy
 }
 
+type protocolContextKey struct{}
+
+var passthroughPrefixes = []string{
+	"/anthropic/",
+	"/openai/",
+	"/google-ai-studio/",
+	"/compat/",
+}
+
 // NewHandler returns an http.Handler that forwards everything to the
-// configured upstream, rewriting POST bodies on the Anthropic Messages routes
-// through TransformAnthropicMessages. Responses (including SSE streams) pass
-// through untouched.
+// configured provider upstream, rewriting POST bodies on supported Anthropic
+// and OpenAI routes. Responses (including SSE streams) pass through untouched.
 func NewHandler(opts HandlerOptions) http.Handler {
 	if opts.Upstream == nil {
 		opts.Upstream = &url.URL{Scheme: "https", Host: "api.anthropic.com"}
+	}
+	if opts.OpenAIUpstream == nil {
+		opts.OpenAIUpstream = &url.URL{Scheme: "https", Host: "api.openai.com"}
 	}
 	if opts.MaxBodyBytes <= 0 {
 		opts.MaxBodyBytes = defaultMaxBodyBytes
@@ -54,14 +80,75 @@ func NewHandler(opts HandlerOptions) http.Handler {
 	h := &handler{opts: opts}
 	h.proxy = &httputil.ReverseProxy{
 		Rewrite: func(pr *httputil.ProxyRequest) {
-			pr.SetURL(opts.Upstream)
-			pr.Out.Host = opts.Upstream.Host
+			protocol, _ := pr.In.Context().Value(protocolContextKey{}).(Protocol)
+			originalPath := pr.In.URL.Path
+			outPath := originalPath
+			if opts.RewritePath != nil {
+				outPath = opts.RewritePath(originalPath, protocol)
+				pr.Out.URL.Path = outPath
+				pr.Out.URL.RawPath = ""
+			}
+			providerPrefixed := isProviderPrefixedPath(originalPath)
+			openAI := !providerPrefixed && isCanonicalOpenAIPath(outPath, pr.In.Header, opts.OpenAIAPIKey != "")
+			target := opts.Upstream
+			if openAI {
+				target = opts.OpenAIUpstream
+			}
+			pr.SetURL(target)
+			pr.Out.Host = target.Host
+			if openAI {
+				pr.Out.Header.Del("X-Api-Key")
+				for name := range pr.Out.Header {
+					if strings.HasPrefix(strings.ToLower(name), "anthropic-") {
+						pr.Out.Header.Del(name)
+					}
+				}
+				if opts.OpenAIAPIKey != "" {
+					pr.Out.Header.Set("Authorization", "Bearer "+opts.OpenAIAPIKey)
+				}
+			} else if !providerPrefixed || strings.HasPrefix(originalPath, "/anthropic/") {
+				if opts.APIKey != "" {
+					pr.Out.Header.Set("X-Api-Key", opts.APIKey)
+				}
+				if token := resolveAuthToken(opts); token != "" {
+					pr.Out.Header.Set("Authorization", "Bearer "+token)
+				}
+			}
 		},
 		Transport: opts.Transport,
 		// Negative FlushInterval streams SSE tokens as they arrive.
 		FlushInterval: -1,
 	}
 	return h
+}
+
+func isProviderPrefixedPath(pathname string) bool {
+	for _, prefix := range passthroughPrefixes {
+		if strings.HasPrefix(pathname, prefix) {
+			return true
+		}
+	}
+	return false
+}
+
+func isCanonicalOpenAIPath(pathname string, headers http.Header, hasOpenAIKey bool) bool {
+	isModelsPath := pathname == "/v1/models" || strings.HasPrefix(pathname, "/v1/models/")
+	auth := strings.Fields(headers.Get("Authorization"))
+	bearerIsAnthropic := len(auth) >= 2 && strings.EqualFold(auth[0], "Bearer") &&
+		strings.HasPrefix(strings.ToLower(auth[1]), "sk-ant-")
+	looksOpenAIAuth := hasOpenAIKey ||
+		(len(headers.Values("Authorization")) > 0 && len(headers.Values("X-Api-Key")) == 0 && !bearerIsAnthropic)
+	return pathname == "/v1/chat/completions" ||
+		pathname == "/v1/responses" ||
+		strings.HasPrefix(pathname, "/v1/responses/") ||
+		(isModelsPath && looksOpenAIAuth)
+}
+
+func resolveAuthToken(opts HandlerOptions) string {
+	if opts.AuthTokenFunc != nil {
+		return opts.AuthTokenFunc()
+	}
+	return opts.AuthToken
 }
 
 func extractModel(body []byte) string {
@@ -146,6 +233,7 @@ func (h *handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		protocolOf = DefaultProtocolOf
 	}
 	surface := protocolOf(r.URL.Path)
+	r = r.WithContext(context.WithValue(r.Context(), protocolContextKey{}, surface))
 	bypassValue, hasBypass := r.Header[http.CanonicalHeaderKey("X-Pxpipe-Bypass")]
 	r.Header.Del("X-Pxpipe-Bypass")
 	bypass := hasBypass && len(bypassValue) > 0 &&
