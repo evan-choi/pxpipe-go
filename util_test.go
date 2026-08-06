@@ -4,7 +4,10 @@ import (
 	"bytes"
 	"encoding/base64"
 	"encoding/json"
+	"slices"
 	"testing"
+
+	"github.com/evan-choi/pxpipe-go/render"
 )
 
 func TestU16Slice(t *testing.T) {
@@ -40,6 +43,34 @@ func TestJoinTextPrefixes(t *testing.T) {
 	for i, end := range ends {
 		if got := source[:end]; got != want[i] {
 			t.Fatalf("prefix %d = %q, want %q", i, got, want[i])
+		}
+	}
+	cleanSource, cleanEnds := joinTextPrefixes([]string{"한글", "middle", "tail\n"})
+	packed, packedEnds, ok := reflowedTextPrefixes(cleanSource, cleanEnds, 0)
+	if !ok {
+		t.Fatal("expected reusable reflowed prefixes")
+	}
+	for i, end := range cleanEnds {
+		want, wantOK := render.Reflow(cleanSource[:end])
+		if !wantOK || packed[:packedEnds[i]] != want {
+			t.Fatalf("reflowed prefix %d = %q, want %q", i, packed[:packedEnds[i]], want)
+		}
+	}
+	const sourceOffset = 17
+	absoluteEnds := append([]int(nil), cleanEnds...)
+	for i := range absoluteEnds {
+		absoluteEnds[i] += sourceOffset
+	}
+	offsetPacked, offsetEnds, ok := reflowedTextPrefixes(cleanSource, absoluteEnds, sourceOffset)
+	if !ok || offsetPacked != packed || !slices.Equal(offsetEnds, packedEnds) {
+		t.Fatalf("offset prefixes = %q, %v, %v; want %q, %v, true", offsetPacked, offsetEnds, ok, packed, packedEnds)
+	}
+}
+
+func TestReflowedTextPrefixesFallback(t *testing.T) {
+	for _, text := range []string{"tab\there", "trailing ", "too\n\n\n\nmany", render.NLSentinel} {
+		if _, _, ok := reflowedTextPrefixes(text, []int{len(text)}, 0); ok {
+			t.Fatalf("reflowedTextPrefixes(%q) unexpectedly reusable", text)
 		}
 	}
 }

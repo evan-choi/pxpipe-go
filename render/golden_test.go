@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"image"
 	"image/png"
+	"math/rand"
 	"os"
 	"path/filepath"
 	"slices"
@@ -104,10 +105,95 @@ func TestCountTextPagesMatchesRender(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			if got := CountTextPages(tc.text, tc.cols, tc.style, tc.maxHeightPx); got != len(images) {
+			got := CountTextPages(tc.text, tc.cols, tc.style, tc.maxHeightPx)
+			if got != len(images) {
 				t.Fatalf("CountTextPages() = %d, rendered %d pages", got, len(images))
 			}
+			for limit := 0; limit <= got+1; limit++ {
+				if fits := FitsTextPages(tc.text, tc.cols, tc.style, tc.maxHeightPx, limit); fits != (limit > 0 && got <= limit) {
+					t.Fatalf("FitsTextPages(maxPages=%d) = %v, pages %d", limit, fits, got)
+				}
+			}
 		})
+	}
+}
+
+func TestReflowedPagePlanMatchesGeneric(t *testing.T) {
+	for _, source := range []string{
+		strings.Repeat("alpha\tbeta 한글\n", 80),
+		strings.Repeat("trailing   \n\n\n\nmissing 🫠 glyph\n", 80),
+	} {
+		text, ok := Reflow(source)
+		if !ok {
+			t.Fatal("expected reflow")
+		}
+		want, err := RenderTextToPngs(text, 24, DenseRenderStyle, 96, nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		got, err := RenderReflowedTextToPngs(text, 24, DenseRenderStyle, 96)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(got) != len(want) {
+			t.Fatalf("RenderReflowedTextToPngs() pages = %d, want %d", len(got), len(want))
+		}
+		for i := range want {
+			if !bytes.Equal(got[i].PNG, want[i].PNG) || got[i].Width != want[i].Width || got[i].Height != want[i].Height || got[i].CharsRendered != want[i].CharsRendered {
+				t.Fatalf("RenderReflowedTextToPngs() page %d differs", i)
+			}
+		}
+		for limit := 1; limit <= len(want)+1; limit++ {
+			if fits := FitsReflowedTextPages(text, 24, DenseRenderStyle, 96, limit); fits != (len(want) <= limit) {
+				t.Fatalf("FitsReflowedTextPages(maxPages=%d) = %v, pages %d", limit, fits, len(want))
+			}
+		}
+	}
+}
+
+func TestPageCountersMatchPlans(t *testing.T) {
+	rng := rand.New(rand.NewSource(1))
+	alphabet := []rune("ab 한글🫠\t\n")
+	for n := 0; n < 300; n++ {
+		runes := make([]rune, rng.Intn(400))
+		for i := range runes {
+			runes[i] = alphabet[rng.Intn(len(alphabet))]
+		}
+		text := string(runes)
+		cols := rng.Intn(40) + 1
+		maxChars := rng.Intn(200) + 1
+		maxHeightPx := rng.Intn(200) + 1
+		style := DenseRenderStyle
+		style.MarkerScale = rng.Intn(3) + 1
+
+		want := len(textPages(text, cols, maxChars, style, maxHeightPx))
+		if got := countTextPages(text, cols, maxChars, style, maxHeightPx, 0, false); got != want {
+			t.Fatalf("case %d: countTextPages() = %d, want %d", n, got, want)
+		}
+		for limit := 1; limit <= want+1; limit++ {
+			got := countTextPages(text, cols, maxChars, style, maxHeightPx, limit, false) <= limit
+			if got != (want <= limit) {
+				t.Fatalf("case %d: limited count(maxPages=%d) = %v, want %v", n, limit, got, want <= limit)
+			}
+		}
+
+		reflowed, ok := Reflow(text)
+		if !ok {
+			t.Fatalf("case %d: source unexpectedly rejected by Reflow", n)
+		}
+		generic := textPages(reflowed, cols, maxChars, style, maxHeightPx)
+		specialized := reflowedTextPages(reflowed, cols, maxChars, style, maxHeightPx)
+		if len(specialized) != len(generic) {
+			t.Fatalf("case %d: reflowed pages = %d, generic pages %d", n, len(specialized), len(generic))
+		}
+		for i := range generic {
+			if !slices.Equal(specialized[i], generic[i]) {
+				t.Fatalf("case %d page %d: reflowed plan = %q, generic plan %q", n, i, specialized[i], generic[i])
+			}
+		}
+		if got := countTextPages(reflowed, cols, maxChars, style, maxHeightPx, 0, true); got != len(generic) {
+			t.Fatalf("case %d: reflowed count = %d, want %d", n, got, len(generic))
+		}
 	}
 }
 
