@@ -1287,7 +1287,7 @@ func applyPins(req map[string]any, info *TransformInfo, pins []pin) {
 	}
 }
 
-func finalizeEarly(req map[string]any, info *TransformInfo, o *resolvedOptions, droppedCodepoints map[rune]int, pins []pin) ([]byte, bool, error) {
+func finalizeEarly(req map[string]any, bodyBytes int, info *TransformInfo, o *resolvedOptions, droppedCodepoints map[rune]int, pins []pin) ([]byte, bool, error) {
 	collapsed := false
 	if msgs, ok := asArr(req["messages"]); ok && len(msgs) > 0 {
 		protectedPrefix := 0
@@ -1302,7 +1302,7 @@ func finalizeEarly(req map[string]any, info *TransformInfo, o *resolvedOptions, 
 	}
 	applyPins(req, info, pins)
 	info.OutgoingTextChars = countOutgoingTextChars(req)
-	return jsStringify(req), collapsed, nil
+	return jsStringifyCap(req, openAIJSONCapacity(bodyBytes, info.ImageBytes)), collapsed, nil
 }
 
 const imageInstructionHeaderBase = "=================== SESSION CONFIGURATION PAGES ===================\n" +
@@ -1492,7 +1492,7 @@ func transformParsed(req map[string]any, body []byte, o *resolvedOptions, info *
 
 	if u16len(combined) < o.MinCompressChars {
 		info.Reason = "below_min_chars (" + strconv.Itoa(u16len(combined)) + " < " + strconv.Itoa(o.MinCompressChars) + ")"
-		finalBody, collapsed, err := finalizeEarly(req, info, o, droppedCodepoints, pins)
+		finalBody, collapsed, err := finalizeEarly(req, len(body), info, o, droppedCodepoints, pins)
 		if err != nil {
 			return nil, err
 		}
@@ -1530,7 +1530,7 @@ func transformParsed(req map[string]any, body []byte, o *resolvedOptions, info *
 	) {
 		info.Reason = "not_profitable (slab=" + strconv.Itoa(u16len(combined)) + " chars)"
 		bumpPassthrough(info, "not_profitable")
-		finalBody, collapsed, err := finalizeEarly(req, info, o, droppedCodepoints, pins)
+		finalBody, collapsed, err := finalizeEarly(req, len(body), info, o, droppedCodepoints, pins)
 		if err != nil {
 			return nil, err
 		}
@@ -1689,7 +1689,7 @@ func transformParsed(req map[string]any, body []byte, o *resolvedOptions, info *
 	}
 	applyPins(req, info, pins)
 	info.OutgoingTextChars = countOutgoingTextChars(req)
-	return jsStringify(req), nil
+	return jsStringifyCap(req, openAIJSONCapacity(len(body), info.ImageBytes)), nil
 }
 
 func compressToolResults(req map[string]any, o *resolvedOptions, info *TransformInfo, denseGeo gateGeometry, droppedCodepoints map[rune]int) error {
