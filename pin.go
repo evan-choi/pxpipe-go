@@ -77,9 +77,7 @@ func stripReminders(text string) string {
 
 func foldPins(messages []any, system any) []pin {
 	var pins []pin
-	for _, entry := range systemPinLines(system) {
-		applyPinLine(&pins, entry)
-	}
+	foldSystemPins(&pins, system)
 	for idx, mv := range messages {
 		m, ok := asMap(mv)
 		if !ok {
@@ -93,6 +91,26 @@ func foldPins(messages []any, system any) []pin {
 		}
 	}
 	return pins
+}
+
+func foldSystemPins(pins *[]pin, sys any) {
+	if sys == nil {
+		return
+	}
+	for _, bv := range contentBlocks(sys) {
+		blk, ok := asMap(bv)
+		if !ok || blockType(bv) != "text" {
+			continue
+		}
+		text, ok := getStr(blk, "text")
+		if !ok {
+			continue
+		}
+		path := filePathOf(text)
+		for line := range strings.SplitSeq(text, "\n") {
+			applyPinLine(pins, pinLine{line: line, source: pinSourceFile, path: path})
+		}
+	}
 }
 
 func applyPinLine(pins *[]pin, entry pinLine) {
@@ -225,28 +243,6 @@ func messagePinLines(m map[string]any, idx int) []pinLine {
 		leadingRun = false
 		for _, line := range strings.Split(text, "\n") {
 			out = append(out, pinLine{line: line, source: pinSourceSession})
-		}
-	}
-	return out
-}
-
-func systemPinLines(sys any) []pinLine {
-	if sys == nil {
-		return nil
-	}
-	var out []pinLine
-	for _, bv := range contentBlocks(sys) {
-		blk, ok := asMap(bv)
-		if !ok || blockType(bv) != "text" {
-			continue
-		}
-		text, ok := getStr(blk, "text")
-		if !ok {
-			continue
-		}
-		path := filePathOf(text)
-		for _, line := range strings.Split(text, "\n") {
-			out = append(out, pinLine{line: line, source: pinSourceFile, path: path})
 		}
 	}
 	return out
