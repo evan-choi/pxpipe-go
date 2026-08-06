@@ -17,6 +17,24 @@ const gptHistoryCols = 152
 // circular dependency with openai.go. baselineTextTokens < 0 means "unset".
 type gptProfitableFn func(text string, cols int, baselineTextTokens int) bool
 
+// GptHistoryOptions contains optional GPT history-collapse overrides.
+// Nil fields inherit the model profile or built-in defaults.
+type GptHistoryOptions struct {
+	KeepTail          *int
+	MaxImages         *int
+	KeepRecentPairs   *int
+	ResponsesMode     *string
+	MinCollapsePrefix *int
+	MinCollapseTokens *int
+	Cols              *int
+	CollapseChunk     *int
+	FreezeChunk       *int
+	SectionTokens     *int
+	MaxHeightPx       *int
+	Style             *render.RenderStyle
+	Reflow            *bool
+}
+
 type gptHistoryOptions struct {
 	KeepTail          int
 	MaxImages         int

@@ -70,6 +70,7 @@ type openaiResolvedOptions struct {
 	charsPerTokenSet bool
 	Reflow           bool
 	CollapseHistory  bool
+	GptHistory       *GptHistoryOptions
 	tokenCounts      gptTokenCounter
 }
 
@@ -119,6 +120,7 @@ func resolveOpenAIOpts(opts *TransformOptions) openaiResolvedOptions {
 	if opts.CollapseHistory != nil {
 		o.CollapseHistory = *opts.CollapseHistory
 	}
+	o.GptHistory = opts.GptHistory
 	return o
 }
 
@@ -137,15 +139,70 @@ func configuredHistoryMaxImages(model string) int {
 
 func gptHistoryOptsFor(model string, o openaiResolvedOptions, profile *GptModelProfile) gptHistoryOptions {
 	h := defaultGptHistoryOptions()
+	if overrides := o.GptHistory; overrides != nil {
+		if overrides.KeepTail != nil {
+			h.KeepTail = *overrides.KeepTail
+		}
+		if overrides.MaxImages != nil {
+			h.MaxImages = *overrides.MaxImages
+		}
+		if overrides.KeepRecentPairs != nil {
+			h.KeepRecentPairs = *overrides.KeepRecentPairs
+		}
+		if overrides.ResponsesMode != nil {
+			h.ResponsesMode = *overrides.ResponsesMode
+		}
+		if overrides.MinCollapsePrefix != nil {
+			h.MinCollapsePrefix = *overrides.MinCollapsePrefix
+		}
+		if overrides.MinCollapseTokens != nil {
+			h.MinCollapseTokens = *overrides.MinCollapseTokens
+		}
+		if overrides.Cols != nil {
+			h.Cols = *overrides.Cols
+		}
+		if overrides.CollapseChunk != nil {
+			h.CollapseChunk = *overrides.CollapseChunk
+		}
+		if overrides.FreezeChunk != nil {
+			h.FreezeChunk = *overrides.FreezeChunk
+		}
+		if overrides.SectionTokens != nil {
+			h.SectionTokens = *overrides.SectionTokens
+		}
+		if overrides.MaxHeightPx != nil {
+			h.MaxHeightPx = *overrides.MaxHeightPx
+		}
+		if overrides.Style != nil {
+			h.Style = *overrides.Style
+		}
+		if overrides.Reflow != nil {
+			h.Reflow = *overrides.Reflow
+		}
+	}
 	h.Reflow = o.Reflow
-	h.KeepTail = profile.History.KeepTail
-	h.KeepRecentPairs = profile.History.KeepRecentPairs
-	h.MinCollapseTokens = profile.History.MinCollapseTokens
+	if o.GptHistory == nil || o.GptHistory.KeepTail == nil {
+		h.KeepTail = profile.History.KeepTail
+	}
+	if o.GptHistory == nil || o.GptHistory.KeepRecentPairs == nil {
+		h.KeepRecentPairs = profile.History.KeepRecentPairs
+	}
+	if o.GptHistory == nil || o.GptHistory.MinCollapseTokens == nil {
+		h.MinCollapseTokens = profile.History.MinCollapseTokens
+	}
 	h.ResponsesMode = profile.History.ResponsesMode
-	h.Cols = profile.StripCols
-	h.MaxHeightPx = profile.MaxHeightPx
-	h.Style = profile.Style
-	h.MaxImages = configuredHistoryMaxImages(model)
+	if o.GptHistory == nil || o.GptHistory.Cols == nil {
+		h.Cols = profile.StripCols
+	}
+	if o.GptHistory == nil || o.GptHistory.MaxHeightPx == nil {
+		h.MaxHeightPx = profile.MaxHeightPx
+	}
+	if o.GptHistory == nil || o.GptHistory.Style == nil {
+		h.Style = profile.Style
+	}
+	if o.GptHistory == nil || o.GptHistory.MaxImages == nil {
+		h.MaxImages = configuredHistoryMaxImages(model)
+	}
 	h.tokenCounts = o.tokenCounts
 	return h
 }

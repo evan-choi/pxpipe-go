@@ -56,6 +56,8 @@ type TransformOptions struct {
 	EmitRecoverable            bool
 	// CollapseHistory gates GPT-path history imaging (default true).
 	CollapseHistory *bool
+	// GptHistory overrides GPT-path history-collapse tuning.
+	GptHistory *GptHistoryOptions
 }
 
 type resolvedOptions struct {
