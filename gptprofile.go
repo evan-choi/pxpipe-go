@@ -165,6 +165,19 @@ func flagshipGptProfile(v GptVisionCost) *GptModelProfile {
 	}
 }
 
+var (
+	gpt5NanoProfile  = miniNanoProfile(2.46, gpt5Pricing)
+	baseNanoProfile  = miniNanoProfile(2.46, basePricing)
+	gpt5MiniProfile  = miniNanoProfile(1.62, gpt5Pricing)
+	baseMiniProfile  = miniNanoProfile(1.62, basePricing)
+	gpt5PatchProfile = flagshipGptProfile(
+		GptVisionCost{Regime: "patch", Multiplier: 1, PatchCap: 10000},
+	)
+	gpt5TileProfile = flagshipGptProfile(
+		GptVisionCost{Regime: "tile", Base: 70, PerTile: 140},
+	)
+)
+
 var o13Profile = &GptModelProfile{
 	Vision:            GptVisionCost{Regime: "tile", Base: 75, PerTile: 150},
 	CacheReadRate:     basePricing.cacheReadRate,
@@ -264,21 +277,25 @@ func resolveGptBuiltin(m string) *GptModelProfile {
 	if isClaudeModel(m) {
 		return resolveClaudeGptProfile(m)
 	}
+	if isMiniNanoPatch(m) {
+		if strings.HasPrefix(m, "gpt-5") {
+			if strings.Contains(m, "nano") {
+				return gpt5NanoProfile
+			}
+			return gpt5MiniProfile
+		}
+		if strings.Contains(m, "nano") {
+			return baseNanoProfile
+		}
+		return baseMiniProfile
+	}
 	switch {
-	case isMiniNanoPatch(m) && strings.Contains(m, "nano") && strings.HasPrefix(m, "gpt-5"):
-		return miniNanoProfile(2.46, gpt5Pricing)
-	case isMiniNanoPatch(m) && strings.Contains(m, "nano"):
-		return miniNanoProfile(2.46, basePricing)
-	case isMiniNanoPatch(m) && strings.HasPrefix(m, "gpt-5"):
-		return miniNanoProfile(1.62, gpt5Pricing)
-	case isMiniNanoPatch(m):
-		return miniNanoProfile(1.62, basePricing)
 	case m == "gpt-5.6-sol" || strings.HasPrefix(m, "gpt-5.6-sol-"):
 		return gpt56SolProfile
 	case gpt5FlagshipRe.MatchString(m):
-		return flagshipGptProfile(GptVisionCost{Regime: "patch", Multiplier: 1, PatchCap: 10000})
+		return gpt5PatchProfile
 	case strings.HasPrefix(m, "gpt-5"):
-		return flagshipGptProfile(GptVisionCost{Regime: "tile", Base: 70, PerTile: 140})
+		return gpt5TileProfile
 	case o13Re.MatchString(m):
 		return o13Profile
 	case isGrokModel(m):
