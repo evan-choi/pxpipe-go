@@ -33,9 +33,11 @@ import (
 )
 
 func main() {
-    upstream, _ := url.Parse("https://api.anthropic.com")
+    anthropic, _ := url.Parse("https://api.anthropic.com")
+    openAI, _ := url.Parse("https://api.openai.com")
     h := pxpipe.NewHandler(pxpipe.HandlerOptions{
-        Upstream: upstream,
+        Upstream:       anthropic,
+        OpenAIUpstream: openAI,
         OnResult: func(r *http.Request, res *pxpipe.TransformResult) {
             log.Printf("%s applied=%v reason=%s images=%d",
                 r.URL.Path, res.Applied, res.Reason, res.Info.ImageCount)
@@ -51,11 +53,20 @@ Then point Claude Code at it:
 ANTHROPIC_BASE_URL=http://127.0.0.1:47821 claude
 ```
 
-`POST /v1/messages` (and `/anthropic/messages` variants),
-`POST /v1/chat/completions`, and `POST /v1/responses` (with one optional
-gateway/provider path segment, e.g. `/openai/v1/responses`) are rewritten;
-`count_tokens` and everything else — including SSE response streams — pass
-through untouched. Set `Upstream` to whichever provider the handler fronts.
+Canonical `/v1/messages` requests go to `Upstream`; canonical
+`/v1/chat/completions`, `/v1/responses`, and `/v1/responses/*` requests go to
+`OpenAIUpstream`. `/v1/models` uses the request's auth style to choose between
+them. Both upstreams have the public API defaults shown above.
+
+Provider-prefixed paths (`/anthropic/*`, `/openai/*`,
+`/google-ai-studio/*`, `/compat/*`) keep their full path and go to the generic
+`Upstream`, which lets an API gateway route them. Supported POST bodies are
+still transformed by wire shape; `count_tokens`, unknown routes, and all
+responses (including SSE) pass through unchanged.
+
+Set `APIKey` or `AuthToken`/`AuthTokenFunc` for Anthropic credentials and
+`OpenAIAPIKey` for OpenAI. Direct OpenAI requests never receive `x-api-key` or
+`anthropic-*` headers.
 
 ### Custom routes
 
@@ -65,7 +76,8 @@ Set `ProtocolOf` to map your own paths to wire protocols; return
 
 ```go
 h := pxpipe.NewHandler(pxpipe.HandlerOptions{
-    Upstream: upstream,
+    Upstream:       anthropic,
+    OpenAIUpstream: openAI,
     ProtocolOf: func(path string) pxpipe.Protocol {
         switch path {
         case "/api/llm/claude":
@@ -75,10 +87,24 @@ h := pxpipe.NewHandler(pxpipe.HandlerOptions{
         case "/api/llm/gpt/responses":
             return pxpipe.ProtocolOpenAIResponses
         }
-        return pxpipe.DefaultProtocolOf(strings.TrimPrefix(path, "/internal/ai-proxy"))
+        return pxpipe.DefaultProtocolOf(path)
+    },
+    RewritePath: func(path string, _ pxpipe.Protocol) string {
+        switch path {
+        case "/api/llm/claude":
+            return "/v1/messages"
+        case "/api/llm/gpt/chat":
+            return "/v1/chat/completions"
+        case "/api/llm/gpt/responses":
+            return "/v1/responses"
+        }
+        return path
     },
 })
 ```
+
+`ProtocolOf` chooses the request-body transform. `RewritePath` chooses the
+outbound API path, which also controls direct Anthropic/OpenAI routing.
 
 ## Use as a pure transform
 
@@ -105,12 +131,13 @@ Per-model GPT render/pricing profiles (gpt-5.x, o-series, Grok, …) resolve via
 `pxpipe.ResolveGptProfile`; unknown models can be declared without a code
 change through the `PXPIPE_GPT_PROFILES` env JSON, exactly as upstream.
 
-Or render arbitrary text to the same dense pages:
+Or render arbitrary text with the same model-specific geometry and style:
 
 ```go
-import "github.com/evan-choi/pxpipe-go/render"
-
-out, _ := render.RenderTextToImages(text, render.RenderOptions{Reflow: true})
+out, _ := pxpipe.RenderTextToImages(text, pxpipe.RenderOptions{
+    Model: "gpt-5.6-sol",
+    Reflow: true,
+})
 for _, page := range out.Pages { os.WriteFile("page.png", page.PNG, 0o644) }
 ```
 
