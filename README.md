@@ -233,7 +233,7 @@ Reproduce the comparison with:
 
 ```bash
 for benchmark_run in 1 2 3 4 5; do
-  (cd ../pxpipe && pnpm exec tsx ../pxpipe-go/tools/bench-ts.ts)
+  (cd pxpipe && pnpm exec tsx ../tools/bench-ts.ts)
 done
 
 go test -run '^$' \
@@ -248,8 +248,8 @@ compiler and `go` command:
 
 ```bash
 for benchmark_run in 1 2 3 4 5; do
-  (cd ../pxpipe &&
-    /usr/bin/time -l pnpm exec tsx ../pxpipe-go/tools/bench-ts.ts >/dev/null)
+  (cd pxpipe &&
+    /usr/bin/time -l pnpm exec tsx ../tools/bench-ts.ts >/dev/null)
 done
 
 go test -c -o /tmp/pxpipe-go-bench.test .
@@ -265,15 +265,20 @@ cost. The renderer uses zlib level 6; framebuffers and encoders are pooled.
 
 ## Regenerating fixtures
 
-Requires the TS repo checked out as a sibling `../pxpipe`:
+Initialize the pinned TS reference implementation first:
 
 ```bash
-cd ../pxpipe
-pnpm exec tsx ../pxpipe-go/tools/dump-atlas.ts
-pnpm exec tsx ../pxpipe-go/tools/gen-fixtures.ts
-pnpm exec tsx ../pxpipe-go/tools/gen-fixtures-openai.ts
-pnpm exec tsx ../pxpipe-go/tools/dump-gpt-profiles.ts > ../pxpipe-go/testdata/openai/profiles.json
+git submodule update --init --recursive
+cd pxpipe
+pnpm install --frozen-lockfile
+pnpm exec tsx ../tools/dump-atlas.ts
+pnpm exec tsx ../tools/gen-fixtures.ts
+pnpm exec tsx ../tools/gen-fixtures-openai.ts
+pnpm exec tsx ../tools/dump-gpt-profiles.ts > ../testdata/openai/profiles.json
 ```
+
+See [UPSTREAM.md](UPSTREAM.md) for the pinned reference revision and current
+porting status.
 
 ## License
 
