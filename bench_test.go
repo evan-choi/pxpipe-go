@@ -53,6 +53,8 @@ func BenchmarkResolveGptProfileStableHit(b *testing.B) {
 		{"mini", "openai/gpt-5-mini-20260801"},
 		{"o3", "openai/o3-20260801"},
 		{"gemini", "google/gemini-3.6-flash"},
+		{"claude", "anthropic/claude-fable-5"},
+		{"claude_legacy", "anthropic/claude-3-5-sonnet-20241022"},
 	}
 	for _, model := range models {
 		b.Run(model.name, func(b *testing.B) {
