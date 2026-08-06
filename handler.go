@@ -7,6 +7,7 @@ import (
 	"net/http/httputil"
 	"net/url"
 	"strconv"
+	"strings"
 
 	"github.com/bytedance/sonic"
 )
@@ -145,24 +146,46 @@ func (h *handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		protocolOf = DefaultProtocolOf
 	}
 	surface := protocolOf(r.URL.Path)
-	if r.Method == http.MethodPost && surface != ProtocolNone && r.Body != nil {
-		body, err := io.ReadAll(io.LimitReader(r.Body, h.opts.MaxBodyBytes+1))
+	bypassValue, hasBypass := r.Header[http.CanonicalHeaderKey("X-Pxpipe-Bypass")]
+	r.Header.Del("X-Pxpipe-Bypass")
+	bypass := hasBypass && len(bypassValue) > 0 &&
+		!falseyBypassValue(bypassValue[0])
+	if !bypass && r.Method == http.MethodPost && surface != ProtocolNone && r.Body != nil &&
+		(r.ContentLength < 0 || r.ContentLength <= h.opts.MaxBodyBytes) {
+		originalBody := r.Body
+		body, err := io.ReadAll(io.LimitReader(originalBody, h.opts.MaxBodyBytes+1))
 		if err != nil {
+			originalBody.Close()
 			http.Error(w, "pxpipe: failed to read request body", http.StatusBadGateway)
 			return
 		}
-		r.Body.Close()
-		if int64(len(body)) <= h.opts.MaxBodyBytes {
-			res := h.transformFor(surface, body)
-			if h.opts.OnResult != nil {
-				h.opts.OnResult(r, res)
-			}
-			body = res.Body
+		if int64(len(body)) > h.opts.MaxBodyBytes {
+			r.Body = struct {
+				io.Reader
+				io.Closer
+			}{io.MultiReader(bytes.NewReader(body), originalBody), originalBody}
+			h.proxy.ServeHTTP(w, r)
+			return
 		}
+		originalBody.Close()
+		res := h.transformFor(surface, body)
+		if h.opts.OnResult != nil {
+			h.opts.OnResult(r, res)
+		}
+		body = res.Body
 		r.Body = io.NopCloser(bytes.NewReader(body))
 		r.ContentLength = int64(len(body))
 		r.Header.Set("Content-Length", strconv.Itoa(len(body)))
 		r.Header.Del("Transfer-Encoding")
+		r.TransferEncoding = nil
 	}
 	h.proxy.ServeHTTP(w, r)
+}
+
+func falseyBypassValue(v string) bool {
+	switch strings.ToLower(strings.TrimSpace(v)) {
+	case "0", "false", "off", "no":
+		return true
+	}
+	return false
 }

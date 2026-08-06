@@ -279,3 +279,143 @@ func TestDefaultProtocolOf(t *testing.T) {
 		}
 	}
 }
+
+func TestHandlerOversizedBodyPassesThroughUnchanged(t *testing.T) {
+	payload := []byte(`{"model":"claude-fable-5","messages":[],"padding":"` + strings.Repeat("x", 128) + `"}`)
+
+	for _, chunked := range []bool{false, true} {
+		name := "known-length"
+		if chunked {
+			name = "chunked"
+		}
+		t.Run(name, func(t *testing.T) {
+			var upstreamBody []byte
+			up := upstreamEcho(t, &upstreamBody)
+			defer up.Close()
+			u, _ := url.Parse(up.URL)
+			called := false
+			srv := httptest.NewServer(NewHandler(HandlerOptions{
+				Upstream:     u,
+				MaxBodyBytes: 32,
+				OnResult: func(_ *http.Request, _ *TransformResult) {
+					called = true
+				},
+			}))
+			defer srv.Close()
+
+			var body io.Reader = bytes.NewReader(payload)
+			if chunked {
+				pr, pw := io.Pipe()
+				body = pr
+				go func() {
+					_, _ = pw.Write(payload)
+					_ = pw.Close()
+				}()
+			}
+			req, err := http.NewRequest(http.MethodPost, srv.URL+"/v1/messages", body)
+			if err != nil {
+				t.Fatal(err)
+			}
+			resp, err := http.DefaultClient.Do(req)
+			if err != nil {
+				t.Fatal(err)
+			}
+			resp.Body.Close()
+			if called {
+				t.Fatal("oversized body must not be transformed")
+			}
+			if !bytes.Equal(upstreamBody, payload) {
+				t.Fatalf("upstream body was truncated: got %d bytes, want %d", len(upstreamBody), len(payload))
+			}
+		})
+	}
+}
+
+func TestHandlerBypassSkipsTransformAndStripsHeader(t *testing.T) {
+	input, err := os.ReadFile(filepath.Join("testdata", "transform", "big-claude-code", "input.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var upstreamBody []byte
+	var upstreamBypass string
+	up := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		upstreamBody, _ = io.ReadAll(r.Body)
+		upstreamBypass = r.Header.Get("X-Pxpipe-Bypass")
+		w.Header().Set("Content-Type", "application/json")
+		fmt.Fprint(w, `{"ok":true}`)
+	}))
+	defer up.Close()
+	u, _ := url.Parse(up.URL)
+	called := false
+	srv := httptest.NewServer(NewHandler(HandlerOptions{
+		Upstream: u,
+		OnResult: func(_ *http.Request, _ *TransformResult) {
+			called = true
+		},
+	}))
+	defer srv.Close()
+
+	req, err := http.NewRequest(http.MethodPost, srv.URL+"/v1/messages", bytes.NewReader(input))
+	if err != nil {
+		t.Fatal(err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("X-Pxpipe-Bypass", "1")
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp.Body.Close()
+	if called {
+		t.Fatal("bypassed request was transformed")
+	}
+	if !bytes.Equal(upstreamBody, input) {
+		t.Fatal("bypassed body was modified")
+	}
+	if upstreamBypass != "" {
+		t.Fatalf("bypass header leaked upstream: %q", upstreamBypass)
+	}
+}
+
+func TestHandlerFalseyBypassStillTransforms(t *testing.T) {
+	var upstreamBody []byte
+	var upstreamBypass string
+	up := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		upstreamBody, _ = io.ReadAll(r.Body)
+		upstreamBypass = r.Header.Get("X-Pxpipe-Bypass")
+		w.Header().Set("Content-Type", "application/json")
+		fmt.Fprint(w, `{"ok":true}`)
+	}))
+	defer up.Close()
+	u, _ := url.Parse(up.URL)
+	var result *TransformResult
+	srv := httptest.NewServer(NewHandler(HandlerOptions{
+		Upstream: u,
+		OnResult: func(_ *http.Request, got *TransformResult) {
+			result = got
+		},
+	}))
+	defer srv.Close()
+
+	payload := []byte(`{"model":"claude-sonnet-4-6","messages":[{"role":"user","content":"hi"}]}`)
+	req, err := http.NewRequest(http.MethodPost, srv.URL+"/v1/messages", bytes.NewReader(payload))
+	if err != nil {
+		t.Fatal(err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("X-Pxpipe-Bypass", "false")
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp.Body.Close()
+	if result == nil || result.Reason != ReasonUnsupportedModel {
+		t.Fatalf("falsey bypass skipped classification: %+v", result)
+	}
+	if !bytes.Equal(upstreamBody, payload) {
+		t.Fatal("unsupported body was modified")
+	}
+	if upstreamBypass != "" {
+		t.Fatalf("bypass header leaked upstream: %q", upstreamBypass)
+	}
+}
