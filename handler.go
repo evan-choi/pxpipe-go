@@ -18,8 +18,8 @@ import (
 type HandlerOptions struct {
 	// AnthropicUpstream is the Anthropic API base. Default https://api.anthropic.com.
 	AnthropicUpstream *url.URL
-	// Upstream is the legacy Anthropic API base, used only when AnthropicUpstream is nil.
-	// Deprecated: use AnthropicUpstream.
+	// Upstream is the legacy shared API base, used when a provider-specific upstream is nil.
+	// Deprecated: use AnthropicUpstream and OpenAIUpstream.
 	Upstream *url.URL
 	// OpenAIUpstream is the OpenAI API base. Default https://api.openai.com.
 	OpenAIUpstream *url.URL
@@ -33,8 +33,11 @@ type HandlerOptions struct {
 	// OpenAIAPIKey overrides or supplies the OpenAI authorization bearer.
 	OpenAIAPIKey string
 	// Transform supplies per-request transform options; Model is filled from
-	// the request body. Nil = defaults.
+	// the request body. Nil = defaults. Ignored when TransformFunc is set.
 	Transform *TransformOptions
+	// TransformFunc resolves transform options per request. Its result takes
+	// precedence over Transform; nil = defaults.
+	TransformFunc func() *TransformOptions
 	// Transport is used for upstream requests. Nil = http.DefaultTransport.
 	Transport http.RoundTripper
 	// OnResult observes every transform outcome (nil-safe). Called before the
@@ -83,6 +86,9 @@ var passthroughPrefixes = []string{
 func NewHandler(opts HandlerOptions) http.Handler {
 	if opts.AnthropicUpstream == nil {
 		opts.AnthropicUpstream = opts.Upstream
+	}
+	if opts.OpenAIUpstream == nil {
+		opts.OpenAIUpstream = opts.Upstream
 	}
 	if opts.AnthropicUpstream == nil {
 		opts.AnthropicUpstream = &url.URL{Scheme: "https", Host: "api.anthropic.com"}
@@ -214,10 +220,24 @@ func DefaultProtocolOf(pathname string) Protocol {
 
 func (h *handler) transformFor(surface Protocol, body []byte, model string) *TransformResult {
 	var base TransformOptions
-	if h.opts.Transform != nil {
-		base = *h.opts.Transform
+	transform := h.opts.Transform
+	if h.opts.TransformFunc != nil {
+		transform = h.opts.TransformFunc()
+	}
+	if transform != nil {
+		base = *transform
 	}
 	if surface == ProtocolAnthropicMessages {
+		if !isClaudeModel(model) {
+			res := &TransformResult{
+				Body:   body,
+				Reason: ReasonUnsupportedModel,
+				Detail: model,
+				Info:   &TransformInfo{Reason: "unsupported_model"},
+			}
+			res.Cache.MarkerCount = CountCacheControlMarkers(body)
+			return res
+		}
 		return TransformAnthropicMessages(TransformInput{Body: body, Model: model, Options: &base})
 	}
 	res := &TransformResult{}
@@ -273,6 +293,20 @@ func (h *handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		originalBody.Close()
+		var pinReply *pinCommandReply
+		switch surface {
+		case ProtocolAnthropicMessages:
+			pinReply = pinCommandResponse(body)
+		case ProtocolOpenAIChat, ProtocolOpenAIResponses:
+			pinReply = pinCommandResponseOpenAI(body, surface)
+		}
+		if pinReply != nil {
+			w.Header().Set("Content-Type", pinReply.contentType)
+			w.Header().Set("Cache-Control", "no-cache")
+			w.WriteHeader(http.StatusOK)
+			_, _ = w.Write(pinReply.body)
+			return
+		}
 		model := extractModel(body)
 		res := h.transformFor(surface, body, model)
 		body = res.Body

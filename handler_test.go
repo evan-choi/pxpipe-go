@@ -11,6 +11,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync/atomic"
 	"testing"
 )
 
@@ -103,6 +104,149 @@ func TestHandlerUnsupportedModelPassesThrough(t *testing.T) {
 	resp.Body.Close()
 	if !bytes.Equal(upstreamBody, payload) {
 		t.Errorf("unsupported model must pass through untouched: %s", upstreamBody)
+	}
+}
+
+func TestHandlerNonClaudeMessagesPassThrough(t *testing.T) {
+	SetAllowedModelBases([]string{"gpt-5.4"})
+	t.Cleanup(func() { SetAllowedModelBases(nil) })
+
+	var upstreamBody []byte
+	up := upstreamEcho(t, &upstreamBody)
+	defer up.Close()
+	u, _ := url.Parse(up.URL)
+	var result *TransformResult
+	srv := httptest.NewServer(NewHandler(HandlerOptions{
+		AnthropicUpstream: u,
+		OnResult: func(_ *http.Request, got *TransformResult) {
+			result = got
+		},
+	}))
+	defer srv.Close()
+
+	payload := []byte(`{"model":"gpt-5.4","messages":[{"role":"user","content":"hi"}]}`)
+	resp, err := http.Post(srv.URL+"/v1/messages", "application/json", bytes.NewReader(payload))
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp.Body.Close()
+	if result == nil || result.Reason != ReasonUnsupportedModel || result.Detail != "gpt-5.4" {
+		t.Fatalf("non-Claude Messages result = %+v", result)
+	}
+	if !bytes.Equal(upstreamBody, payload) {
+		t.Fatal("non-Claude Messages body was modified")
+	}
+}
+
+func TestHandlerTransformFuncRunsPerRequestAndOverridesStatic(t *testing.T) {
+	var upstreamBody []byte
+	up := upstreamEcho(t, &upstreamBody)
+	defer up.Close()
+	u, _ := url.Parse(up.URL)
+	enabled, disabled := true, false
+	var calls atomic.Int32
+	results := make(chan *TransformResult, 2)
+	srv := httptest.NewServer(NewHandler(HandlerOptions{
+		AnthropicUpstream: u,
+		Transform:         &TransformOptions{Compress: &enabled},
+		TransformFunc: func() *TransformOptions {
+			calls.Add(1)
+			return &TransformOptions{Compress: &disabled}
+		},
+		OnResult: func(_ *http.Request, result *TransformResult) { results <- result },
+	}))
+	defer srv.Close()
+
+	payload := []byte(`{"model":"claude-fable-5","messages":[{"role":"user","content":"hi"}]}`)
+	for range 2 {
+		resp, err := http.Post(srv.URL+"/v1/messages", "application/json", bytes.NewReader(payload))
+		if err != nil {
+			t.Fatal(err)
+		}
+		resp.Body.Close()
+		if result := <-results; result.Reason != ReasonCompressDisabled {
+			t.Fatalf("dynamic transform result = %+v", result)
+		}
+	}
+	if calls.Load() != 2 {
+		t.Fatalf("TransformFunc calls = %d, want 2", calls.Load())
+	}
+	if !bytes.Equal(upstreamBody, payload) {
+		t.Fatal("dynamic compress=false body was modified")
+	}
+}
+
+func TestHandlerReturnsPinCommandsLocally(t *testing.T) {
+	tests := []struct {
+		name        string
+		path        string
+		body        string
+		contentType string
+		contains    string
+	}{
+		{
+			name:        "Anthropic Messages",
+			path:        "/v1/messages",
+			body:        `{"model":"claude-test","messages":[{"role":"user","content":"@pxpipe pin concise"}]}`,
+			contentType: "application/json",
+			contains:    `"type":"message"`,
+		},
+		{
+			name:        "OpenAI Chat",
+			path:        "/v1/chat/completions",
+			body:        `{"model":"gpt-test","messages":[{"role":"user","content":"@pxpipe pin concise"}]}`,
+			contentType: "application/json",
+			contains:    `"object":"chat.completion"`,
+		},
+		{
+			name:        "OpenAI Responses stream",
+			path:        "/v1/responses",
+			body:        `{"model":"gpt-test","stream":true,"input":[{"role":"user","content":"@pxpipe pin concise"}]}`,
+			contentType: "text/event-stream",
+			contains:    "event: response.completed",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var upstreamCalls atomic.Int32
+			up := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+				upstreamCalls.Add(1)
+				fmt.Fprint(w, `{"upstream":true}`)
+			}))
+			defer up.Close()
+			u, _ := url.Parse(up.URL)
+			var onResultCalls atomic.Int32
+			srv := httptest.NewServer(NewHandler(HandlerOptions{
+				AnthropicUpstream: u,
+				OpenAIUpstream:    u,
+				OnResult: func(_ *http.Request, _ *TransformResult) {
+					onResultCalls.Add(1)
+				},
+			}))
+			defer srv.Close()
+
+			resp, err := http.Post(srv.URL+tt.path, "application/json", strings.NewReader(tt.body))
+			if err != nil {
+				t.Fatal(err)
+			}
+			body, err := io.ReadAll(resp.Body)
+			resp.Body.Close()
+			if err != nil {
+				t.Fatal(err)
+			}
+			if resp.StatusCode != http.StatusOK || resp.Header.Get("Content-Type") != tt.contentType ||
+				resp.Header.Get("Cache-Control") != "no-cache" {
+				t.Fatalf("response = %d content-type=%q cache-control=%q", resp.StatusCode,
+					resp.Header.Get("Content-Type"), resp.Header.Get("Cache-Control"))
+			}
+			if !bytes.Contains(body, []byte(tt.contains)) {
+				t.Fatalf("local reply missing %q: %s", tt.contains, body)
+			}
+			if upstreamCalls.Load() != 0 || onResultCalls.Load() != 0 {
+				t.Fatalf("local reply calls: upstream=%d OnResult=%d", upstreamCalls.Load(), onResultCalls.Load())
+			}
+		})
 	}
 }
 
@@ -376,6 +520,22 @@ func TestHandlerBypassSkipsTransformAndStripsHeader(t *testing.T) {
 	}
 	if upstreamBypass != "" {
 		t.Fatalf("bypass header leaked upstream: %q", upstreamBypass)
+	}
+
+	pin := []byte(`{"model":"claude-fable-5","messages":[{"role":"user","content":"@pxpipe pin concise"}]}`)
+	req, err = http.NewRequest(http.MethodPost, srv.URL+"/v1/messages", bytes.NewReader(pin))
+	if err != nil {
+		t.Fatal(err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("X-Pxpipe-Bypass", "1")
+	resp, err = http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp.Body.Close()
+	if !bytes.Equal(upstreamBody, pin) {
+		t.Fatal("bypassed pin command was handled locally")
 	}
 }
 
