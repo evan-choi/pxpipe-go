@@ -282,20 +282,21 @@ func factSheetFeatures(s string) fsFeature {
 }
 
 func priorityTier(tok string) int {
+	features := factSheetFeatures(tok)
 	switch {
-	case shapeAssignment.MatchString(tok),
-		shapeHex.MatchString(tok) && shapeHexDigit.MatchString(tok),
-		shapeUUID.MatchString(tok),
-		shapeEmail.MatchString(tok),
-		shapeIBAN.MatchString(tok),
-		shapeCurrency.MatchString(tok),
-		shapeConst.MatchString(tok),
-		shapeTicket.MatchString(tok) && shapeTicketDig.MatchString(tok),
-		shapeFlag.MatchString(tok),
-		shapeNum.MatchString(tok),
-		shapeCamel.MatchString(tok) && u16len(tok) >= 8:
+	case features&(fsHasEqual|fsHasUpper) == fsHasEqual|fsHasUpper && shapeAssignment.MatchString(tok),
+		features&fsHasDigit != 0 && shapeHex.MatchString(tok) && shapeHexDigit.MatchString(tok),
+		features&fsHasDash != 0 && shapeUUID.MatchString(tok),
+		features&(fsHasAt|fsHasDot) == fsHasAt|fsHasDot && shapeEmail.MatchString(tok),
+		features&(fsHasUpper|fsHasDigit) == fsHasUpper|fsHasDigit && shapeIBAN.MatchString(tok),
+		features&fsHasDigit != 0 && shapeCurrency.MatchString(tok),
+		features&(fsHasUpper|fsHasUnderscore) == fsHasUpper|fsHasUnderscore && shapeConst.MatchString(tok),
+		features&(fsHasUpper|fsHasDash|fsHasDigit) == fsHasUpper|fsHasDash|fsHasDigit && shapeTicket.MatchString(tok) && shapeTicketDig.MatchString(tok),
+		features&fsHasDash != 0 && shapeFlag.MatchString(tok),
+		features&fsHasDigit != 0 && shapeNum.MatchString(tok),
+		features&(fsHasUpper|fsHasLower) == fsHasUpper|fsHasLower && shapeCamel.MatchString(tok) && u16len(tok) >= 8:
 		return 0
-	case shapeURL.MatchString(tok):
+	case features&(fsHasColon|fsHasSlash|fsHasLower) == fsHasColon|fsHasSlash|fsHasLower && shapeURL.MatchString(tok):
 		return 2
 	}
 	return 1

@@ -8,6 +8,26 @@ import (
 	"testing"
 )
 
+func priorityTierReference(tok string) int {
+	switch {
+	case shapeAssignment.MatchString(tok),
+		shapeHex.MatchString(tok) && shapeHexDigit.MatchString(tok),
+		shapeUUID.MatchString(tok),
+		shapeEmail.MatchString(tok),
+		shapeIBAN.MatchString(tok),
+		shapeCurrency.MatchString(tok),
+		shapeConst.MatchString(tok),
+		shapeTicket.MatchString(tok) && shapeTicketDig.MatchString(tok),
+		shapeFlag.MatchString(tok),
+		shapeNum.MatchString(tok),
+		shapeCamel.MatchString(tok) && u16len(tok) >= 8:
+		return 0
+	case shapeURL.MatchString(tok):
+		return 2
+	}
+	return 1
+}
+
 func budgetEntriesReference(all []string, counts map[string]int, collapse bool) []FactSheetEntry {
 	candidates := all
 	if collapse {
@@ -43,7 +63,7 @@ func budgetEntriesReference(all []string, counts map[string]int, collapse bool) 
 	}
 	rankedTokens := make([]ranked, len(candidates))
 	for i, token := range candidates {
-		rankedTokens[i] = ranked{token, priorityTier(token)}
+		rankedTokens[i] = ranked{token, priorityTierReference(token)}
 	}
 	sort.SliceStable(rankedTokens, func(i, j int) bool {
 		if rankedTokens[i].tier != rankedTokens[j].tier {
@@ -74,6 +94,29 @@ func budgetEntriesReference(all []string, counts map[string]int, collapse bool) 
 		kept = append(kept, FactSheetEntry{Token: rankedToken.token, Count: count})
 	}
 	return kept
+}
+
+func TestPriorityTierMatchesReference(t *testing.T) {
+	tokens := []string{
+		"ABC=1", "abc1234", "123e4567-e89b-12d3-a456-426614174000",
+		"dev@example.com", "GB82WEST12345698765432", "$1,234.56",
+		"CONST_ID", "CVE-2026-1234", "--verbose", "1234", "CamelCaseName",
+		"https://example.com/path", "plain", "한글😀",
+	}
+	rng := rand.New(rand.NewSource(2))
+	alphabet := []rune("abcXYZ019_-/.:@=$\x00한글😀")
+	for range 1000 {
+		chars := make([]rune, rng.Intn(64))
+		for i := range chars {
+			chars[i] = alphabet[rng.Intn(len(alphabet))]
+		}
+		tokens = append(tokens, string(chars))
+	}
+	for _, token := range tokens {
+		if got, want := priorityTier(token), priorityTierReference(token); got != want {
+			t.Fatalf("priorityTier(%q) = %d, want %d", token, got, want)
+		}
+	}
 }
 
 func TestBudgetEntriesMatchesReference(t *testing.T) {
