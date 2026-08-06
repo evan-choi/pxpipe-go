@@ -1,7 +1,6 @@
 package pxpipe
 
 import (
-	"regexp"
 	"strconv"
 	"strings"
 
@@ -35,17 +34,44 @@ func isClaudeModel(model string) bool {
 	return strings.Contains(m, "claude") || strings.Contains(m, "anthropic")
 }
 
-var claudeVersionRe = regexp.MustCompile(`claude-(?:[a-z]+-)?(\d+)(?:-(\d+))?`)
-
 func isPre47Claude(m string) bool {
-	v := claudeVersionRe.FindStringSubmatch(m)
-	if v == nil {
+	const prefix = "claude-"
+	start := strings.Index(m, prefix)
+	if start < 0 {
 		return false
 	}
-	major, _ := strconv.Atoi(v[1])
+	version := m[start+len(prefix):]
+	if len(version) == 0 {
+		return false
+	}
+	if version[0] < '0' || version[0] > '9' {
+		i := 0
+		for i < len(version) && version[i] >= 'a' && version[i] <= 'z' {
+			i++
+		}
+		if i == 0 || i == len(version) || version[i] != '-' {
+			return false
+		}
+		version = version[i+1:]
+	}
+	digits := digitPrefixLen(version)
+	if digits == 0 {
+		return false
+	}
+	major, err := strconv.Atoi(version[:digits])
+	if err != nil {
+		return false
+	}
 	minor := 0
-	if v[2] != "" {
-		minor, _ = strconv.Atoi(v[2])
+	version = version[digits:]
+	if len(version) > 1 && version[0] == '-' {
+		digits = digitPrefixLen(version[1:])
+		if digits > 0 {
+			minor, err = strconv.Atoi(version[1 : 1+digits])
+			if err != nil {
+				return false
+			}
+		}
 	}
 	return major < 4 || (major == 4 && minor < 7)
 }

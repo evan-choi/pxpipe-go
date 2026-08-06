@@ -264,12 +264,44 @@ func isGeminiModel(model string) bool {
 
 func isGrokModel(m string) bool { return strings.HasPrefix(m, "grok-") }
 
-var miniNanoRe = regexp.MustCompile(`^(?:gpt-5(?:\.\d+)?|gpt-4\.1)-(?:mini|nano)`)
-var gpt5FlagshipRe = regexp.MustCompile(`^gpt-5\.\d`)
-var o13Re = regexp.MustCompile(`^o[13]`)
+func digitPrefixLen(s string) int {
+	i := 0
+	for i < len(s) && s[i] >= '0' && s[i] <= '9' {
+		i++
+	}
+	return i
+}
 
 func isMiniNanoPatch(m string) bool {
-	return miniNanoRe.MatchString(m) || strings.HasPrefix(m, "o4-mini")
+	if strings.HasPrefix(m, "o4-mini") {
+		return true
+	}
+	var suffix string
+	switch {
+	case strings.HasPrefix(m, "gpt-5-"):
+		suffix = m[len("gpt-5-"):]
+	case strings.HasPrefix(m, "gpt-5."):
+		rest := m[len("gpt-5."):]
+		digits := digitPrefixLen(rest)
+		if digits == 0 || digits == len(rest) || rest[digits] != '-' {
+			return false
+		}
+		suffix = rest[digits+1:]
+	case strings.HasPrefix(m, "gpt-4.1-"):
+		suffix = m[len("gpt-4.1-"):]
+	default:
+		return false
+	}
+	return strings.HasPrefix(suffix, "mini") || strings.HasPrefix(suffix, "nano")
+}
+
+func isGpt5Flagship(m string) bool {
+	return len(m) > len("gpt-5.") && strings.HasPrefix(m, "gpt-5.") &&
+		m[len("gpt-5.")] >= '0' && m[len("gpt-5.")] <= '9'
+}
+
+func isO13Model(m string) bool {
+	return len(m) >= 2 && m[0] == 'o' && (m[1] == '1' || m[1] == '3')
 }
 
 // resolveGptBuiltin mirrors BUILTIN_RULES order exactly.
@@ -292,11 +324,11 @@ func resolveGptBuiltin(m string) *GptModelProfile {
 	switch {
 	case m == "gpt-5.6-sol" || strings.HasPrefix(m, "gpt-5.6-sol-"):
 		return gpt56SolProfile
-	case gpt5FlagshipRe.MatchString(m):
+	case isGpt5Flagship(m):
 		return gpt5PatchProfile
 	case strings.HasPrefix(m, "gpt-5"):
 		return gpt5TileProfile
-	case o13Re.MatchString(m):
+	case isO13Model(m):
 		return o13Profile
 	case isGrokModel(m):
 		return grokProfile

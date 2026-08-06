@@ -156,6 +156,30 @@ func TestStripBracketVariants(t *testing.T) {
 	}
 }
 
+func TestBuiltInModelMatchers(t *testing.T) {
+	miniNano := map[string]bool{
+		"gpt-5-mini": true, "gpt-5.12-nano-preview": true,
+		"gpt-4.1-mini": true, "o4-mini-extra": true,
+		"gpt-5.1.2-mini": false, "gpt-5.-mini": false, "gpt-5.4": false,
+	}
+	for model, want := range miniNano {
+		if got := isMiniNanoPatch(model); got != want {
+			t.Errorf("isMiniNanoPatch(%q) = %v, want %v", model, got, want)
+		}
+	}
+
+	pre47 := map[string]bool{
+		"claude-3-5-sonnet": true, "claude-opus-4-6": true,
+		"claude-opus-4-7": false, "claude-fable-5": false,
+		"claude-sonnet-new-4": false, "not-claude": false,
+	}
+	for model, want := range pre47 {
+		if got := isPre47Claude(model); got != want {
+			t.Errorf("isPre47Claude(%q) = %v, want %v", model, got, want)
+		}
+	}
+}
+
 func TestGptEnvProfileRefresh(t *testing.T) {
 	t.Setenv("PXPIPE_GPT_PROFILES", `{"gpt-5.4":{"stripCols":120}}`)
 	if got := ResolveGptProfile("gpt-5.4").StripCols; got != 120 {
