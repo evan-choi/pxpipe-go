@@ -21,3 +21,19 @@ func TestCompactSlabWhitespace(t *testing.T) {
 		})
 	}
 }
+
+func TestCollapseNewlineRuns(t *testing.T) {
+	for _, tc := range []struct {
+		input, want string
+	}{
+		{"a\nb", "a\nb"},
+		{"a\n\nb", "a\n\nb"},
+		{"a\n\n\nb", "a\n\nb"},
+		{"\n\n\n\n", "\n\n"},
+		{"a\n\n\nb\n\n\n\nc", "a\n\nb\n\nc"},
+	} {
+		if got := collapseNewlineRuns(tc.input); got != tc.want {
+			t.Fatalf("collapseNewlineRuns(%q) = %q, want %q", tc.input, got, tc.want)
+		}
+	}
+}
