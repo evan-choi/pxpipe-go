@@ -521,6 +521,29 @@ func splitWrappedLinesIntoReadablePages(lines []string, maxLines, maxChars int) 
 	return pages
 }
 
+func textPages(text string, cols, maxCharsPerImage int, style RenderStyle, maxHeightPx int) [][]string {
+	markerScale := style.MarkerScale
+	if markerScale < 1 {
+		markerScale = 1
+	}
+	lines := WrapLines(text, cols, markerScale, style.Font)
+	hardLinesPerImg := (maxHeightPx - 2*PadY) / RenderCellHeight(style)
+	if hardLinesPerImg < 1 {
+		hardLinesPerImg = 1
+	}
+	byChars := maxCharsPerImage / cols
+	if byChars < 1 {
+		byChars = 1
+	}
+	return splitWrappedLinesIntoReadablePages(lines, min(hardLinesPerImg, byChars), maxCharsPerImage)
+}
+
+// CountTextPages returns the exact number of pages RenderTextToPngs would
+// produce without rasterizing or encoding them.
+func CountTextPages(text string, cols int, style RenderStyle, maxHeightPx int) int {
+	return len(textPages(text, cols, ReadableCharsPerImage, style, maxHeightPx))
+}
+
 func fbSet(fb []byte, idx int, v byte) {
 	if idx >= 0 && idx < len(fb) {
 		fb[idx] = v
@@ -1080,26 +1103,11 @@ func RenderTextToPngsWithCharLimit(text string, cols, maxCharsPerImage int, styl
 	if markerScale < 1 {
 		markerScale = 1
 	}
-	cellH := RenderCellHeight(style)
-	lines := WrapLines(text, cols, markerScale, style.Font)
 	var slotLines []string
 	if style.ColorByRole && slotText != nil {
 		slotLines = WrapLines(*slotText, cols, markerScale, style.Font)
 	}
-	hardLinesPerImg := (maxHeightPx - 2*PadY) / cellH
-	if hardLinesPerImg < 1 {
-		hardLinesPerImg = 1
-	}
-	byChars := maxCharsPerImage / cols
-	if byChars < 1 {
-		byChars = 1
-	}
-	linesPerImg := hardLinesPerImg
-	if byChars < linesPerImg {
-		linesPerImg = byChars
-	}
-
-	pages := splitWrappedLinesIntoReadablePages(lines, linesPerImg, maxCharsPerImage)
+	pages := textPages(text, cols, maxCharsPerImage, style, maxHeightPx)
 	var pageSlotLines [][]string
 	if slotLines != nil {
 		pageSlotLines = make([][]string, len(pages))

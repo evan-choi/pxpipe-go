@@ -786,7 +786,7 @@ type renderedUnits struct {
 	Images       []*render.RenderedImage
 }
 
-func renderUnitTexts(texts []string, o gptHistoryOptions) (renderedUnits, error) {
+func prepareUnitTexts(texts []string, o gptHistoryOptions) renderedUnits {
 	source := strings.Join(texts, "\n\n")
 	safe := render.NeutralizeSentinel(source)
 	renderedText := safe
@@ -795,11 +795,13 @@ func renderUnitTexts(texts []string, o gptHistoryOptions) (renderedUnits, error)
 			renderedText = packed
 		}
 	}
-	images, err := render.RenderTextToPngs(renderedText, o.Cols, o.Style, o.MaxHeightPx, nil)
-	if err != nil {
-		return renderedUnits{}, err
-	}
-	return renderedUnits{Source: source, RenderedText: renderedText, Images: images}, nil
+	return renderedUnits{Source: source, RenderedText: renderedText}
+}
+
+func (u *renderedUnits) render(o gptHistoryOptions) error {
+	images, err := render.RenderTextToPngs(u.RenderedText, o.Cols, o.Style, o.MaxHeightPx, nil)
+	u.Images = images
+	return err
 }
 
 // planResponsesMixedCollapse is the profile-gated broad Responses planner.
@@ -940,25 +942,23 @@ func planResponsesMixedCollapse(items []any, old []responsesCompletedRound, stat
 			break
 		}
 		low, high := 0, len(run)+1
-		var best *renderedUnits
+		var best renderedUnits
 		for low+1 < high {
 			count := (low + high) / 2
-			var texts []string
+			texts := make([]string, 0, count)
 			for _, u := range run[:count] {
 				texts = append(texts, u.Text)
 			}
-			rendered, err := renderUnitTexts(texts, o)
-			if err != nil {
-				return base, err
-			}
-			if len(rendered.Images) > 0 && len(rendered.Images) <= remainingImages {
+			planned := prepareUnitTexts(texts, o)
+			imageCount := render.CountTextPages(planned.RenderedText, o.Cols, o.Style, o.MaxHeightPx)
+			if imageCount > 0 && imageCount <= remainingImages {
 				low = count
-				best = &rendered
+				best = planned
 			} else {
 				high = count
 			}
 		}
-		if best == nil || low == 0 {
+		if low == 0 {
 			hitImageCap = true
 			break
 		}
@@ -969,6 +969,9 @@ func planResponsesMixedCollapse(items []any, old []responsesCompletedRound, stat
 		}
 		if !isProfitable(best.RenderedText, o.Cols, selectedBaselineTokens) {
 			continue
+		}
+		if err := best.render(o); err != nil {
+			return base, err
 		}
 		var selectedIndices []int
 		for _, unit := range selected {
@@ -1127,30 +1130,31 @@ func planResponsesPairCollapse(items []any, isProfitable gptProfitableFn, o gptH
 			break
 		}
 		low, high := 0, len(run)+1
-		var best *renderedUnits
+		var best renderedUnits
 		for low+1 < high {
 			count := (low + high) / 2
-			var texts []string
+			texts := make([]string, 0, count)
 			for _, round := range run[:count] {
 				texts = append(texts, round.Text)
 			}
-			rendered, err := renderUnitTexts(texts, o)
-			if err != nil {
-				return base, err
-			}
-			if len(rendered.Images) > 0 && len(rendered.Images) <= remainingImages {
+			planned := prepareUnitTexts(texts, o)
+			imageCount := render.CountTextPages(planned.RenderedText, o.Cols, o.Style, o.MaxHeightPx)
+			if imageCount > 0 && imageCount <= remainingImages {
 				low = count
-				best = &rendered
+				best = planned
 			} else {
 				high = count
 			}
 		}
-		if best == nil || low == 0 {
+		if low == 0 {
 			hitImageCap = true
 			break
 		}
 		if !isProfitable(best.RenderedText, o.Cols, -1) {
 			continue
+		}
+		if err := best.render(o); err != nil {
+			return base, err
 		}
 		selected := run[:low]
 		var selectedIndices []int

@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
+	"strings"
 	"testing"
 
 	"github.com/bytedance/sonic"
@@ -82,6 +83,31 @@ func TestReflowForRender(t *testing.T) {
 	}
 	if got, buf, ok = reflowForRender("a" + NLSentinel + "b"); ok || got != "" || buf != nil {
 		t.Fatalf("reflowForRender(sentinel) = %q, %v, %v", got, buf, ok)
+	}
+}
+
+func TestCountTextPagesMatchesRender(t *testing.T) {
+	for _, tc := range []struct {
+		name        string
+		text        string
+		cols        int
+		style       RenderStyle
+		maxHeightPx int
+	}{
+		{"empty", "", 8, DenseRenderStyle, 80},
+		{"wrapped", strings.Repeat("abcdef", 100), 8, DenseRenderStyle, 80},
+		{"tabs and unicode", strings.Repeat("a\tb 한글\n", 40), 12, DenseRenderStyle, 96},
+		{"large marker", strings.Repeat("a"+NLSentinel+"b", 80), 10, RenderStyle{AA: true, MarkerScale: 2}, 96},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			images, err := RenderTextToPngs(tc.text, tc.cols, tc.style, tc.maxHeightPx, nil)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if got := CountTextPages(tc.text, tc.cols, tc.style, tc.maxHeightPx); got != len(images) {
+				t.Fatalf("CountTextPages() = %d, rendered %d pages", got, len(images))
+			}
+		})
 	}
 }
 
