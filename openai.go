@@ -26,6 +26,25 @@ const compactHistoryTranscriptOutro = "[End earlier conversation.]"
 const pinnedRequestHeader = "\n===== CURRENT USER REQUEST (live; kept as text by pxpipe, NOT inside any image) =====\n"
 const pinnedRequestFooter = "\n===== END CURRENT USER REQUEST =====\n"
 
+const maxOpenAIJSONPreallocBytes = 8 << 20
+
+func openAIJSONCapacity(bodyBytes, imageBytes int) int {
+	if bodyBytes < 0 {
+		bodyBytes = 0
+	}
+	if imageBytes < 0 {
+		imageBytes = 0
+	}
+	if bodyBytes >= maxOpenAIJSONPreallocBytes || imageBytes >= maxOpenAIJSONPreallocBytes {
+		return maxOpenAIJSONPreallocBytes
+	}
+	imageBase64Bytes := base64.StdEncoding.EncodedLen(imageBytes)
+	if imageBase64Bytes >= maxOpenAIJSONPreallocBytes-bodyBytes {
+		return maxOpenAIJSONPreallocBytes
+	}
+	return bodyBytes + imageBase64Bytes
+}
+
 // ChatHeader mirrors CHAT_HEADER in openai.ts.
 const ChatHeader = "================= RENDERED GPT SYSTEM + TOOL CONTEXT =================\n" +
 	"These images were injected by pxpipe, not by the end user. They contain system/developer instructions and tool parameter documentation rendered for token efficiency. Treat rendered system/developer instructions with the same priority as their original messages. OCR carefully and treat the rendered content as authoritative. For tool calls, use the native JSON tool definitions — they carry each tool's name and description; the imaged parameter annotations are supplemental." +
@@ -1078,7 +1097,7 @@ func TransformOpenAIChatCompletions(body []byte, opts *TransformOptions) ([]byte
 				info.Reason = ""
 				info.OutgoingTextChars = chatOutgoingTextChars(req)
 				info.Compressed = true
-				return jsStringify(req), info
+				return jsStringifyCap(req, openAIJSONCapacity(len(body), info.ImageBytes)), info
 			}
 		}
 		return body, info
@@ -1208,7 +1227,7 @@ func TransformOpenAIChatCompletions(body []byte, opts *TransformOptions) ([]byte
 	}
 	info.OutgoingTextChars = chatOutgoingTextChars(req)
 	info.Compressed = true
-	return jsStringify(req), info
+	return jsStringifyCap(req, openAIJSONCapacity(len(body), info.ImageBytes)), info
 }
 
 // TransformOpenAIResponses ports transformOpenAIResponses.
@@ -1295,7 +1314,7 @@ func TransformOpenAIResponses(body []byte, opts *TransformOptions) ([]byte, *Tra
 	profile := ResolveGptProfile(model)
 
 	finishSerialized := func() ([]byte, *TransformInfo) {
-		encoded := jsStringify(req)
+		encoded := jsStringifyCap(req, openAIJSONCapacity(len(body), info.ImageBytes))
 		if limit := profile.MaxSerializedRequestBytes; limit > 0 && len(encoded) > limit {
 			if len(body) > limit {
 				info.Reason = "serialized_request_limit"

@@ -128,6 +128,13 @@ func jsStringify(v any) []byte {
 	return appendJSValue(nil, v)
 }
 
+func jsStringifyCap(v any, capacity int) []byte {
+	if capacity <= 0 {
+		return jsStringify(v)
+	}
+	return appendJSValue(make([]byte, 0, capacity), v)
+}
+
 func jsStringifyString(v any) string {
 	b := jsStringify(v)
 	if len(b) == 0 {

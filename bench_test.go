@@ -174,12 +174,16 @@ func BenchmarkTransformOpenAIChat(b *testing.B) {
 	b.SetBytes(int64(len(input)))
 	b.ReportAllocs()
 	b.ResetTimer()
+	var out []byte
+	var info *TransformInfo
 	for i := 0; i < b.N; i++ {
-		_, info := TransformOpenAIChatCompletions(input, nil)
+		out, info = TransformOpenAIChatCompletions(input, nil)
 		if !info.Compressed {
 			b.Fatal("expected compression")
 		}
 	}
+	b.ReportMetric(float64(len(out)), "output-B")
+	b.ReportMetric(float64(info.ImageBytes), "image-B")
 }
 
 func BenchmarkTransformOpenAIResponses(b *testing.B) {
@@ -190,10 +194,14 @@ func BenchmarkTransformOpenAIResponses(b *testing.B) {
 	b.SetBytes(int64(len(input)))
 	b.ReportAllocs()
 	b.ResetTimer()
+	var out []byte
+	var info *TransformInfo
 	for i := 0; i < b.N; i++ {
-		_, info := TransformOpenAIResponses(input, nil)
+		out, info = TransformOpenAIResponses(input, nil)
 		if !info.Compressed {
 			b.Fatal("expected compression")
 		}
 	}
+	b.ReportMetric(float64(len(out)), "output-B")
+	b.ReportMetric(float64(info.ImageBytes), "image-B")
 }

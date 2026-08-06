@@ -40,6 +40,26 @@ func TestJSStringifyObjectOrderAndExtras(t *testing.T) {
 	if got, want := string(jsStringify(unordered)), `{"first":1,"second":2}`; got != want {
 		t.Fatalf("unordered jsStringify() = %s, want %s", got, want)
 	}
+	if got, want := string(jsStringifyCap(unordered, 128)), `{"first":1,"second":2}`; got != want {
+		t.Fatalf("preallocated jsStringify() = %s, want %s", got, want)
+	}
+}
+
+func TestOpenAIJSONCapacity(t *testing.T) {
+	for _, tc := range []struct {
+		body, image, want int
+	}{
+		{100, 0, 100},
+		{100, 3, 104},
+		{-1, -1, 0},
+		{maxOpenAIJSONPreallocBytes, 0, maxOpenAIJSONPreallocBytes},
+		{0, maxOpenAIJSONPreallocBytes, maxOpenAIJSONPreallocBytes},
+		{maxOpenAIJSONPreallocBytes - 1, 1, maxOpenAIJSONPreallocBytes},
+	} {
+		if got := openAIJSONCapacity(tc.body, tc.image); got != tc.want {
+			t.Errorf("openAIJSONCapacity(%d, %d) = %d, want %d", tc.body, tc.image, got, tc.want)
+		}
+	}
 }
 
 func TestCachePrefixDigestJoinsSerializedParts(t *testing.T) {
