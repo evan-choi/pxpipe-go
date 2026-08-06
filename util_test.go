@@ -1,6 +1,10 @@
 package pxpipe
 
-import "testing"
+import (
+	"bytes"
+	"encoding/base64"
+	"testing"
+)
 
 func TestU16Slice(t *testing.T) {
 	input := "a😀b"
@@ -55,5 +59,17 @@ func TestHistoryImageSha8ConcatSemantics(t *testing.T) {
 
 	if got := historyImageSha8([]any{map[string]any{"content": []any{imageBlock("")}}}); got != "" {
 		t.Fatalf("historyImageSha8(empty data) = %q, want empty", got)
+	}
+}
+
+func TestHistoryImageSha8RawChunkBoundary(t *testing.T) {
+	first := bytes.Repeat([]byte{0xfb}, (12<<10)+5)
+	second := []byte{0, 1, 2, 3}
+	messages := []any{map[string]any{"content": []any{
+		makeImageBlock(first), makeImageBlock(second),
+	}}}
+	want := sha8(base64.StdEncoding.EncodeToString(first) + base64.StdEncoding.EncodeToString(second))
+	if got := historyImageSha8(messages); got != want {
+		t.Fatalf("historyImageSha8(chunked raw PNGs) = %q, want %q", got, want)
 	}
 }
