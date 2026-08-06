@@ -306,7 +306,7 @@ func isO13Model(m string) bool {
 
 // resolveGptBuiltin mirrors BUILTIN_RULES order exactly.
 func resolveGptBuiltin(m string) *GptModelProfile {
-	if isClaudeModel(m) {
+	if strings.Contains(m, "claude") || strings.Contains(m, "anthropic") {
 		return resolveClaudeGptProfile(m)
 	}
 	if isMiniNanoPatch(m) {
