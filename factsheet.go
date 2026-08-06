@@ -384,7 +384,7 @@ func ExtractFactSheetEntries(text string) []FactSheetEntry {
 func budgetEntries(all []string, counts map[string]int, collapse bool) []FactSheetEntry {
 	candidates := all
 	if collapse {
-		ordered := append([]string(nil), all...)
+		ordered := all
 		sort.SliceStable(ordered, func(i, j int) bool {
 			li, lj := u16len(ordered[i]), u16len(ordered[j])
 			if li != lj {
@@ -392,7 +392,7 @@ func budgetEntries(all []string, counts map[string]int, collapse bool) []FactShe
 			}
 			return ordered[i] < ordered[j]
 		})
-		var specific []string
+		specific := ordered[:0]
 		for _, t := range ordered {
 			sub := false
 			for _, k := range specific {
