@@ -436,22 +436,42 @@ func stripBillingLine(text string) (kept string, body string) {
 // stripMarkdownEnvSection extracts the `# Environment` markdown section
 // (churns per turn; would bust the slab cache). Emulates the TS lookahead
 // `(?=\n#{1,6}\s|$)` with a manual terminator scan.
-var envSectionStartRe = regexp.MustCompile(`(?:^|\n)# Environment\b`)
-var envSectionEndRe = regexp.MustCompile(`\n#{1,6}[ \t\n\v\f\r\x{00a0}\x{1680}\x{2000}-\x{200a}\x{2028}\x{2029}\x{202f}\x{205f}\x{3000}\x{feff}]`)
-
 func stripMarkdownEnvSection(text string) (kept string, body string) {
-	loc := envSectionStartRe.FindStringIndex(text)
-	if loc == nil {
-		return "", text
+	const heading = "# Environment"
+	start := -1
+	if strings.HasPrefix(text, heading) && (len(text) == len(heading) || !isFactSheetASCIIWord(text[len(heading)])) {
+		start = 0
+	} else {
+		for from := 0; ; {
+			i := strings.Index(text[from:], "\n"+heading)
+			if i < 0 {
+				return "", text
+			}
+			start = from + i + 1
+			after := start + len(heading)
+			if after == len(text) || !isFactSheetASCIIWord(text[after]) {
+				break
+			}
+			from = after
+		}
 	}
-	start := loc[0]
-	if text[start] == '\n' {
-		start++
-	}
-	endLoc := envSectionEndRe.FindStringIndex(text[loc[1]:])
+
 	end := len(text)
-	if endLoc != nil {
-		end = loc[1] + endLoc[0]
+	for from := start + len(heading); ; {
+		i := strings.Index(text[from:], "\n#")
+		if i < 0 {
+			break
+		}
+		i += from
+		j := i + 1
+		for j < len(text) && j-i <= 6 && text[j] == '#' {
+			j++
+		}
+		if r, _ := decodeRuneAt(text, j); isJSSpace(r) {
+			end = i
+			break
+		}
+		from = j
 	}
 	section := strings.TrimRightFunc(text[start:end], isJSSpace)
 	return section, text[:start] + text[end:]
