@@ -42,7 +42,7 @@ type gateGeometry struct {
 	maxHeightPx int
 	maxChars    int
 	style       render.RenderStyle
-	tier        visionTier
+	pricing     *GptModelProfile
 }
 
 func defaultGateGeometry() gateGeometry {
@@ -51,7 +51,7 @@ func defaultGateGeometry() gateGeometry {
 		maxHeightPx: render.MaxHeightPx,
 		maxChars:    render.DenseContentCharsPerImage,
 		style:       render.DenseRenderStyle,
-		tier:        tierHighRes,
+		pricing:     claudeGptProfile,
 	}
 }
 
@@ -62,7 +62,7 @@ func denseGateGeometry(o *resolvedOptions) gateGeometry {
 	if profile != nil {
 		g.maxHeightPx = profile.maxHeightPx
 		g.style = profile.style
-		g.tier = profile.tier
+		g.pricing = profile.pricing
 	}
 	return g
 }
@@ -90,8 +90,8 @@ func imageTokensForRows(visualRows, cols, imageCountCap, maxCharsPerImage int, g
 	rowsInLast := minInt(maxInt(1, linesInLast), rowsPerImage)
 	fullImageHeight := 2*render.PadY + rowsPerImage*cellH
 	lastImageHeight := 2*render.PadY + rowsInLast*cellH
-	imageSum := fullImages*visionTokens(g.tier, widthPx, fullImageHeight) +
-		visionTokens(g.tier, widthPx, lastImageHeight)
+	imageSum := fullImages*visionTokensFor(g.pricing, widthPx, fullImageHeight) +
+		visionTokensFor(g.pricing, widthPx, lastImageHeight)
 	return math.Ceil(float64(imageSum) * gateMargin)
 }
 

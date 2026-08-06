@@ -8,10 +8,8 @@ import (
 	"github.com/evan-choi/pxpipe-go/render"
 )
 
-// Claude-only slice of the TS model-profile system: geometry (312 cols /
-// 728 px), the 28-px patch vision pricing, and the high-res/standard tier
-// split at Claude 4.7. Non-Claude ids get no profile (nil), matching
-// resolveGptProfile falling through for the models this port does not gate in.
+// Anthropic vision geometry helpers plus the Messages-path view of the shared
+// GPT model profiles.
 
 const (
 	cacheCreateRate = 1.25
@@ -29,18 +27,7 @@ type modelProfile struct {
 	stripCols   int
 	maxHeightPx int
 	style       render.RenderStyle
-	tier        visionTier
-}
-
-var baseStyle = render.RenderStyle{Font: render.DefaultRenderFont, AA: true, MarkerScale: 1}
-
-func claudeProfile(tier visionTier) *modelProfile {
-	return &modelProfile{
-		stripCols:   render.AnthropicSlabCols,
-		maxHeightPx: render.MaxHeightPx,
-		style:       baseStyle,
-		tier:        tier,
-	}
+	pricing     *GptModelProfile
 }
 
 func isClaudeModel(model string) bool {
@@ -69,14 +56,13 @@ func resolveProfile(model string) *modelProfile {
 	if model == "" {
 		return nil
 	}
-	m := variantTagRe.ReplaceAllString(strings.ToLower(model), "")
-	if !isClaudeModel(m) {
-		return nil
+	p := ResolveGptProfile(model)
+	return &modelProfile{
+		stripCols:   p.StripCols,
+		maxHeightPx: p.MaxHeightPx,
+		style:       p.Style,
+		pricing:     p,
 	}
-	if isPre47Claude(m) {
-		return claudeProfile(tierStandard)
-	}
-	return claudeProfile(tierHighRes)
 }
 
 const anthropicPatchPx = 28
@@ -152,10 +138,6 @@ func patchTokensForTier(tier visionTier, width, height int) int {
 	}
 	rw, rh := resizedSize(w, h, limits.maxLongEdge, limits.maxVisualTokens)
 	return patchTokens(rw, rh)
-}
-
-func visionTokens(tier visionTier, width, height int) int {
-	return patchTokensForTier(tier, width, height)
 }
 
 func ceilDiv(a, b int) int { return (a + b - 1) / b }

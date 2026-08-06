@@ -9,8 +9,7 @@ import (
 
 // Model scope: which models pxpipe may transform. Resolution order per call —
 // runtime override (SetAllowedModelBases) → PXPIPE_MODELS env CSV → built-in
-// default. This Go port transforms the Anthropic Messages surface only, so
-// only Claude-profile models render; the scope semantics still mirror TS.
+// default. Anthropic and OpenAI surfaces share this scope.
 
 var defaultModelBases = []string{"claude-fable-5", "gemini-3.6-flash"}
 
@@ -61,6 +60,10 @@ func allowedModelBases() []string {
 // GetAllowedModelBases returns the current effective allowed-model scope.
 func GetAllowedModelBases() []string { return allowedModelBases() }
 
+// GetConfiguredModelBases returns the PXPIPE_MODELS/default scope, ignoring
+// the runtime override.
+func GetConfiguredModelBases() []string { return envOrDefaultBases() }
+
 // SetAllowedModelBases sets a runtime override; nil clears it, an empty slice
 // compresses nothing.
 func SetAllowedModelBases(list []string) {
@@ -93,6 +96,9 @@ func isAllowed(model string) bool {
 		return false
 	}
 	base := strings.ToLower(variantTagRe.ReplaceAllString(model, ""))
+	if IsMisresolvedModelId(base) {
+		return false
+	}
 	unqualified, hasUnqualified := unqualifiedModelID(base)
 	hit := func(id, target string) bool {
 		return id == target || strings.HasPrefix(id, target+"-")
@@ -134,4 +140,50 @@ func IsAnthropicMessagesPath(pathname string) bool {
 	return pathname == "/v1/messages" ||
 		pathname == "/anthropic/v1/messages" ||
 		pathname == "/anthropic/messages"
+}
+
+// ApplicabilityReason explains why an Anthropic Messages request is or is not
+// eligible for transformation.
+type ApplicabilityReason string
+
+const (
+	ApplicabilityReasonEligible          ApplicabilityReason = "eligible"
+	ApplicabilityReasonUnsupportedModel  ApplicabilityReason = "unsupported_model"
+	ApplicabilityReasonUnsupportedMethod ApplicabilityReason = "unsupported_method"
+	ApplicabilityReasonUnsupportedPath   ApplicabilityReason = "unsupported_path"
+	ApplicabilityReasonEmptyBody         ApplicabilityReason = "empty_body"
+)
+
+// ApplicabilityInput describes the request fields used by the public
+// Anthropic Messages eligibility check. Empty Method or Path skips that check;
+// nil BodyBytes means its size is unknown.
+type ApplicabilityInput struct {
+	Model     string
+	Method    string
+	Path      string
+	BodyBytes *int64
+}
+
+// ApplicabilityResult is the outcome of ShouldTransformAnthropicMessages.
+type ApplicabilityResult struct {
+	Eligible bool
+	Reason   ApplicabilityReason
+}
+
+// ShouldTransformAnthropicMessages reports whether an Anthropic Messages
+// request is eligible for transformation.
+func ShouldTransformAnthropicMessages(input ApplicabilityInput) ApplicabilityResult {
+	if input.Method != "" && !strings.EqualFold(input.Method, "POST") {
+		return ApplicabilityResult{Reason: ApplicabilityReasonUnsupportedMethod}
+	}
+	if input.Path != "" && !IsAnthropicMessagesPath(input.Path) {
+		return ApplicabilityResult{Reason: ApplicabilityReasonUnsupportedPath}
+	}
+	if input.BodyBytes != nil && *input.BodyBytes <= 0 {
+		return ApplicabilityResult{Reason: ApplicabilityReasonEmptyBody}
+	}
+	if !IsSupportedModel(input.Model) {
+		return ApplicabilityResult{Reason: ApplicabilityReasonUnsupportedModel}
+	}
+	return ApplicabilityResult{Eligible: true, Reason: ApplicabilityReasonEligible}
 }
