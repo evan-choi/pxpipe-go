@@ -65,3 +65,47 @@ func TestGptHistoryOptionsInheritProfileAndEnvironment(t *testing.T) {
 		t.Errorf("max images = %d, want environment override 70", got.MaxImages)
 	}
 }
+
+func TestGptHistoryPlanReusesExactSectionSources(t *testing.T) {
+	pinned := "pin"
+	turns := []historyTurn{
+		{Text: "zero"},
+		{Text: "one"},
+		{Text: "pin", UserText: &pinned},
+		{Text: "three"},
+		{Text: "four"},
+	}
+	o := defaultGptHistoryOptions()
+	o.KeepTail = 0
+	o.MinCollapsePrefix = 1
+	o.MinCollapseTokens = 0
+	o.CollapseChunk = 0
+	o.FreezeChunk = 1
+	o.SectionTokens = 2
+	o.MaxImages = 10
+	o.tokenCounts = gptTokenCounter{"zero": 1, "one": 1, "pin": 1, "three": 1, "four": 1}
+
+	plan, err := planGptCollapse(turns, 0, func(string, int, int) bool { return true }, o)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if plan.Text != "zero\n\none\n\nthree\n\nfour" {
+		t.Fatalf("collapsed text = %q", plan.Text)
+	}
+	if len(plan.ImageSources) == 0 || len(plan.ImageSourcesAfter) == 0 {
+		t.Fatalf("expected images on both sides of pin: %+v", plan)
+	}
+	for _, source := range plan.ImageSources {
+		if source != "zero\n\none" {
+			t.Fatalf("before-pin source = %q", source)
+		}
+	}
+	for _, source := range plan.ImageSourcesAfter {
+		if source != "three\n\nfour" {
+			t.Fatalf("after-pin source = %q", source)
+		}
+	}
+	if plan.PinText == nil || *plan.PinText != pinned {
+		t.Fatalf("pin text = %v", plan.PinText)
+	}
+}
