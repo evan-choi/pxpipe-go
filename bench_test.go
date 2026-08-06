@@ -15,6 +15,51 @@ var benchmarkCachePrefixSHA string
 var benchmarkCachePrefixBytes int
 var benchmarkCachePrefixOK bool
 var factSheetEntries []FactSheetEntry
+var benchmarkGptEnvProfiles map[string]*GptModelProfile
+var benchmarkGptEnvOrder []string
+var benchmarkModelAllowed bool
+
+func BenchmarkGptEnvProfilesStableHit(b *testing.B) {
+	b.Setenv("PXPIPE_GPT_PROFILES", `{"gpt-5.4":{"stripCols":120}}`)
+	benchmarkGptEnvProfiles, benchmarkGptEnvOrder = gptEnvProfiles()
+	b.ReportAllocs()
+	b.ResetTimer()
+	for range b.N {
+		benchmarkGptEnvProfiles, benchmarkGptEnvOrder = gptEnvProfiles()
+	}
+}
+
+func BenchmarkGptEnvProfilesStableHitParallel(b *testing.B) {
+	b.Setenv("PXPIPE_GPT_PROFILES", `{"gpt-5.4":{"stripCols":120}}`)
+	gptEnvProfiles()
+	b.ReportAllocs()
+	b.ResetTimer()
+	b.RunParallel(func(pb *testing.PB) {
+		for pb.Next() {
+			gptEnvProfiles()
+		}
+	})
+}
+
+func BenchmarkIsSupportedGptModelStableHit(b *testing.B) {
+	b.Setenv("PXPIPE_GPT_PROFILES", "")
+	b.Run("configured_env", func(b *testing.B) {
+		b.Setenv("PXPIPE_MODELS", "gpt-5.4,claude-fable-5")
+		SetAllowedModelBases(nil)
+		b.ReportAllocs()
+		for range b.N {
+			benchmarkModelAllowed = IsSupportedGptModel("gpt-5.4-20260801")
+		}
+	})
+	b.Run("runtime_override", func(b *testing.B) {
+		SetAllowedModelBases([]string{"gpt-5.4", "claude-fable-5"})
+		b.Cleanup(func() { SetAllowedModelBases(nil) })
+		b.ReportAllocs()
+		for range b.N {
+			benchmarkModelAllowed = IsSupportedGptModel("gpt-5.4-20260801")
+		}
+	})
+}
 
 func BenchmarkTransformBigClaudeCode(b *testing.B) {
 	input, err := os.ReadFile(filepath.Join("testdata", "transform", "big-claude-code", "input.json"))
