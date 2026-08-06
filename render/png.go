@@ -7,7 +7,8 @@ import (
 	"hash/crc32"
 	"runtime"
 
-	"github.com/klauspost/compress/zlib"
+	"github.com/klauspost/compress/flate"
+	adler32 "github.com/mhr3/adler32-simd"
 )
 
 var pngSignature = []byte{0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a}
@@ -17,7 +18,7 @@ const maxCachedBufferBytes = 8 << 20
 type pngEncoder struct {
 	raw        bytes.Buffer
 	compressed bytes.Buffer
-	zw         *zlib.Writer
+	zw         *flate.Writer
 }
 
 var pngEncoderCache = make(chan *pngEncoder, runtime.GOMAXPROCS(0))
@@ -25,7 +26,7 @@ var pixelBufferCache = make(chan []byte, runtime.GOMAXPROCS(0))
 
 func newPNGEncoder() *pngEncoder {
 	e := &pngEncoder{}
-	e.zw, _ = zlib.NewWriterLevel(&e.compressed, 6)
+	e.zw, _ = flate.NewWriter(&e.compressed, 6)
 	return e
 }
 
@@ -99,9 +100,13 @@ func encodePNG(pixels []byte, width, height, bytesPerPixel int, colorType byte) 
 	}
 
 	e.compressed.Reset()
+	e.compressed.WriteString("\x78\x9c")
 	e.zw.Reset(&e.compressed)
 	_, _ = e.zw.Write(e.raw.Bytes())
 	_ = e.zw.Close()
+	var checksum [4]byte
+	binary.BigEndian.PutUint32(checksum[:], adler32.Checksum(e.raw.Bytes()))
+	e.compressed.Write(checksum[:])
 
 	compressed := e.compressed.Bytes()
 	out := make([]byte, len(compressed)+57)
