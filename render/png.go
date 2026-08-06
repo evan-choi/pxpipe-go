@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/binary"
 	"fmt"
+	"hash"
 	"hash/crc32"
 	"runtime"
 
@@ -12,20 +13,21 @@ import (
 )
 
 var pngSignature = []byte{0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a}
+var pngFilterNone [1]byte
 
 const maxCachedBufferBytes = 8 << 20
 
 type pngEncoder struct {
-	raw        bytes.Buffer
 	compressed bytes.Buffer
 	zw         *flate.Writer
+	checksum   hash.Hash32
 }
 
 var pngEncoderCache = make(chan *pngEncoder, runtime.GOMAXPROCS(0))
 var pixelBufferCache = make(chan []byte, runtime.GOMAXPROCS(0))
 
 func newPNGEncoder() *pngEncoder {
-	e := &pngEncoder{}
+	e := &pngEncoder{checksum: adler32.New()}
 	e.zw, _ = flate.NewWriter(&e.compressed, 6)
 	return e
 }
@@ -40,7 +42,7 @@ func getPNGEncoder() *pngEncoder {
 }
 
 func putPNGEncoder(e *pngEncoder) {
-	if e.raw.Cap() > maxCachedBufferBytes || e.compressed.Cap() > maxCachedBufferBytes {
+	if e.compressed.Cap() > maxCachedBufferBytes {
 		return
 	}
 	select {
@@ -90,22 +92,21 @@ func encodePNG(pixels []byte, width, height, bytesPerPixel int, colorType byte) 
 	ihdr[9] = colorType
 
 	e := getPNGEncoder()
-	e.raw.Reset()
-	stride := width*bytesPerPixel + 1
-	e.raw.Grow(stride * height)
 	rowLen := width * bytesPerPixel
-	for y := 0; y < height; y++ {
-		e.raw.WriteByte(0)
-		e.raw.Write(pixels[y*rowLen : (y+1)*rowLen])
-	}
-
 	e.compressed.Reset()
 	e.compressed.WriteString("\x78\x9c")
 	e.zw.Reset(&e.compressed)
-	_, _ = e.zw.Write(e.raw.Bytes())
+	e.checksum.Reset()
+	for y := 0; y < height; y++ {
+		row := pixels[y*rowLen : (y+1)*rowLen]
+		_, _ = e.zw.Write(pngFilterNone[:])
+		_, _ = e.zw.Write(row)
+		_, _ = e.checksum.Write(pngFilterNone[:])
+		_, _ = e.checksum.Write(row)
+	}
 	_ = e.zw.Close()
 	var checksum [4]byte
-	binary.BigEndian.PutUint32(checksum[:], adler32.Checksum(e.raw.Bytes()))
+	binary.BigEndian.PutUint32(checksum[:], e.checksum.Sum32())
 	e.compressed.Write(checksum[:])
 
 	compressed := e.compressed.Bytes()
