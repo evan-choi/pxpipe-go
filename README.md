@@ -36,8 +36,8 @@ func main() {
     anthropic, _ := url.Parse("https://api.anthropic.com")
     openAI, _ := url.Parse("https://api.openai.com")
     h := pxpipe.NewHandler(pxpipe.HandlerOptions{
-        Upstream:       anthropic,
-        OpenAIUpstream: openAI,
+        AnthropicUpstream: anthropic,
+        OpenAIUpstream:    openAI,
         OnResult: func(r *http.Request, res *pxpipe.TransformResult) {
             log.Printf("%s applied=%v reason=%s images=%d",
                 r.URL.Path, res.Applied, res.Reason, res.Info.ImageCount)
@@ -53,20 +53,33 @@ Then point Claude Code at it:
 ANTHROPIC_BASE_URL=http://127.0.0.1:47821 claude
 ```
 
-Canonical `/v1/messages` requests go to `Upstream`; canonical
+Canonical `/v1/messages` requests go to `AnthropicUpstream`; canonical
 `/v1/chat/completions`, `/v1/responses`, and `/v1/responses/*` requests go to
 `OpenAIUpstream`. `/v1/models` uses the request's auth style to choose between
-them. Both upstreams have the public API defaults shown above.
+them. Both upstreams have the public API defaults shown above. The old
+`Upstream` field remains as a deprecated shared fallback for either
+provider-specific field.
 
 Provider-prefixed paths (`/anthropic/*`, `/openai/*`,
-`/google-ai-studio/*`, `/compat/*`) keep their full path and go to the generic
-`Upstream`, which lets an API gateway route them. Supported POST bodies are
-still transformed by wire shape; `count_tokens`, unknown routes, and all
-responses (including SSE) pass through unchanged.
+`/google-ai-studio/*`, `/compat/*`) keep their full path and go to
+`AnthropicUpstream`, which lets an API gateway route them. Supported POST
+bodies are still transformed by wire shape; `count_tokens`, unknown routes,
+and all responses (including SSE) pass through unchanged.
 
 Set `APIKey` or `AuthToken`/`AuthTokenFunc` for Anthropic credentials and
 `OpenAIAPIKey` for OpenAI. Direct OpenAI requests never receive `x-api-key` or
 `anthropic-*` headers.
+
+The handler defaults to a 5-minute response-header timeout, a 2-minute stream
+idle timeout, and a 1-minute identical-request hold. Set
+`UpstreamHeadersTimeout`, `UpstreamIdleTimeout`, or `DuplicateHold` to a
+duration pointer; a pointer to zero disables that guard. `TransformFunc` can
+return live transform options per request and takes precedence over the static
+`Transform` value.
+
+A turn containing only `@pxpipe pin` or `@pxpipe unpin` is answered locally in
+the caller's Anthropic Messages, Chat Completions, or Responses wire format.
+Set `x-pxpipe-bypass: 1` to forward it instead.
 
 ### Custom routes
 
@@ -76,8 +89,8 @@ Set `ProtocolOf` to map your own paths to wire protocols; return
 
 ```go
 h := pxpipe.NewHandler(pxpipe.HandlerOptions{
-    Upstream:       anthropic,
-    OpenAIUpstream: openAI,
+    AnthropicUpstream: anthropic,
+    OpenAIUpstream:    openAI,
     ProtocolOf: func(path string) pxpipe.Protocol {
         switch path {
         case "/api/llm/claude":
