@@ -786,8 +786,20 @@ type renderedUnits struct {
 	Images       []*render.RenderedImage
 }
 
-func prepareUnitTexts(texts []string, o gptHistoryOptions) renderedUnits {
-	source := strings.Join(texts, "\n\n")
+func joinTextPrefixes(texts []string) (string, []int) {
+	ends := make([]int, len(texts))
+	n := 0
+	for i, text := range texts {
+		if i > 0 {
+			n += 2
+		}
+		n += len(text)
+		ends[i] = n
+	}
+	return strings.Join(texts, "\n\n"), ends
+}
+
+func prepareUnitText(source string, o gptHistoryOptions) renderedUnits {
 	safe := render.NeutralizeSentinel(source)
 	renderedText := safe
 	if o.Reflow {
@@ -941,15 +953,16 @@ func planResponsesMixedCollapse(items []any, old []responsesCompletedRound, stat
 			hitImageCap = true
 			break
 		}
+		texts := make([]string, len(run))
+		for i := range run {
+			texts[i] = run[i].Text
+		}
+		source, prefixEnds := joinTextPrefixes(texts)
 		low, high := 0, len(run)+1
 		var best renderedUnits
 		for low+1 < high {
 			count := (low + high) / 2
-			texts := make([]string, 0, count)
-			for _, u := range run[:count] {
-				texts = append(texts, u.Text)
-			}
-			planned := prepareUnitTexts(texts, o)
+			planned := prepareUnitText(source[:prefixEnds[count-1]], o)
 			imageCount := render.CountTextPages(planned.RenderedText, o.Cols, o.Style, o.MaxHeightPx)
 			if imageCount > 0 && imageCount <= remainingImages {
 				low = count
@@ -1129,15 +1142,16 @@ func planResponsesPairCollapse(items []any, isProfitable gptProfitableFn, o gptH
 			hitImageCap = true
 			break
 		}
+		texts := make([]string, len(run))
+		for i := range run {
+			texts[i] = run[i].Text
+		}
+		source, prefixEnds := joinTextPrefixes(texts)
 		low, high := 0, len(run)+1
 		var best renderedUnits
 		for low+1 < high {
 			count := (low + high) / 2
-			texts := make([]string, 0, count)
-			for _, round := range run[:count] {
-				texts = append(texts, round.Text)
-			}
-			planned := prepareUnitTexts(texts, o)
+			planned := prepareUnitText(source[:prefixEnds[count-1]], o)
 			imageCount := render.CountTextPages(planned.RenderedText, o.Cols, o.Style, o.MaxHeightPx)
 			if imageCount > 0 && imageCount <= remainingImages {
 				low = count
