@@ -6,6 +6,7 @@ import (
 	"regexp"
 	"strings"
 	"sync"
+	"sync/atomic"
 
 	"github.com/bytedance/sonic"
 	"github.com/bytedance/sonic/ast"
@@ -297,12 +298,16 @@ func candidateIds(m string) []string {
 // --- env override (PXPIPE_GPT_PROFILES) ------------------------------------
 
 var (
-	gptEnvMu  sync.Mutex
-	gptEnvRaw *string
-	gptEnvMap map[string]*GptModelProfile
-	// envOrder preserves insertion order for the longest-match tie rule.
-	gptEnvOrder []string
+	gptEnvMu    sync.Mutex
+	gptEnvCache atomic.Pointer[gptEnvSnapshot]
 )
+
+type gptEnvSnapshot struct {
+	raw      string
+	profiles map[string]*GptModelProfile
+	// order preserves insertion order for the longest-match tie rule.
+	order []string
+}
 
 type envVisionIn struct {
 	Regime             string   `json:"regime"`
@@ -571,13 +576,18 @@ func parseGptEnvProfiles(raw string) (map[string]*GptModelProfile, []string) {
 
 func gptEnvProfiles() (map[string]*GptModelProfile, []string) {
 	raw := os.Getenv("PXPIPE_GPT_PROFILES")
+	if cached := gptEnvCache.Load(); cached != nil && cached.raw == raw {
+		return cached.profiles, cached.order
+	}
 	gptEnvMu.Lock()
 	defer gptEnvMu.Unlock()
-	if gptEnvRaw == nil || *gptEnvRaw != raw {
-		gptEnvRaw = &raw
-		gptEnvMap, gptEnvOrder = parseGptEnvProfiles(raw)
+	if cached := gptEnvCache.Load(); cached != nil && cached.raw == raw {
+		return cached.profiles, cached.order
 	}
-	return gptEnvMap, gptEnvOrder
+	profiles, order := parseGptEnvProfiles(raw)
+	cached := &gptEnvSnapshot{raw: raw, profiles: profiles, order: order}
+	gptEnvCache.Store(cached)
+	return profiles, order
 }
 
 var bracketVariantRe = regexp.MustCompile(`\[[^\]]*\]`)

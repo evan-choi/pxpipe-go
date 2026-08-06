@@ -3,6 +3,7 @@ package pxpipe
 import (
 	"os"
 	"path/filepath"
+	"sync"
 	"testing"
 
 	"github.com/bytedance/sonic"
@@ -139,4 +140,31 @@ func TestGptEnvProfileOverride(t *testing.T) {
 	if got := ResolveGptProfile("gpt-5.4"); got.StripCols != 152 {
 		t.Errorf("malformed env should fall back: %+v", got.StripCols)
 	}
+}
+
+func TestGptEnvProfileRefresh(t *testing.T) {
+	t.Setenv("PXPIPE_GPT_PROFILES", `{"gpt-5.4":{"stripCols":120}}`)
+	if got := ResolveGptProfile("gpt-5.4").StripCols; got != 120 {
+		t.Fatalf("initial stripCols = %d, want 120", got)
+	}
+	t.Setenv("PXPIPE_GPT_PROFILES", `{"gpt-5.4":{"stripCols":144}}`)
+	if got := ResolveGptProfile("gpt-5.4").StripCols; got != 144 {
+		t.Fatalf("refreshed stripCols = %d, want 144", got)
+	}
+}
+
+func TestGptEnvProfileConcurrentCacheFill(t *testing.T) {
+	t.Setenv("PXPIPE_GPT_PROFILES", `{"gpt-cache-race":{"stripCols":123}}`)
+	start := make(chan struct{})
+	var wg sync.WaitGroup
+	for range 16 {
+		wg.Go(func() {
+			<-start
+			if got := ResolveGptProfile("gpt-cache-race").StripCols; got != 123 {
+				t.Errorf("stripCols = %d, want 123", got)
+			}
+		})
+	}
+	close(start)
+	wg.Wait()
 }

@@ -5,6 +5,7 @@ import (
 	"regexp"
 	"strings"
 	"sync"
+	"sync/atomic"
 )
 
 // Model scope: which models pxpipe may transform. Resolution order per call —
@@ -14,10 +15,20 @@ import (
 var defaultModelBases = []string{"claude-fable-5", "gemini-3.6-flash"}
 
 var (
-	runtimeModelBasesMu sync.RWMutex
-	runtimeModelBases   []string
-	hasRuntimeOverride  bool
+	runtimeModelBases         atomic.Pointer[modelBasesSnapshot]
+	configuredModelBasesMu    sync.Mutex
+	configuredModelBasesCache atomic.Pointer[configuredModelBasesSnapshot]
 )
+
+type modelBasesSnapshot struct {
+	bases []string
+}
+
+type configuredModelBasesSnapshot struct {
+	raw     string
+	present bool
+	bases   []string
+}
 
 func falsey(v string) bool {
 	switch strings.ToLower(strings.TrimSpace(v)) {
@@ -27,14 +38,13 @@ func falsey(v string) bool {
 	return false
 }
 
-func envOrDefaultBases() []string {
-	raw, ok := os.LookupEnv("PXPIPE_MODELS")
-	if !ok {
-		return append([]string(nil), defaultModelBases...)
+func parseConfiguredModelBases(raw string, present bool) []string {
+	if !present {
+		return defaultModelBases
 	}
 	trimmed := strings.TrimSpace(raw)
 	if trimmed == "" {
-		return append([]string(nil), defaultModelBases...)
+		return defaultModelBases
 	}
 	if falsey(trimmed) {
 		return nil
@@ -48,14 +58,31 @@ func envOrDefaultBases() []string {
 	return out
 }
 
-func allowedModelBases() []string {
-	runtimeModelBasesMu.RLock()
-	defer runtimeModelBasesMu.RUnlock()
-	if hasRuntimeOverride {
-		return append([]string(nil), runtimeModelBases...)
+func configuredModelBases() []string {
+	raw, present := os.LookupEnv("PXPIPE_MODELS")
+	if cached := configuredModelBasesCache.Load(); cached != nil && cached.raw == raw && cached.present == present {
+		return cached.bases
 	}
-	return envOrDefaultBases()
+	configuredModelBasesMu.Lock()
+	defer configuredModelBasesMu.Unlock()
+	if cached := configuredModelBasesCache.Load(); cached != nil && cached.raw == raw && cached.present == present {
+		return cached.bases
+	}
+	bases := parseConfiguredModelBases(raw, present)
+	configuredModelBasesCache.Store(&configuredModelBasesSnapshot{raw: raw, present: present, bases: bases})
+	return bases
 }
+
+func envOrDefaultBases() []string { return append([]string(nil), configuredModelBases()...) }
+
+func allowedModelBasesView() []string {
+	if snapshot := runtimeModelBases.Load(); snapshot != nil {
+		return snapshot.bases
+	}
+	return configuredModelBases()
+}
+
+func allowedModelBases() []string { return append([]string(nil), allowedModelBasesView()...) }
 
 // GetAllowedModelBases returns the current effective allowed-model scope.
 func GetAllowedModelBases() []string { return allowedModelBases() }
@@ -67,20 +94,17 @@ func GetConfiguredModelBases() []string { return envOrDefaultBases() }
 // SetAllowedModelBases sets a runtime override; nil clears it, an empty slice
 // compresses nothing.
 func SetAllowedModelBases(list []string) {
-	runtimeModelBasesMu.Lock()
-	defer runtimeModelBasesMu.Unlock()
 	if list == nil {
-		hasRuntimeOverride = false
-		runtimeModelBases = nil
+		runtimeModelBases.Store(nil)
 		return
 	}
-	hasRuntimeOverride = true
-	runtimeModelBases = runtimeModelBases[:0]
+	bases := make([]string, 0, len(list))
 	for _, s := range list {
 		if t := strings.TrimSpace(s); t != "" {
-			runtimeModelBases = append(runtimeModelBases, t)
+			bases = append(bases, t)
 		}
 	}
+	runtimeModelBases.Store(&modelBasesSnapshot{bases: bases})
 }
 
 func unqualifiedModelID(base string) (string, bool) {
@@ -103,7 +127,7 @@ func isAllowed(model string) bool {
 	hit := func(id, target string) bool {
 		return id == target || strings.HasPrefix(id, target+"-")
 	}
-	for _, b := range allowedModelBases() {
+	for _, b := range allowedModelBasesView() {
 		target := strings.ToLower(b)
 		if hit(base, target) || (hasUnqualified && hit(unqualified, target)) {
 			return true

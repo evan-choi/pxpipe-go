@@ -2,6 +2,7 @@ package pxpipe
 
 import (
 	"slices"
+	"sync"
 	"testing"
 )
 
@@ -10,12 +11,55 @@ func TestConfiguredModelBasesIgnoreRuntimeOverride(t *testing.T) {
 	SetAllowedModelBases([]string{"gpt-5.4"})
 	t.Cleanup(func() { SetAllowedModelBases(nil) })
 
+	configured := GetConfiguredModelBases()
+	if want := []string{"claude-opus-5", "gpt-5.6-sol"}; !slices.Equal(configured, want) {
+		t.Fatalf("GetConfiguredModelBases() = %v, want %v", configured, want)
+	}
+	configured[0] = "mutated"
 	if got, want := GetConfiguredModelBases(), []string{"claude-opus-5", "gpt-5.6-sol"}; !slices.Equal(got, want) {
 		t.Fatalf("GetConfiguredModelBases() = %v, want %v", got, want)
 	}
+	allowed := GetAllowedModelBases()
+	if want := []string{"gpt-5.4"}; !slices.Equal(allowed, want) {
+		t.Fatalf("GetAllowedModelBases() = %v, want %v", allowed, want)
+	}
+	allowed[0] = "mutated"
 	if got, want := GetAllowedModelBases(), []string{"gpt-5.4"}; !slices.Equal(got, want) {
 		t.Fatalf("GetAllowedModelBases() = %v, want %v", got, want)
 	}
+
+	t.Setenv("PXPIPE_MODELS", "gemini-3.6-flash")
+	if got, want := GetConfiguredModelBases(), []string{"gemini-3.6-flash"}; !slices.Equal(got, want) {
+		t.Fatalf("refreshed GetConfiguredModelBases() = %v, want %v", got, want)
+	}
+	SetAllowedModelBases(nil)
+	if got, want := GetAllowedModelBases(), []string{"gemini-3.6-flash"}; !slices.Equal(got, want) {
+		t.Fatalf("refreshed GetAllowedModelBases() = %v, want %v", got, want)
+	}
+}
+
+func TestAllowedModelBasesConcurrentAccess(t *testing.T) {
+	t.Setenv("PXPIPE_MODELS", "gpt-5.4")
+	SetAllowedModelBases(nil)
+	t.Cleanup(func() { SetAllowedModelBases(nil) })
+
+	var wg sync.WaitGroup
+	for range 4 {
+		wg.Go(func() {
+			for range 1_000 {
+				if !IsSupportedGptModel("gpt-5.4") {
+					t.Error("gpt-5.4 must remain allowed")
+				}
+			}
+		})
+	}
+	wg.Go(func() {
+		for range 1_000 {
+			SetAllowedModelBases([]string{"gpt-5.4"})
+			SetAllowedModelBases(nil)
+		}
+	})
+	wg.Wait()
 }
 
 func TestSupportedModelRejectsMisresolvedSibling(t *testing.T) {
