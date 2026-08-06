@@ -1,6 +1,7 @@
 package pxpipe
 
 import (
+	"encoding/base64"
 	"strconv"
 	"strings"
 	"testing"
@@ -42,6 +43,15 @@ func TestJSStringifyObjectOrderAndExtras(t *testing.T) {
 	}
 	if got, want := string(jsStringifyCap(unordered, 128)), `{"first":1,"second":2}`; got != want {
 		t.Fatalf("preallocated jsStringify() = %s, want %s", got, want)
+	}
+}
+
+func TestJSStringifyAnthropicImage(t *testing.T) {
+	png := []byte{0, 1, 2, 253, 254, 255}
+	got := string(jsStringify(makeImageBlock(base64.StdEncoding.EncodeToString(png))))
+	want := `{"type":"image","source":{"type":"base64","media_type":"image/png","data":"AAEC/f7/"}}`
+	if got != want {
+		t.Fatalf("jsStringify(image) = %s, want %s", got, want)
 	}
 }
 
@@ -136,5 +146,15 @@ func BenchmarkJSStringifyString(b *testing.B) {
 	b.ResetTimer()
 	for range b.N {
 		benchmarkJSONString = jsStringifyString(m)
+	}
+}
+
+func BenchmarkJSStringifyAnthropicImage(b *testing.B) {
+	png := make([]byte, 256<<10)
+	b.SetBytes(int64(len(png)))
+	b.ReportAllocs()
+	b.ResetTimer()
+	for range b.N {
+		benchmarkJSONBytes = jsStringify(makeImageBlock(base64.StdEncoding.EncodeToString(png)))
 	}
 }
