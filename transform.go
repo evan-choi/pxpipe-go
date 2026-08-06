@@ -229,6 +229,9 @@ type TransformInfo struct {
 	NativeInjectedTokens int                   `json:"nativeInjectedTokens,omitempty"`
 	ImageSourceTexts     []string              `json:"imageSourceTexts,omitempty"`
 	ResponsesComposition *ResponsesComposition `json:"responsesComposition,omitempty"`
+
+	cacheControlMarkers      int
+	cacheControlMarkersKnown bool
 }
 
 // ResponsesComposition is the local o200k decomposition of a Responses
@@ -1390,6 +1393,8 @@ func TransformRequest(body []byte, opts *TransformOptions) (outBody []byte, info
 		info.Compressed = false
 		return body, info
 	}
+	info.cacheControlMarkers = countCacheControlValue(req)
+	info.cacheControlMarkersKnown = true
 	return out, info
 }
 
