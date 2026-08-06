@@ -258,8 +258,7 @@ var gemini36FlashProfile = &GptModelProfile{
 }
 
 func isGeminiModel(model string) bool {
-	id := strings.ToLower(model)
-	return id == "gemini-3.6-flash" || id == "google/gemini-3.6-flash"
+	return model == "gemini-3.6-flash" || model == "google/gemini-3.6-flash"
 }
 
 func isGrokModel(m string) bool { return strings.HasPrefix(m, "grok-") }
