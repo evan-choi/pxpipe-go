@@ -115,7 +115,10 @@ func TransformAnthropicMessages(input TransformInput) *TransformResult {
 	res.Reason = classifyReason(info)
 	res.Detail = info.Reason
 	res.Info = info
-	markerCount := CountCacheControlMarkers(body)
+	markerCount := info.cacheControlMarkers
+	if !info.cacheControlMarkersKnown {
+		markerCount = CountCacheControlMarkers(body)
+	}
 	res.Cache.MarkerCount = markerCount
 	res.Cache.OwnsCacheControl = info.Compressed && markerCount > 0
 	return res

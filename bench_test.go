@@ -20,6 +20,7 @@ var benchmarkGptEnvProfiles map[string]*GptModelProfile
 var benchmarkGptEnvOrder []string
 var benchmarkGptProfile *GptModelProfile
 var benchmarkModelAllowed bool
+var benchmarkTransformResult *TransformResult
 
 func BenchmarkGptEnvProfilesStableHit(b *testing.B) {
 	b.Setenv("PXPIPE_GPT_PROFILES", `{"gpt-5.4":{"stripCols":120}}`)
@@ -99,6 +100,22 @@ func BenchmarkTransformBigClaudeCode(b *testing.B) {
 	for i := 0; i < b.N; i++ {
 		_, info := TransformRequest(input, opts)
 		if !info.Compressed {
+			b.Fatal("expected compression")
+		}
+	}
+}
+
+func BenchmarkTransformAnthropicMessages(b *testing.B) {
+	input, err := os.ReadFile(filepath.Join("testdata", "transform", "big-claude-code", "input.json"))
+	if err != nil {
+		b.Fatal(err)
+	}
+	b.SetBytes(int64(len(input)))
+	b.ReportAllocs()
+	b.ResetTimer()
+	for range b.N {
+		benchmarkTransformResult = TransformAnthropicMessages(TransformInput{Body: input, Model: "claude-fable-5"})
+		if !benchmarkTransformResult.Applied {
 			b.Fatal("expected compression")
 		}
 	}

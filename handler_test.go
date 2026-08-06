@@ -71,6 +71,34 @@ func TestHandlerTransformsMessagesRoute(t *testing.T) {
 	}
 }
 
+func TestTransformAnthropicMessagesMarkerCount(t *testing.T) {
+	input, err := os.ReadFile(filepath.Join("testdata", "transform", "big-claude-code", "input.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	result := TransformAnthropicMessages(TransformInput{Body: input, Model: "claude-fable-5"})
+	if !result.Applied || !result.Info.cacheControlMarkersKnown {
+		t.Fatalf("expected applied transform with parsed marker count: %+v", result)
+	}
+	if want := CountCacheControlMarkers(result.Body); result.Cache.MarkerCount != want {
+		t.Fatalf("marker count = %d, want %d", result.Cache.MarkerCount, want)
+	}
+	if result.Cache.OwnsCacheControl != (result.Cache.MarkerCount > 0) {
+		t.Fatalf("cache ownership = %v for %d markers", result.Cache.OwnsCacheControl, result.Cache.MarkerCount)
+	}
+
+	disabled := false
+	result = TransformAnthropicMessages(TransformInput{
+		Body: input, Model: "claude-fable-5", Options: &TransformOptions{Compress: &disabled},
+	})
+	if result.Info.cacheControlMarkersKnown {
+		t.Fatal("compress=false result unexpectedly used parsed marker count")
+	}
+	if want := CountCacheControlMarkers(input); result.Cache.MarkerCount != want {
+		t.Fatalf("fallback marker count = %d, want %d", result.Cache.MarkerCount, want)
+	}
+}
+
 func TestHandlerPassesThroughOtherRoutes(t *testing.T) {
 	var upstreamBody []byte
 	up := upstreamEcho(t, &upstreamBody)
