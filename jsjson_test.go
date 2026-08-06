@@ -3,6 +3,7 @@ package pxpipe
 import (
 	"strconv"
 	"strings"
+	"sync"
 	"testing"
 )
 
@@ -81,8 +82,9 @@ func TestCachePrefixDigestJoinsSerializedParts(t *testing.T) {
 	setObjKeyOrder(tool, []string{"name", "description"})
 	system := textBlock("시스템")
 	history := textBlock(HistorySyntheticIntro)
+	image := makeImageBlock([]byte{0, 1, 2, 253, 254, 255})
 	tail := textBlock("끝")
-	message := map[string]any{"role": "assistant", "content": []any{history, "raw", tail}}
+	message := map[string]any{"role": "assistant", "content": []any{history, image, "raw", tail}}
 	setObjKeyOrder(message, []string{"role", "content"})
 	req := map[string]any{
 		"tools":    []any{tool},
@@ -94,19 +96,36 @@ func TestCachePrefixDigestJoinsSerializedParts(t *testing.T) {
 		string(jsStringify(tool)),
 		string(jsStringify(system)),
 		string(jsStringify(history)),
+		string(jsStringify(image)),
 		"raw",
 		string(jsStringify(tail)),
 	}, "\x00")
+	wantSHA := sha8(prefix)
+	wantBytes := u16len(prefix)
 	gotSHA, gotBytes, ok := cachePrefixDigest(req)
 	if !ok {
 		t.Fatal("cachePrefixDigest() did not find history boundary")
 	}
-	if want := sha8(prefix); gotSHA != want {
-		t.Fatalf("cachePrefixDigest() sha = %q, want %q", gotSHA, want)
+	if gotSHA != wantSHA {
+		t.Fatalf("cachePrefixDigest() sha = %q, want %q", gotSHA, wantSHA)
 	}
-	if want := u16len(prefix); gotBytes != want {
-		t.Fatalf("cachePrefixDigest() bytes = %d, want %d", gotBytes, want)
+	if gotBytes != wantBytes {
+		t.Fatalf("cachePrefixDigest() bytes = %d, want %d", gotBytes, wantBytes)
 	}
+
+	var wg sync.WaitGroup
+	for range 32 {
+		wg.Go(func() {
+			for range 20 {
+				sha, bytes, ok := cachePrefixDigest(req)
+				if !ok || sha != wantSHA || bytes != wantBytes {
+					t.Errorf("concurrent cachePrefixDigest() = %q, %d, %v", sha, bytes, ok)
+					return
+				}
+			}
+		})
+	}
+	wg.Wait()
 }
 
 func BenchmarkAppendJSOrderedObject(b *testing.B) {
