@@ -1100,21 +1100,23 @@ func cachePrefixDigest(req map[string]any) (string, int, bool) {
 	if boundary < 0 {
 		return "", 0, false
 	}
-	prefix := make([]byte, 0, 4096)
+	h := sha256.New()
+	var separator [1]byte
+	scratch := make([]byte, 0, 4096)
 	partCount := 0
+	prefixUnits := 0
 	appendString := func(s string) {
 		if partCount > 0 {
-			prefix = append(prefix, 0)
+			_, _ = h.Write(separator[:])
+			prefixUnits++
 		}
-		prefix = append(prefix, s...)
+		_, _ = h.Write(unsafe.Slice(unsafe.StringData(s), len(s)))
+		prefixUnits += u16len(s)
 		partCount++
 	}
 	appendValue := func(v any) {
-		if partCount > 0 {
-			prefix = append(prefix, 0)
-		}
-		prefix = appendJSValue(prefix, v)
-		partCount++
+		scratch = appendJSValue(scratch[:0], v)
+		appendString(unsafe.String(unsafe.SliceData(scratch), len(scratch)))
 	}
 	if tools, ok := asArr(req["tools"]); ok {
 		for _, t := range tools {
@@ -1145,11 +1147,8 @@ func cachePrefixDigest(req map[string]any) (string, int, bool) {
 			}
 		}
 	}
-	prefixText := ""
-	if len(prefix) > 0 {
-		prefixText = unsafe.String(unsafe.SliceData(prefix), len(prefix))
-	}
-	return sha8(prefixText), u16len(prefixText), true
+	var sum [sha256.Size]byte
+	return hex.EncodeToString(h.Sum(sum[:0])[:4]), prefixUnits, true
 }
 
 func countOutgoingTextChars(req map[string]any) int {
