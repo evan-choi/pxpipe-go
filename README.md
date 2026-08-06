@@ -194,36 +194,37 @@ Known deviations:
 
 ## Performance
 
-![pxpipe versus pxpipe-go benchmark: pxpipe-go is 7.2 to 46.4 times faster across four workloads and uses 59.2% less peak RSS](docs/benchmark-improvements.png)
+![pxpipe versus pxpipe-go benchmark: pxpipe-go is 10.3 to 44.9 times faster across four workloads and uses 64.3% less peak RSS](docs/benchmark-improvements.png)
 
-Measured on an Apple M1 Pro with Node 26.5.0 and Go 1.26.3. Values are medians
-of five runs with three timed iterations per run, comparing `pxpipe@508fc9d`
-with `pxpipe-go@406cce7` (2026-08-06). Actual latency varies with CPU
-architecture and request content.
+Measured on an Apple M1 Pro with Node 26.5.0 and Go 1.26.5. Values are medians
+of five runs: three timed iterations per run for pxpipe and one-second
+benchmark windows for pxpipe-go. The comparison uses `pxpipe@a9b9759` and
+`pxpipe-go@0e0159d` (2026-08-06). Actual latency varies with CPU architecture
+and request content.
 
 | benchmark | pxpipe time/op | pxpipe-go time/op | speedup |
 |---|---:|---:|---:|
-| TransformBigClaudeCode | 156.20 ms | 21.66 ms | 7.2× |
-| RenderDensePage | 391.20 ms | 8.43 ms | 46.4× |
-| TransformOpenAIChat | 119.10 ms | 7.77 ms | 15.3× |
-| TransformOpenAIResponses | 640.00 ms | 44.15 ms | 14.5× |
+| TransformBigClaudeCode | 160.60 ms | 15.54 ms | 10.3× |
+| RenderDensePage | 392.20 ms | 8.73 ms | 44.9× |
+| TransformOpenAIChat | 119.10 ms | 7.00 ms | 17.0× |
+| TransformOpenAIResponses | 643.90 ms | 15.47 ms | 41.6× |
 
 Peak RSS was measured over the full four-benchmark suite in a fresh process
 for each run:
 
 | implementation | median peak RSS | relative to pxpipe |
 |---|---:|---:|
-| pxpipe | 305.22 MiB | baseline |
-| pxpipe-go | 124.66 MiB | 59.2% lower |
+| pxpipe | 312.81 MiB | baseline |
+| pxpipe-go | 111.55 MiB | 64.3% lower |
 
 Go's `-benchmem` output reports the following allocation volume per operation:
 
 | benchmark | B/op | allocs/op |
 |---|---:|---:|
-| TransformBigClaudeCode | 4,896,602 | 3,855 |
-| RenderDensePage | 803,208 | 73 |
-| TransformOpenAIChat | 1,243,930 | 1,779 |
-| TransformOpenAIResponses | 3,436,256 | 2,351 |
+| TransformBigClaudeCode | 2,433,839 | 3,746 |
+| RenderDensePage | 801,769 | 70 |
+| TransformOpenAIChat | 1,078,375 | 1,763 |
+| TransformOpenAIResponses | 1,991,467 | 2,073 |
 
 Raw GC counts are not compared because V8 and Go use different collectors and
 event semantics. Peak RSS is the cross-runtime memory metric; `B/op` and
@@ -236,9 +237,9 @@ for benchmark_run in 1 2 3 4 5; do
   (cd pxpipe && pnpm exec tsx ../tools/bench-ts.ts)
 done
 
-go test -run '^$' \
+GOTOOLCHAIN=go1.26.5 go test -run '^$' \
   -bench '^(BenchmarkTransformBigClaudeCode|BenchmarkRenderDensePage|BenchmarkTransformOpenAIChat|BenchmarkTransformOpenAIResponses)$' \
-  -benchtime=3x -benchmem -count=5 .
+  -benchtime=1s -benchmem -count=5 .
 ```
 
 On macOS, reproduce peak RSS by running each suite in a fresh process five
@@ -252,11 +253,11 @@ for benchmark_run in 1 2 3 4 5; do
     /usr/bin/time -l pnpm exec tsx ../tools/bench-ts.ts >/dev/null)
 done
 
-go test -c -o /tmp/pxpipe-go-bench.test .
+GOTOOLCHAIN=go1.26.5 go test -c -o /tmp/pxpipe-go-bench.test .
 for benchmark_run in 1 2 3 4 5; do
   /usr/bin/time -l /tmp/pxpipe-go-bench.test -test.run '^$' \
     -test.bench '^(BenchmarkTransformBigClaudeCode|BenchmarkRenderDensePage|BenchmarkTransformOpenAIChat|BenchmarkTransformOpenAIResponses)$' \
-    -test.benchtime=3x -test.count=1 >/dev/null
+    -test.benchtime=1s -test.count=1 >/dev/null
 done
 ```
 
