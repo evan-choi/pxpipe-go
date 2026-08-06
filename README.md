@@ -156,7 +156,7 @@ Known deviations:
 
 ## Performance
 
-![Benchmark reductions versus main: 70–86% lower latency and 57–95% fewer allocated bytes](docs/benchmark-improvements.svg)
+![Benchmark reductions versus main: 70–86% lower latency and 57–95% fewer allocated bytes](docs/benchmark-improvements.png)
 
 Measured on Linux arm64 with 2 vCPUs and Go 1.26.5. Values are medians of five
 runs with three iterations per run, comparing `main@9df7eea` with `f464a22`
