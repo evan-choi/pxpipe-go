@@ -287,12 +287,23 @@ func resolveGptBuiltin(m string) *GptModelProfile {
 	return DefaultGptProfile
 }
 
-// candidateIds returns both spellings of a vendor-qualified id.
-func candidateIds(m string) []string {
+// candidateIds returns both spellings of a vendor-qualified id without
+// allocating a result slice on the request path.
+func candidateIds(m string) ([2]string, int) {
 	if slash := strings.LastIndexByte(m, '/'); slash >= 0 {
-		return []string{m, m[slash+1:]}
+		return [2]string{m, m[slash+1:]}, 2
 	}
-	return []string{m}
+	return [2]string{m}, 1
+}
+
+var bracketVariantRe = regexp.MustCompile(`\[[^\]]*\]`)
+
+func stripBracketVariants(s string) string {
+	start := strings.IndexByte(s, '[')
+	if start < 0 || strings.IndexByte(s[start+1:], ']') < 0 {
+		return s
+	}
+	return bracketVariantRe.ReplaceAllString(s, "")
 }
 
 // --- env override (PXPIPE_GPT_PROFILES) ------------------------------------
@@ -590,14 +601,12 @@ func gptEnvProfiles() (map[string]*GptModelProfile, []string) {
 	return profiles, order
 }
 
-var bracketVariantRe = regexp.MustCompile(`\[[^\]]*\]`)
-
 // ResolveGptProfile resolves the render/pricing profile for a model id,
 // mirroring resolveGptProfile in gpt-model-profiles.ts.
 func ResolveGptProfile(model string) *GptModelProfile {
-	m := bracketVariantRe.ReplaceAllString(strings.ToLower(model), "")
-	ids := candidateIds(m)
-	for _, id := range ids {
+	m := stripBracketVariants(strings.ToLower(model))
+	ids, idCount := candidateIds(m)
+	for _, id := range ids[:idCount] {
 		if isGeminiModel(id) {
 			return gemini36FlashProfile
 		}
@@ -608,7 +617,7 @@ func ResolveGptProfile(model string) *GptModelProfile {
 		bestLen := -1
 		for _, k := range order {
 			p := env[k]
-			for _, id := range ids {
+			for _, id := range ids[:idCount] {
 				if strings.HasPrefix(id, k) && len(k) > bestLen {
 					best = p
 					bestLen = len(k)
@@ -619,24 +628,23 @@ func ResolveGptProfile(model string) *GptModelProfile {
 			return best
 		}
 	}
-	if len(ids) > 1 {
+	if idCount > 1 {
 		if q := resolveGptBuiltin(ids[0]); q != DefaultGptProfile {
 			return q
 		}
 	}
-	return resolveGptBuiltin(ids[len(ids)-1])
+	return resolveGptBuiltin(ids[idCount-1])
 }
 
 // hasDeclaredGptProfile reports whether the operator declared this id in
 // PXPIPE_GPT_PROFILES.
-func hasDeclaredGptProfile(m string) bool {
+func hasDeclaredGptProfile(ids [2]string, idCount int) bool {
 	env, _ := gptEnvProfiles()
 	if len(env) == 0 {
 		return false
 	}
-	ids := candidateIds(m)
 	for k := range env {
-		for _, id := range ids {
+		for _, id := range ids[:idCount] {
 			if strings.HasPrefix(id, k) {
 				return true
 			}
@@ -649,10 +657,10 @@ func hasDeclaredGptProfile(m string) bool {
 // does not match that family's profile test (e.g. gemini-3.6-pro).
 func IsMisresolvedModelId(model string) bool {
 	m := strings.ToLower(model)
-	if hasDeclaredGptProfile(m) {
+	ids, idCount := candidateIds(m)
+	if hasDeclaredGptProfile(ids, idCount) {
 		return false
 	}
-	ids := candidateIds(m)
 	type guard struct {
 		mentions func(string) bool
 		matches  func(string) bool
@@ -663,7 +671,7 @@ func IsMisresolvedModelId(model string) bool {
 	}
 	for _, g := range guards {
 		mentioned, matched := false, false
-		for _, id := range ids {
+		for _, id := range ids[:idCount] {
 			if g.mentions(id) {
 				mentioned = true
 			}

@@ -50,8 +50,6 @@ func isPre47Claude(m string) bool {
 	return major < 4 || (major == 4 && minor < 7)
 }
 
-var variantTagRe = regexp.MustCompile(`\[[^\]]*\]`)
-
 func resolveProfile(model string) *modelProfile {
 	if model == "" {
 		return nil

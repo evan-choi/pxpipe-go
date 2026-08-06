@@ -119,7 +119,7 @@ func isAllowed(model string) bool {
 	if model == "" {
 		return false
 	}
-	base := strings.ToLower(variantTagRe.ReplaceAllString(model, ""))
+	base := stripBracketVariants(strings.ToLower(model))
 	if IsMisresolvedModelId(base) {
 		return false
 	}

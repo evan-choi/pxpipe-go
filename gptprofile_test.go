@@ -142,6 +142,20 @@ func TestGptEnvProfileOverride(t *testing.T) {
 	}
 }
 
+func TestStripBracketVariants(t *testing.T) {
+	tests := map[string]string{
+		"gpt-5.4":                 "gpt-5.4",
+		"gpt[preview]-5[dated].4": "gpt-5.4",
+		"gpt-[unterminated":       "gpt-[unterminated",
+		"a[[nested]b]":            "ab]",
+	}
+	for input, want := range tests {
+		if got := stripBracketVariants(input); got != want {
+			t.Errorf("stripBracketVariants(%q) = %q, want %q", input, got, want)
+		}
+	}
+}
+
 func TestGptEnvProfileRefresh(t *testing.T) {
 	t.Setenv("PXPIPE_GPT_PROFILES", `{"gpt-5.4":{"stripCols":120}}`)
 	if got := ResolveGptProfile("gpt-5.4").StripCols; got != 120 {
