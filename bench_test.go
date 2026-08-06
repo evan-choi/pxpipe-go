@@ -72,6 +72,24 @@ func BenchmarkRenderDensePage(b *testing.B) {
 	}
 }
 
+func BenchmarkRenderColorPage(b *testing.B) {
+	input, err := os.ReadFile(filepath.Join("testdata", "render", "multi-page", "input.txt"))
+	if err != nil {
+		b.Fatal(err)
+	}
+	text := string(input)
+	style := render.DenseRenderStyle
+	style.ColorCycle = true
+	b.SetBytes(int64(len(input)))
+	b.ReportAllocs()
+	b.ResetTimer()
+	for range b.N {
+		if _, err := render.RenderTextToImages(text, render.RenderOptions{Reflow: true, Style: &style}); err != nil {
+			b.Fatal(err)
+		}
+	}
+}
+
 func BenchmarkRenderDensePageParallel(b *testing.B) {
 	input, err := os.ReadFile(filepath.Join("testdata", "render", "multi-page", "input.txt"))
 	if err != nil {

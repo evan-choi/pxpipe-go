@@ -812,16 +812,36 @@ func renderWrappedLinesToPNG(fitLines, fitSlotLines []string, charsRendered, col
 	width := 2*PadX + cols*cellW + overhang
 	height := 2*PadY + len(fitLines)*cellH
 
-	fb := getPixelBuffer(width * height)
-	var markerMask []byte
-	if style.MarkerRed {
-		markerMask = make([]byte, width*height)
-	}
+	pixelCount := width * height
 	useColorCycle := style.ColorCycle
 	useColorByRole := style.ColorByRole
+	useColor := useColorCycle || useColorByRole
+	scratchLen := pixelCount
+	if style.MarkerRed {
+		scratchLen += pixelCount
+	}
+	if useColor {
+		scratchLen += pixelCount
+	}
+	if style.MarkerRed || useColor {
+		scratchLen += 3 * pixelCount
+	}
+	scratch := getPixelBuffer(scratchLen)
+	fb := scratch[:pixelCount]
+	nextScratch := pixelCount
+	var markerMask []byte
+	if style.MarkerRed {
+		markerMask = scratch[nextScratch : nextScratch+pixelCount]
+		nextScratch += pixelCount
+	}
 	var colorMask []byte
-	if useColorCycle || useColorByRole {
-		colorMask = make([]byte, width*height)
+	if useColor {
+		colorMask = scratch[nextScratch : nextScratch+pixelCount]
+		nextScratch += pixelCount
+	}
+	var rgb []byte
+	if markerMask != nil || colorMask != nil {
+		rgb = scratch[nextScratch : nextScratch+3*pixelCount]
 	}
 	inkPalette := glyphPalette
 	if useColorByRole {
@@ -953,7 +973,6 @@ func renderWrappedLinesToPNG(fitLines, fitSlotLines []string, charsRendered, col
 	var err error
 	switch {
 	case colorMask != nil:
-		rgb := make([]byte, width*height*3)
 		for i := range fb {
 			g := int(fb[i])
 			slot := int(colorMask[i])
@@ -980,7 +999,6 @@ func renderWrappedLinesToPNG(fitLines, fitSlotLines []string, charsRendered, col
 		}
 		png, err = EncodeRGBPNG(rgb, width, height)
 	case markerMask != nil:
-		rgb := make([]byte, width*height*3)
 		for i := range fb {
 			g := fb[i]
 			if markerMask[i] == 1 && g < 128 {
@@ -997,7 +1015,7 @@ func renderWrappedLinesToPNG(fitLines, fitSlotLines []string, charsRendered, col
 	default:
 		png, err = EncodeGrayPNG(fb, width, height)
 	}
-	putPixelBuffer(fb)
+	putPixelBuffer(scratch)
 	if err != nil {
 		return nil, err
 	}
