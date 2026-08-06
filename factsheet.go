@@ -2,7 +2,7 @@ package pxpipe
 
 import (
 	"regexp"
-	"sort"
+	"slices"
 	"strconv"
 	"strings"
 )
@@ -382,51 +382,68 @@ func ExtractFactSheetEntries(text string) []FactSheetEntry {
 }
 
 func budgetEntries(all []string, counts map[string]int, collapse bool) []FactSheetEntry {
-	candidates := all
+	type ranked struct {
+		t      string
+		mask   uint32
+		length uint16
+		tier   uint8
+	}
+	rs := make([]ranked, len(all))
+	for i, t := range all {
+		var mask uint32
+		for j := 0; j < len(t); j++ {
+			mask |= 1 << (t[j] & 31)
+		}
+		rs[i] = ranked{t: t, mask: mask, length: uint16(u16len(t))}
+	}
 	if collapse {
-		ordered := all
-		sort.SliceStable(ordered, func(i, j int) bool {
-			li, lj := u16len(ordered[i]), u16len(ordered[j])
-			if li != lj {
-				return li > lj
+		slices.SortFunc(rs, func(a, b ranked) int {
+			if a.length > b.length {
+				return -1
 			}
-			return ordered[i] < ordered[j]
+			if a.length < b.length {
+				return 1
+			}
+			return strings.Compare(a.t, b.t)
 		})
-		specific := ordered[:0]
-		for _, t := range ordered {
+		specific := rs[:0]
+		for _, token := range rs {
 			sub := false
-			for _, k := range specific {
-				if len(k) == len(t) {
+			for _, container := range specific {
+				if len(container.t) == len(token.t) {
 					continue
 				}
-				if strings.Contains(k, t) {
+				if container.mask&token.mask != token.mask {
+					continue
+				}
+				if strings.Contains(container.t, token.t) {
 					sub = true
 					break
 				}
 			}
 			if !sub {
-				specific = append(specific, t)
+				specific = append(specific, token)
 			}
 		}
-		candidates = specific
+		rs = specific
 	}
-	type ranked struct {
-		t    string
-		tier int
+	for i := range rs {
+		rs[i].tier = uint8(priorityTier(rs[i].t))
 	}
-	rs := make([]ranked, len(candidates))
-	for i, t := range candidates {
-		rs[i] = ranked{t, priorityTier(t)}
-	}
-	sort.SliceStable(rs, func(i, j int) bool {
-		if rs[i].tier != rs[j].tier {
-			return rs[i].tier < rs[j].tier
+	slices.SortFunc(rs, func(a, b ranked) int {
+		if a.tier < b.tier {
+			return -1
 		}
-		li, lj := u16len(rs[i].t), u16len(rs[j].t)
-		if li != lj {
-			return li > lj
+		if a.tier > b.tier {
+			return 1
 		}
-		return rs[i].t < rs[j].t
+		if a.length > b.length {
+			return -1
+		}
+		if a.length < b.length {
+			return 1
+		}
+		return strings.Compare(a.t, b.t)
 	})
 	var kept []FactSheetEntry
 	urls := 0
