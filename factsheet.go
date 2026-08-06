@@ -42,20 +42,20 @@ var fsPatterns = []fsPattern{
 	{re: regexp.MustCompile(`\bhttps?://[^\s)"'<>]+`), required: fsHasColon | fsHasSlash | fsHasLower},
 	{re: regexp.MustCompile("\\b[A-Za-z0-9.!#$%&'*+/=?^_`{|}~-]+@[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?(?:\\.[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?)+\\b"), required: fsHasAt | fsHasDot},
 	{re: regexp.MustCompile(`\b[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}\b`), required: fsHasDash},
-	{re: regexp.MustCompile(`\b[A-Z]{2}\d{2}[A-Z0-9]{8,30}\b`), required: fsHasUpper | fsHasDigit},
+	{scan: nextFactSheetIBAN, required: fsHasUpper | fsHasDigit},
 	{scan: nextFactSheetCurrency, required: fsHasDigit},
 	{re: regexp.MustCompile(`(?:[\w@~+-]+)?(?:/[\w.@+-]+)+\.[A-Za-z]\w{0,8}\b`), required: fsHasSlash | fsHasDot},
 	{re: regexp.MustCompile(`/[\w.@+-]+(?:/[\w.@+-]+)+/?`), required: fsHasSlash},
 	// git sha / long hex: JS `(?=[0-9a-f]*\d)` emulated via verify.
 	{scan: nextFactSheetHex, required: fsHasDigit},
-	{re: regexp.MustCompile(`\bv?\d+\.\d+(?:\.\d+)?(?:[-+][\w.]+)?\b`), required: fsHasDigit | fsHasDot},
+	{scan: nextFactSheetVersion, required: fsHasDigit | fsHasDot},
 	{scan: nextFactSheetFlag, required: fsHasDash},
 	{scan: nextFactSheetLargeNumber, required: fsHasDigit},
-	{re: regexp.MustCompile(`\b\d+\.\d+\b`), required: fsHasDigit | fsHasDot},
+	{scan: nextFactSheetDecimal, required: fsHasDigit | fsHasDot},
 	{re: regexp.MustCompile(`\b[A-Z][A-Z0-9]{2,}(?:_[A-Z0-9]+)+\b`), required: fsHasUpper | fsHasUnderscore},
 	{re: regexp.MustCompile(`\b(?:[a-z]+|[A-Z][a-z0-9]+)(?:[A-Z][a-z0-9]*)+\b`), required: fsHasUpper | fsHasLower},
 	// ticket/advisory codes: JS `(?=[A-Z0-9-]{0,119}\d)` emulated via verify.
-	{re: regexp.MustCompile(`\b[A-Z][A-Z0-9]+(?:-[A-Z0-9]+)+\b`), verify: regexp.MustCompile(`^[A-Z0-9-]{0,119}\d`), required: fsHasUpper | fsHasDash | fsHasDigit},
+	{scan: nextFactSheetTicket, required: fsHasUpper | fsHasDash | fsHasDigit},
 }
 
 func isFactSheetASCIIAlpha(c byte) bool {
@@ -64,6 +64,158 @@ func isFactSheetASCIIAlpha(c byte) bool {
 
 func isFactSheetASCIIWord(c byte) bool {
 	return isFactSheetASCIIAlpha(c) || c >= '0' && c <= '9' || c == '_'
+}
+
+func isFactSheetASCIIUpper(c byte) bool {
+	return c >= 'A' && c <= 'Z'
+}
+
+func isFactSheetASCIIDigit(c byte) bool {
+	return c >= '0' && c <= '9'
+}
+
+func isFactSheetASCIIUpperDigit(c byte) bool {
+	return isFactSheetASCIIUpper(c) || isFactSheetASCIIDigit(c)
+}
+
+func isFactSheetWordBoundary(s string, i int) bool {
+	left := i > 0 && isFactSheetASCIIWord(s[i-1])
+	right := i < len(s) && isFactSheetASCIIWord(s[i])
+	return left != right
+}
+
+func nextFactSheetIBAN(s string, from int) (int, int) {
+	for i := from; i+12 <= len(s); i++ {
+		if !isFactSheetASCIIUpper(s[i]) || i > 0 && isFactSheetASCIIWord(s[i-1]) ||
+			!isFactSheetASCIIUpper(s[i+1]) || !isFactSheetASCIIDigit(s[i+2]) || !isFactSheetASCIIDigit(s[i+3]) {
+			continue
+		}
+		end := i + 4
+		for end < len(s) && end-i < 34 && isFactSheetASCIIUpperDigit(s[end]) {
+			end++
+		}
+		if end-i >= 12 && isFactSheetWordBoundary(s, end) {
+			return i, end
+		}
+	}
+	return -1, -1
+}
+
+func factSheetVersionEnd(s string, end int) int {
+	if end < len(s) && (s[end] == '-' || s[end] == '+') && end+1 < len(s) &&
+		(isFactSheetASCIIWord(s[end+1]) || s[end+1] == '.') {
+		last := end + 2
+		for last < len(s) && (isFactSheetASCIIWord(s[last]) || s[last] == '.') {
+			last++
+		}
+		for last > end+1 {
+			if isFactSheetWordBoundary(s, last) {
+				return last
+			}
+			last--
+		}
+	}
+	if isFactSheetWordBoundary(s, end) {
+		return end
+	}
+	return -1
+}
+
+func nextFactSheetVersion(s string, from int) (int, int) {
+	for i := from; i < len(s); i++ {
+		if i > 0 && isFactSheetASCIIWord(s[i-1]) {
+			continue
+		}
+		j := i
+		if s[j] == 'v' {
+			j++
+		}
+		if j == len(s) || !isFactSheetASCIIDigit(s[j]) {
+			continue
+		}
+		for j < len(s) && isFactSheetASCIIDigit(s[j]) {
+			j++
+		}
+		if j+1 >= len(s) || s[j] != '.' || !isFactSheetASCIIDigit(s[j+1]) {
+			continue
+		}
+		j += 2
+		for j < len(s) && isFactSheetASCIIDigit(s[j]) {
+			j++
+		}
+		baseEnd := j
+		if j+1 < len(s) && s[j] == '.' && isFactSheetASCIIDigit(s[j+1]) {
+			j += 2
+			for j < len(s) && isFactSheetASCIIDigit(s[j]) {
+				j++
+			}
+			if end := factSheetVersionEnd(s, j); end >= 0 {
+				return i, end
+			}
+		}
+		if end := factSheetVersionEnd(s, baseEnd); end >= 0 {
+			return i, end
+		}
+	}
+	return -1, -1
+}
+
+func nextFactSheetDecimal(s string, from int) (int, int) {
+	for i := from; i < len(s); i++ {
+		if !isFactSheetASCIIDigit(s[i]) || i > 0 && isFactSheetASCIIWord(s[i-1]) {
+			continue
+		}
+		end := i + 1
+		for end < len(s) && isFactSheetASCIIDigit(s[end]) {
+			end++
+		}
+		if end+1 >= len(s) || s[end] != '.' || !isFactSheetASCIIDigit(s[end+1]) {
+			continue
+		}
+		end += 2
+		for end < len(s) && isFactSheetASCIIDigit(s[end]) {
+			end++
+		}
+		if isFactSheetWordBoundary(s, end) {
+			return i, end
+		}
+	}
+	return -1, -1
+}
+
+func nextFactSheetTicket(s string, from int) (int, int) {
+	for i := from; i+4 <= len(s); i++ {
+		if !isFactSheetASCIIUpper(s[i]) || i > 0 && isFactSheetASCIIWord(s[i-1]) {
+			continue
+		}
+		end := i + 1
+		for end < len(s) && isFactSheetASCIIUpperDigit(s[end]) {
+			end++
+		}
+		if end-i < 2 {
+			continue
+		}
+		matchEnd := -1
+		for end+1 < len(s) && s[end] == '-' && isFactSheetASCIIUpperDigit(s[end+1]) {
+			end += 2
+			for end < len(s) && isFactSheetASCIIUpperDigit(s[end]) {
+				end++
+			}
+			if isFactSheetWordBoundary(s, end) {
+				matchEnd = end
+			}
+		}
+		if matchEnd < 0 {
+			continue
+		}
+		limit := min(len(s), i+120)
+		for j := i; j < limit && (isFactSheetASCIIUpperDigit(s[j]) || s[j] == '-'); j++ {
+			if isFactSheetASCIIDigit(s[j]) {
+				return i, matchEnd
+			}
+		}
+	}
+	return -1, -1
 }
 
 func isFactSheetAssignmentValue(c byte) bool {

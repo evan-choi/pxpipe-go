@@ -49,6 +49,47 @@ func TestFactSheetScannersMatchRegex(t *testing.T) {
 			},
 		},
 		{
+			name: "iban",
+			re:   regexp.MustCompile(`\b[A-Z]{2}\d{2}[A-Z0-9]{8,30}\b`),
+			scan: nextFactSheetIBAN,
+			inputs: []string{
+				"", "GB82WEST12345698765432", "GB82ABCDEFGH", "GB8ABCDEFGH",
+				"xGB82WEST12345678", "éGB82WEST12345678", "GB82WEST12345678x",
+				"GB82" + strings.Repeat("A", 30), "GB82" + strings.Repeat("A", 31),
+				"GB82ABCDEFGH DE12ABCDEFGHIJ",
+			},
+		},
+		{
+			name: "version",
+			re:   regexp.MustCompile(`\bv?\d+\.\d+(?:\.\d+)?(?:[-+][\w.]+)?\b`),
+			scan: nextFactSheetVersion,
+			inputs: []string{
+				"", "1.2", "v1.2", "1.2.3", "1.2.3-rc.1", "1.2+build.7",
+				"x1.2", "V1.2", "é1.2", "1.2x", "1.2_", "1.2.3x",
+				"1.2-.x.", "1.2-...", "1.2 3.4.5+meta.1",
+			},
+		},
+		{
+			name: "decimal",
+			re:   regexp.MustCompile(`\b\d+\.\d+\b`),
+			scan: nextFactSheetDecimal,
+			inputs: []string{
+				"", "1.2", "01.002", "v1.2", "x1.2", "é1.2", "1.2x",
+				"1.2_", "1.2.3", "1.2 3.4",
+			},
+		},
+		{
+			name:   "ticket",
+			re:     regexp.MustCompile(`\b[A-Z][A-Z0-9]+(?:-[A-Z0-9]+)+\b`),
+			verify: regexp.MustCompile(`^[A-Z0-9-]{0,119}\d`),
+			scan:   nextFactSheetTicket,
+			inputs: []string{
+				"", "A1-B", "AB-C1", "CVE-2026-1234", "AB-CD", "AB-CD--1",
+				"xCVE-2026-1234", "éCVE-2026-1234", "CVE-2026-1234x",
+				"CVE-2026-1234 CVE-2027-5678",
+			},
+		},
+		{
 			name: "large-number",
 			re:   regexp.MustCompile(`\b\d[\d,_]{3,}\b`),
 			scan: nextFactSheetLargeNumber,
@@ -58,6 +99,20 @@ func TestFactSheetScannersMatchRegex(t *testing.T) {
 				"1234.5678", "123456,abc", "1234/5678",
 			},
 		},
+	}
+	rng := rand.New(rand.NewSource(3))
+	parts := []string{
+		"a", "Z", "0", "_", "-", "+", ".", "/", " ", "\t", "\n", "\x00", "é", "한", "😀",
+		"GB82WEST12345698765432", "v1.2.3-rc.1", "123.45", "CVE-2026-1234", "AB-CD--1",
+	}
+	for range 5_000 {
+		var input strings.Builder
+		for range rng.Intn(32) {
+			input.WriteString(parts[rng.Intn(len(parts))])
+		}
+		for i := range tests {
+			tests[i].inputs = append(tests[i].inputs, input.String())
+		}
 	}
 
 	for _, tt := range tests {
