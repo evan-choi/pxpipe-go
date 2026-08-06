@@ -30,8 +30,6 @@ const (
 type fsPattern struct {
 	re   *regexp.Regexp
 	scan func(string, int) (int, int)
-	// group is the submatch index carrying the token (0 = whole match).
-	group int
 	// verify emulates a JS lookahead at the match start: it must match the
 	// chunk remainder beginning at the token's start offset.
 	verify   *regexp.Regexp
@@ -51,7 +49,7 @@ var fsPatterns = []fsPattern{
 	// git sha / long hex: JS `(?=[0-9a-f]*\d)` emulated via verify.
 	{scan: nextFactSheetHex, required: fsHasDigit},
 	{re: regexp.MustCompile(`\bv?\d+\.\d+(?:\.\d+)?(?:[-+][\w.]+)?\b`), required: fsHasDigit | fsHasDot},
-	{re: regexp.MustCompile(`(?:^|[^\w-])(--?[A-Za-z][\w-]+)`), group: 1, required: fsHasDash},
+	{scan: nextFactSheetFlag, required: fsHasDash},
 	{scan: nextFactSheetLargeNumber, required: fsHasDigit},
 	{re: regexp.MustCompile(`\b\d+\.\d+\b`), required: fsHasDigit | fsHasDot},
 	{re: regexp.MustCompile(`\b[A-Z][A-Z0-9]{2,}(?:_[A-Z0-9]+)+\b`), required: fsHasUpper | fsHasUnderscore},
@@ -194,6 +192,29 @@ func nextFactSheetLargeNumber(s string, from int) (int, int) {
 				return i, end
 			}
 			end--
+		}
+	}
+	return -1, -1
+}
+
+func nextFactSheetFlag(s string, from int) (int, int) {
+	for i := from; i < len(s); i++ {
+		if s[i] != '-' || i > 0 && (isFactSheetASCIIWord(s[i-1]) || s[i-1] == '-') {
+			continue
+		}
+		letter := i + 1
+		if letter < len(s) && s[letter] == '-' {
+			letter++
+		}
+		if letter == len(s) || !isFactSheetASCIIAlpha(s[letter]) {
+			continue
+		}
+		end := letter + 1
+		for end < len(s) && (isFactSheetASCIIWord(s[end]) || s[end] == '-') {
+			end++
+		}
+		if end > letter+1 {
+			return i, end
 		}
 	}
 	return -1, -1
@@ -360,18 +381,11 @@ func ExtractFactSheetEntries(text string) []FactSheetEntry {
 				}
 				continue
 			}
-			for _, idx := range p.re.FindAllStringSubmatchIndex(chunk, -1) {
-				gs, ge := idx[0], idx[1]
-				if p.group > 0 {
-					gs, ge = idx[2*p.group], idx[2*p.group+1]
-					if gs < 0 {
-						continue
-					}
-				}
+			for _, idx := range p.re.FindAllStringIndex(chunk, -1) {
 				if p.verify != nil && !p.verify.MatchString(chunk[idx[0]:]) {
 					continue
 				}
-				addFactSheetSpan(oc, spanSeen, chunk, idx[0], gs, ge)
+				addFactSheetSpan(oc, spanSeen, chunk, idx[0], idx[0], idx[1])
 			}
 		}
 		if len(oc.counts) >= fsMaxSeen {

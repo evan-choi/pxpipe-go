@@ -1,6 +1,7 @@
 package pxpipe
 
 import (
+	"math/rand"
 	"regexp"
 	"strings"
 	"testing"
@@ -88,5 +89,42 @@ func TestFactSheetScannersMatchRegex(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+func TestFactSheetFlagScannerMatchesRegex(t *testing.T) {
+	re := regexp.MustCompile(`(?:^|[^\w-])(--?[A-Za-z][\w-]+)`)
+	inputs := []string{
+		"", "-a", "-ab", "--a", "--ab", "---abc", "!-flag", "x-flag",
+		"_-flag", "é-flag", "😀--flag_1", "-a-", "-a! -bc", "--a1 -z_",
+	}
+	rng := rand.New(rand.NewSource(1))
+	alphabet := []rune("abXY09_-!.:/\x00é한😀")
+	for range 500 {
+		chars := make([]rune, rng.Intn(96))
+		for i := range chars {
+			chars[i] = alphabet[rng.Intn(len(alphabet))]
+		}
+		inputs = append(inputs, string(chars))
+	}
+	for _, input := range inputs {
+		matches := re.FindAllStringSubmatchIndex(input, -1)
+		var got [][2]int
+		for from := 0; ; {
+			start, end := nextFactSheetFlag(input, from)
+			if start < 0 {
+				break
+			}
+			got = append(got, [2]int{start, end})
+			from = end
+		}
+		if len(got) != len(matches) {
+			t.Fatalf("%q: got indexes %v, want %v", input, got, matches)
+		}
+		for i, match := range matches {
+			if got[i] != [2]int{match[2], match[3]} {
+				t.Fatalf("%q: got indexes %v, want group %v", input, got, matches)
+			}
+		}
 	}
 }
