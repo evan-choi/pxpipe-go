@@ -2,8 +2,8 @@
  * Golden fixture generator for the Go port — OpenAI Chat Completions +
  * Responses paths.
  *
- * Run from the pxpipe (TS) repo root:
- *   pnpm exec tsx ../pxpipe-go/tools/gen-fixtures-openai.ts
+ * Run from the pxpipe submodule root:
+ *   pnpm exec tsx ../tools/gen-fixtures-openai.ts
  *
  * PNG bytes are NOT expected to match byte-for-byte (different deflate
  * implementations); the Go tests decode both sides and compare pixels.
@@ -15,8 +15,8 @@ import { fileURLToPath } from 'node:url';
 import {
   transformOpenAIChatCompletions,
   transformOpenAIResponses,
-} from '../../pxpipe/src/core/openai.js';
-import type { TransformOptions } from '../../pxpipe/src/core/transform.js';
+} from '../pxpipe/src/core/openai.js';
+import type { TransformOptions } from '../pxpipe/src/core/transform.js';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..', 'testdata');
 
@@ -388,7 +388,7 @@ async function main() {
     const fn = c.endpoint === 'chat' ? transformOpenAIChatCompletions : transformOpenAIResponses;
     const { body, info } = await fn(bodyBytes, c.opts);
     writeFileSync(join(dir, 'output.json'), body);
-    const { imagePngs: _p, firstImagePng: _f, ...serializableInfo } = info as Record<string, unknown>;
+    const { imagePngs: _p, firstImagePng: _f, ...serializableInfo } = info as unknown as Record<string, unknown>;
     writeFileSync(join(dir, 'info.json'), JSON.stringify(serializableInfo, null, 2));
     console.log(`openai/${c.name}: compressed=${info.compressed} reason=${info.reason ?? ''} images=${info.imageCount} histReason=${info.historyReason ?? ''}`);
   }
