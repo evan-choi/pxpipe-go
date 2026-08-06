@@ -1,9 +1,13 @@
 package pxpipe
 
 import (
+	"bytes"
+	"encoding/json"
+	"fmt"
 	"regexp"
 	"strconv"
 	"strings"
+	"time"
 )
 
 // User pin folding: `@pxpipe pin <text>` / `@pxpipe unpin` commands are folded
@@ -591,4 +595,410 @@ func appendPinBlock(messages []any, pins []pin) int {
 	}
 	last["content"] = append(arr, textBlock(text))
 	return u16len(text)
+}
+
+type pinVerb string
+
+const (
+	pinVerbPin   pinVerb = "pin"
+	pinVerbUnpin pinVerb = "unpin"
+)
+
+type pinFileGroup struct {
+	path string
+	pins []pin
+}
+
+func pinFileGroups(pins []pin) []pinFileGroup {
+	var groups []pinFileGroup
+	for _, p := range pins {
+		if p.source != pinSourceFile {
+			continue
+		}
+		path := p.path
+		if path == "" {
+			path = "system instructions"
+		}
+		if len(groups) > 0 && groups[len(groups)-1].path == path {
+			groups[len(groups)-1].pins = append(groups[len(groups)-1].pins, p)
+		} else {
+			groups = append(groups, pinFileGroup{path: path, pins: []pin{p}})
+		}
+	}
+	return groups
+}
+
+func pinReplyText(pins []pin, verb pinVerb) string {
+	if verb == pinVerbUnpin {
+		var session []pin
+		for _, p := range pins {
+			if p.source == pinSourceSession {
+				session = append(session, p)
+			}
+		}
+		if len(session) == 0 {
+			fromFile := ""
+			if len(pins) > 0 {
+				groups := pinFileGroups(pins)
+				where := fmt.Sprintf("%d files", len(groups))
+				if len(groups) == 1 {
+					where = groups[0].path
+				}
+				line := "lines"
+				come := "come"
+				if len(pins) == 1 {
+					line = "line"
+					come = "comes"
+				}
+				fromFile = fmt.Sprintf("\n  %d pinned %s %s from %s   (edit the file to change these)", len(pins), line, come, where)
+			}
+			return pinReplyMark + "nothing to unpin" + fromFile
+		}
+		lines := []string{"session   (@pxpipe unpin <n>, or unpin all)", ""}
+		for i, p := range session {
+			lines = append(lines, fmt.Sprintf("%d. %s", i+1, p.text))
+		}
+		return fmt.Sprintf("%s%d removable\n%s", pinReplyMark, len(session), strings.Join(lines, "\n"))
+	}
+	if len(pins) == 0 {
+		return pinReplyMark + "nothing pinned\n  @pxpipe pin <instruction>"
+	}
+	var out []string
+	for _, group := range pinFileGroups(pins) {
+		out = append(out, "", group.path+"   (edit the file to change these)", "")
+		for _, p := range group.pins {
+			out = append(out, p.text)
+		}
+	}
+	var session []pin
+	for _, p := range pins {
+		if p.source == pinSourceSession {
+			session = append(session, p)
+		}
+	}
+	if len(session) > 0 {
+		out = append(out, "", "session   (@pxpipe unpin <n>, or unpin all)", "")
+		for i, p := range session {
+			out = append(out, fmt.Sprintf("%d. %s", i+1, p.text))
+		}
+	}
+	return fmt.Sprintf("%s%d pinned\n%s", pinReplyMark, len(pins), strings.Join(out[1:], "\n"))
+}
+
+func livePinTurn(messages []any) (map[string]any, bool) {
+	for i := len(messages) - 1; i >= 0; i-- {
+		m, ok := asMap(messages[i])
+		if !ok {
+			return nil, false
+		}
+		if role, _ := getStr(m, "role"); role == "system" {
+			continue
+		}
+		return m, true
+	}
+	return nil, false
+}
+
+func isPinOnlyRequest(messages []any) bool {
+	live, ok := livePinTurn(messages)
+	return ok && isCommandOnlyTurn(live, true)
+}
+
+func livePinVerb(m map[string]any) pinVerb {
+	verb := pinVerbPin
+	for _, bv := range contentBlocks(m["content"]) {
+		blk, ok := asMap(bv)
+		if !ok {
+			continue
+		}
+		text, ok := getStr(blk, "text")
+		if !ok {
+			continue
+		}
+		for _, line := range strings.Split(text, "\n") {
+			cmd, _, ok := matchPinCmd(line)
+			if ok {
+				verb = pinVerb(cmd)
+			}
+		}
+	}
+	return verb
+}
+
+type pinCommandReply struct {
+	body        []byte
+	contentType string
+}
+
+func pinCommandResponse(body []byte) *pinCommandReply {
+	var req map[string]any
+	if err := json.Unmarshal(body, &req); err != nil {
+		return nil
+	}
+	messages, ok := asArr(req["messages"])
+	if !ok || !isPinOnlyRequest(messages) {
+		return nil
+	}
+	live, _ := livePinTurn(messages)
+	model, ok := getStr(req, "model")
+	if !ok {
+		model = "pxpipe"
+	}
+	stream, _ := req["stream"].(bool)
+	return synthesizePinReply(pinReplyText(foldPins(messages, req["system"]), livePinVerb(live)), model, stream)
+}
+
+func openAITextBlocks(content any) []any {
+	if text, ok := content.(string); ok {
+		return []any{textBlock(text)}
+	}
+	parts, ok := asArr(content)
+	if !ok {
+		return nil
+	}
+	var blocks []any
+	for _, raw := range parts {
+		part, ok := asMap(raw)
+		if !ok {
+			continue
+		}
+		text, ok := getStr(part, "text")
+		if !ok {
+			continue
+		}
+		type_, hasType := getStr(part, "type")
+		if !hasType || type_ == "text" || type_ == "input_text" || type_ == "output_text" {
+			blocks = append(blocks, textBlock(text))
+		}
+	}
+	return blocks
+}
+
+func normalizeOpenAIRequest(req map[string]any) ([]any, any, bool) {
+	var items []any
+	if input, ok := asArr(req["input"]); ok {
+		items = input
+	} else if messages, ok := asArr(req["messages"]); ok {
+		items = messages
+	} else if input, ok := req["input"].(string); ok {
+		items = []any{map[string]any{"role": "user", "content": input}}
+	} else {
+		return nil, nil, false
+	}
+	var system []any
+	if instructions, ok := req["instructions"].(string); ok && instructions != "" {
+		system = append(system, textBlock(instructions))
+	}
+	var messages []any
+	for _, raw := range items {
+		item, ok := asMap(raw)
+		if !ok {
+			return nil, nil, false
+		}
+		if value, hasType := item["type"]; hasType {
+			type_, ok := value.(string)
+			if !ok || type_ != "message" {
+				messages = append(messages, map[string]any{"role": "assistant", "content": []any{}})
+				continue
+			}
+		}
+		blocks := openAITextBlocks(item["content"])
+		role, _ := getStr(item, "role")
+		if role == "system" || role == "developer" {
+			system = append(system, blocks...)
+			continue
+		}
+		if role != "user" {
+			role = "assistant"
+		}
+		messages = append(messages, map[string]any{"role": role, "content": blocks})
+	}
+	if len(system) == 0 {
+		return messages, nil, true
+	}
+	return messages, system, true
+}
+
+func pinCommandResponseOpenAI(body []byte, wire Protocol) *pinCommandReply {
+	var req map[string]any
+	if err := json.Unmarshal(body, &req); err != nil {
+		return nil
+	}
+	messages, system, ok := normalizeOpenAIRequest(req)
+	if !ok || !isPinOnlyRequest(messages) {
+		return nil
+	}
+	model, ok := getStr(req, "model")
+	if !ok {
+		model = "pxpipe"
+	}
+	stream, _ := req["stream"].(bool)
+	text := pinReplyText(foldPins(messages, system), livePinVerb(messages[len(messages)-1].(map[string]any)))
+	switch wire {
+	case ProtocolOpenAIChat:
+		return synthesizeChatPinReply(text, model, stream)
+	case ProtocolOpenAIResponses:
+		return synthesizeResponsesPinReply(text, model, stream)
+	default:
+		return nil
+	}
+}
+
+func marshalPinReply(v any) []byte {
+	var body bytes.Buffer
+	encoder := json.NewEncoder(&body)
+	encoder.SetEscapeHTML(false)
+	if err := encoder.Encode(v); err != nil {
+		panic(err)
+	}
+	return bytes.TrimSuffix(body.Bytes(), []byte{'\n'})
+}
+
+func appendPinSSEEvent(b *strings.Builder, event string, data any) {
+	b.WriteString("event: ")
+	b.WriteString(event)
+	b.WriteString("\ndata: ")
+	b.Write(marshalPinReply(data))
+	b.WriteString("\n\n")
+}
+
+func synthesizePinReply(text, model string, stream bool) *pinCommandReply {
+	id := "msg_pxpipe_pin_" + strconv.FormatInt(time.Now().UnixMilli(), 36)
+	usage := map[string]any{"input_tokens": 0, "output_tokens": 0}
+	if !stream {
+		return &pinCommandReply{
+			contentType: "application/json",
+			body: marshalPinReply(map[string]any{
+				"id": id, "type": "message", "role": "assistant", "model": model,
+				"content":     []any{map[string]any{"type": "text", "text": text}},
+				"stop_reason": "end_turn", "stop_sequence": nil, "usage": usage,
+			}),
+		}
+	}
+	var body strings.Builder
+	appendPinSSEEvent(&body, "message_start", map[string]any{
+		"type": "message_start",
+		"message": map[string]any{
+			"id": id, "type": "message", "role": "assistant", "model": model,
+			"content": []any{}, "stop_reason": nil, "stop_sequence": nil, "usage": usage,
+		},
+	})
+	appendPinSSEEvent(&body, "content_block_start", map[string]any{
+		"type": "content_block_start", "index": 0,
+		"content_block": map[string]any{"type": "text", "text": ""},
+	})
+	appendPinSSEEvent(&body, "content_block_delta", map[string]any{
+		"type": "content_block_delta", "index": 0,
+		"delta": map[string]any{"type": "text_delta", "text": text},
+	})
+	appendPinSSEEvent(&body, "content_block_stop", map[string]any{"type": "content_block_stop", "index": 0})
+	appendPinSSEEvent(&body, "message_delta", map[string]any{
+		"type":  "message_delta",
+		"delta": map[string]any{"stop_reason": "end_turn", "stop_sequence": nil},
+		"usage": map[string]any{"output_tokens": 0},
+	})
+	appendPinSSEEvent(&body, "message_stop", map[string]any{"type": "message_stop"})
+	return &pinCommandReply{body: []byte(body.String()), contentType: "text/event-stream"}
+}
+
+func appendPinSSEData(b *strings.Builder, data any) {
+	b.WriteString("data: ")
+	b.Write(marshalPinReply(data))
+	b.WriteString("\n\n")
+}
+
+func synthesizeChatPinReply(text, model string, stream bool) *pinCommandReply {
+	now := time.Now()
+	id := "chatcmpl_pxpipe_pin_" + strconv.FormatInt(now.UnixMilli(), 36)
+	created := now.Unix()
+	if !stream {
+		return &pinCommandReply{
+			contentType: "application/json",
+			body: marshalPinReply(map[string]any{
+				"id": id, "object": "chat.completion", "created": created, "model": model,
+				"choices": []any{map[string]any{
+					"index": 0, "message": map[string]any{"role": "assistant", "content": text},
+					"finish_reason": "stop", "logprobs": nil,
+				}},
+				"usage": map[string]any{"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0},
+			}),
+		}
+	}
+	chunk := func(delta map[string]any, finish any) map[string]any {
+		return map[string]any{
+			"id": id, "object": "chat.completion.chunk", "created": created, "model": model,
+			"choices": []any{map[string]any{"index": 0, "delta": delta, "finish_reason": finish}},
+		}
+	}
+	var body strings.Builder
+	appendPinSSEData(&body, chunk(map[string]any{"role": "assistant", "content": ""}, nil))
+	appendPinSSEData(&body, chunk(map[string]any{"content": text}, nil))
+	appendPinSSEData(&body, chunk(map[string]any{}, "stop"))
+	body.WriteString("data: [DONE]\n\n")
+	return &pinCommandReply{body: []byte(body.String()), contentType: "text/event-stream"}
+}
+
+func synthesizeResponsesPinReply(text, model string, stream bool) *pinCommandReply {
+	now := time.Now()
+	stamp := strconv.FormatInt(now.UnixMilli(), 36)
+	id := "resp_pxpipe_pin_" + stamp
+	itemID := "msg_pxpipe_pin_" + stamp
+	created := now.Unix()
+	usage := map[string]any{"input_tokens": 0, "output_tokens": 0, "total_tokens": 0}
+	item := map[string]any{
+		"id": itemID, "type": "message", "status": "completed", "role": "assistant",
+		"content": []any{map[string]any{"type": "output_text", "text": text, "annotations": []any{}}},
+	}
+	response := func(status string, output []any) map[string]any {
+		var responseUsage any
+		if status == "completed" {
+			responseUsage = usage
+		}
+		return map[string]any{
+			"id": id, "object": "response", "created_at": created, "status": status, "model": model,
+			"output": output, "error": nil, "incomplete_details": nil, "usage": responseUsage,
+		}
+	}
+	if !stream {
+		return &pinCommandReply{
+			body:        marshalPinReply(response("completed", []any{item})),
+			contentType: "application/json",
+		}
+	}
+	sequence := 0
+	var body strings.Builder
+	event := func(type_ string, data map[string]any) {
+		payload := map[string]any{"type": type_, "sequence_number": sequence}
+		sequence++
+		for key, value := range data {
+			payload[key] = value
+		}
+		appendPinSSEEvent(&body, type_, payload)
+	}
+	part := func(text string) map[string]any {
+		return map[string]any{"type": "output_text", "text": text, "annotations": []any{}}
+	}
+	event("response.created", map[string]any{"response": response("in_progress", []any{})})
+	event("response.in_progress", map[string]any{"response": response("in_progress", []any{})})
+	event("response.output_item.added", map[string]any{
+		"output_index": 0,
+		"item": map[string]any{
+			"id": itemID, "type": "message", "status": "in_progress", "role": "assistant", "content": []any{},
+		},
+	})
+	event("response.content_part.added", map[string]any{
+		"item_id": itemID, "output_index": 0, "content_index": 0, "part": part(""),
+	})
+	event("response.output_text.delta", map[string]any{
+		"item_id": itemID, "output_index": 0, "content_index": 0, "delta": text,
+	})
+	event("response.output_text.done", map[string]any{
+		"item_id": itemID, "output_index": 0, "content_index": 0, "text": text,
+	})
+	event("response.content_part.done", map[string]any{
+		"item_id": itemID, "output_index": 0, "content_index": 0, "part": part(text),
+	})
+	event("response.output_item.done", map[string]any{"output_index": 0, "item": item})
+	event("response.completed", map[string]any{"response": response("completed", []any{item})})
+	return &pinCommandReply{body: []byte(body.String()), contentType: "text/event-stream"}
 }
