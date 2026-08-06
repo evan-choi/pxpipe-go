@@ -49,7 +49,7 @@ var fsPatterns = []fsPattern{
 	{re: regexp.MustCompile(`(?:[\w@~+-]+)?(?:/[\w.@+-]+)+\.[A-Za-z]\w{0,8}\b`), required: fsHasSlash | fsHasDot},
 	{re: regexp.MustCompile(`/[\w.@+-]+(?:/[\w.@+-]+)+/?`), required: fsHasSlash},
 	// git sha / long hex: JS `(?=[0-9a-f]*\d)` emulated via verify.
-	{re: regexp.MustCompile(`\b[0-9a-f]{7,40}\b`), verify: regexp.MustCompile(`^[0-9a-f]*\d`), required: fsHasDigit},
+	{scan: nextFactSheetHex, required: fsHasDigit},
 	{re: regexp.MustCompile(`\bv?\d+\.\d+(?:\.\d+)?(?:[-+][\w.]+)?\b`), required: fsHasDigit | fsHasDot},
 	{re: regexp.MustCompile(`(?:^|[^\w-])(--?[A-Za-z][\w-]+)`), group: 1, required: fsHasDash},
 	{scan: nextFactSheetLargeNumber, required: fsHasDigit},
@@ -147,6 +147,31 @@ func nextFactSheetCurrency(s string, from int) (int, int) {
 				(decimalEnd == len(s) || !isFactSheetASCIIWord(s[decimalEnd])) {
 				return i, decimalEnd
 			}
+			return i, end
+		}
+	}
+	return -1, -1
+}
+
+func nextFactSheetHex(s string, from int) (int, int) {
+	for i := from; i < len(s); i++ {
+		c := s[i]
+		if !((c >= '0' && c <= '9') || (c >= 'a' && c <= 'f')) ||
+			i > 0 && isFactSheetASCIIWord(s[i-1]) {
+			continue
+		}
+		end := i
+		hasDigit := false
+		for end < len(s) {
+			c = s[end]
+			if !((c >= '0' && c <= '9') || (c >= 'a' && c <= 'f')) {
+				break
+			}
+			hasDigit = hasDigit || c >= '0' && c <= '9'
+			end++
+		}
+		if n := end - i; n >= 7 && n <= 40 && hasDigit &&
+			(end == len(s) || !isFactSheetASCIIWord(s[end])) {
 			return i, end
 		}
 	}

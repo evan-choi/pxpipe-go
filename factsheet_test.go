@@ -10,6 +10,7 @@ func TestFactSheetScannersMatchRegex(t *testing.T) {
 	tests := []struct {
 		name   string
 		re     *regexp.Regexp
+		verify *regexp.Regexp
 		scan   func(string, int) (int, int)
 		inputs []string
 	}{
@@ -36,6 +37,17 @@ func TestFactSheetScannersMatchRegex(t *testing.T) {
 			},
 		},
 		{
+			name:   "hex",
+			re:     regexp.MustCompile(`\b[0-9a-f]{7,40}\b`),
+			verify: regexp.MustCompile(`^[0-9a-f]*\d`),
+			scan:   nextFactSheetHex,
+			inputs: []string{
+				"", "abcdefg", "abcde1f", "1234567", "0abcdef", "x1234567",
+				"é1234567", "1234567g", "1234567-", strings.Repeat("a", 39) + "1",
+				strings.Repeat("a", 40) + "1", "ABC1234", "abc1234 def5678",
+			},
+		},
+		{
 			name: "large-number",
 			re:   regexp.MustCompile(`\b\d[\d,_]{3,}\b`),
 			scan: nextFactSheetLargeNumber,
@@ -50,7 +62,13 @@ func TestFactSheetScannersMatchRegex(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			for _, input := range tt.inputs {
-				want := tt.re.FindAllStringIndex(input, -1)
+				all := tt.re.FindAllStringIndex(input, -1)
+				want := all[:0]
+				for _, match := range all {
+					if tt.verify == nil || tt.verify.MatchString(input[match[0]:]) {
+						want = append(want, match)
+					}
+				}
 				var got [][]int
 				for from := 0; ; {
 					start, end := tt.scan(input, from)
