@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"sort"
 	"unicode/utf8"
+	"unsafe"
 
 	"github.com/bytedance/sonic/ast"
 )
@@ -35,7 +36,11 @@ func setObjKeyOrder(m map[string]any, keys []string) {
 // parseOrderedJSON decodes body into the map[string]any / []any / string /
 // json.Number tree the transform operates on, recording object key order.
 func parseOrderedJSON(body []byte) (map[string]any, error) {
-	p := ast.NewParser(string(body))
+	src := ""
+	if len(body) != 0 {
+		src = unsafe.String(unsafe.SliceData(body), len(body))
+	}
+	p := ast.NewParser(src)
 	node, err := p.Parse()
 	if err != 0 {
 		return nil, fmt.Errorf("json parse error: %v", err)
