@@ -1,0 +1,10 @@
+{
+  "reflow": true,
+  "style": {
+    "aa": true,
+    "grid": true,
+    "gridCols": 8,
+    "markerRed": true,
+    "markerScale": 2
+  }
+}

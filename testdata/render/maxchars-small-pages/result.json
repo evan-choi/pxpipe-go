@@ -1,0 +1,41 @@
+{
+  "pages": [
+    {
+      "file": "page-0.png",
+      "width": 323,
+      "height": 256
+    },
+    {
+      "file": "page-1.png",
+      "width": 323,
+      "height": 256
+    },
+    {
+      "file": "page-2.png",
+      "width": 323,
+      "height": 256
+    },
+    {
+      "file": "page-3.png",
+      "width": 323,
+      "height": 256
+    },
+    {
+      "file": "page-4.png",
+      "width": 323,
+      "height": 256
+    },
+    {
+      "file": "page-5.png",
+      "width": 323,
+      "height": 256
+    },
+    {
+      "file": "page-6.png",
+      "width": 323,
+      "height": 120
+    }
+  ],
+  "droppedChars": 0,
+  "pixels": 534888
+}

@@ -1,0 +1,50 @@
+{
+  "spleen-5x8.bit": {
+    "cellW": 5,
+    "cellH": 8,
+    "ascent": 7,
+    "numGlyphs": 35501
+  },
+  "spleen-5x8.gray": {
+    "cellW": 5,
+    "cellH": 8,
+    "ascent": 7,
+    "numGlyphs": 35501
+  },
+  "jbmono10.bit": {
+    "cellW": 6,
+    "cellH": 11,
+    "ascent": 9,
+    "numGlyphs": 718
+  },
+  "jbmono10.gray": {
+    "cellW": 6,
+    "cellH": 11,
+    "ascent": 9,
+    "numGlyphs": 718
+  },
+  "jbmono12.bit": {
+    "cellW": 8,
+    "cellH": 13,
+    "ascent": 11,
+    "numGlyphs": 718
+  },
+  "jbmono12.gray": {
+    "cellW": 8,
+    "cellH": 13,
+    "ascent": 11,
+    "numGlyphs": 718
+  },
+  "jbmono14.bit": {
+    "cellW": 9,
+    "cellH": 16,
+    "ascent": 13,
+    "numGlyphs": 718
+  },
+  "jbmono14.gray": {
+    "cellW": 9,
+    "cellH": 16,
+    "ascent": 13,
+    "numGlyphs": 718
+  }
+}
