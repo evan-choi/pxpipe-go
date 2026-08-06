@@ -13,6 +13,7 @@ import (
 	"strings"
 	"sync/atomic"
 	"testing"
+	"time"
 )
 
 func upstreamEcho(t *testing.T, gotBody *[]byte) *httptest.Server {
@@ -511,6 +512,55 @@ func TestHandlerOversizedBodyPassesThroughUnchanged(t *testing.T) {
 			}
 			if !bytes.Equal(upstreamBody, payload) {
 				t.Fatalf("upstream body was truncated: got %d bytes, want %d", len(upstreamBody), len(payload))
+			}
+		})
+	}
+}
+
+func TestHandlerBodyLengthHintsPreservePayload(t *testing.T) {
+	for _, tc := range []struct {
+		name          string
+		contentLength int64
+		maxBodyBytes  int64
+		wantResult    bool
+	}{
+		{name: "short_hint_oversized", contentLength: 32, maxBodyBytes: 64},
+		{name: "long_hint", contentLength: 120, maxBodyBytes: 128, wantResult: true},
+		{name: "false_large_hint", contentLength: 8 << 20, maxBodyBytes: defaultMaxBodyBytes, wantResult: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			payload := []byte(`{"model":"claude-sonnet-4-6","messages":[],"padding":"` + strings.Repeat("x", 40) + `"}`)
+			var forwarded []byte
+			var called bool
+			zero := time.Duration(0)
+			h := NewHandler(HandlerOptions{
+				MaxBodyBytes: tc.maxBodyBytes,
+				Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
+					forwarded, _ = io.ReadAll(req.Body)
+					return &http.Response{
+						StatusCode: http.StatusNoContent,
+						Header:     make(http.Header),
+						Body:       http.NoBody,
+						Request:    req,
+					}, nil
+				}),
+				OnResult:               func(_ *http.Request, _ *TransformResult) { called = true },
+				UpstreamHeadersTimeout: &zero,
+				UpstreamIdleTimeout:    &zero,
+				DuplicateHold:          &zero,
+			})
+			req := httptest.NewRequest(http.MethodPost, "/v1/messages", bytes.NewReader(payload))
+			req.ContentLength = tc.contentLength
+			recorder := httptest.NewRecorder()
+			h.ServeHTTP(recorder, req)
+			if recorder.Code != http.StatusNoContent {
+				t.Fatalf("status = %d", recorder.Code)
+			}
+			if called != tc.wantResult {
+				t.Fatalf("OnResult called = %v, want %v", called, tc.wantResult)
+			}
+			if !bytes.Equal(forwarded, payload) {
+				t.Fatalf("forwarded %d bytes, want %d", len(forwarded), len(payload))
 			}
 		})
 	}

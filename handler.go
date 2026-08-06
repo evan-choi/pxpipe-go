@@ -61,7 +61,11 @@ type HandlerOptions struct {
 	DuplicateHold *time.Duration
 }
 
-const defaultMaxBodyBytes = 256 << 20
+const (
+	defaultMaxBodyBytes  = 256 << 20
+	// Bound allocation based on the untrusted Content-Length header.
+	maxBodyPreallocBytes = 1 << 20
+)
 
 type handler struct {
 	opts  HandlerOptions
@@ -269,7 +273,17 @@ func (h *handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	if !bypass && r.Method == http.MethodPost && surface != ProtocolNone && r.Body != nil &&
 		(r.ContentLength < 0 || r.ContentLength <= h.opts.MaxBodyBytes) {
 		originalBody := r.Body
-		body, err := io.ReadAll(io.LimitReader(originalBody, h.opts.MaxBodyBytes+1))
+		limitedBody := io.LimitReader(originalBody, h.opts.MaxBodyBytes+1)
+		var body []byte
+		var err error
+		if r.ContentLength > 0 && r.ContentLength <= maxBodyPreallocBytes {
+			var buffered bytes.Buffer
+			buffered.Grow(int(r.ContentLength) + 1)
+			_, err = buffered.ReadFrom(limitedBody)
+			body = buffered.Bytes()
+		} else {
+			body, err = io.ReadAll(limitedBody)
+		}
 		if err != nil {
 			originalBody.Close()
 			http.Error(w, "pxpipe: failed to read request body", http.StatusBadGateway)
