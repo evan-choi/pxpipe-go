@@ -396,6 +396,9 @@ func budgetEntries(all []string, counts map[string]int, collapse bool) []FactShe
 		for _, t := range ordered {
 			sub := false
 			for _, k := range specific {
+				if len(k) == len(t) {
+					continue
+				}
 				if strings.Contains(k, t) {
 					sub = true
 					break
