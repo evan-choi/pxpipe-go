@@ -107,6 +107,17 @@ func TestHandlerUnsupportedModelPassesThrough(t *testing.T) {
 	}
 }
 
+func TestExtractModelRejectsOversizedString(t *testing.T) {
+	accepted := strings.Repeat("🙂", 100)
+	if got := extractModel([]byte(`{"model":"` + accepted + `"}`)); got != accepted {
+		t.Fatalf("200-code-unit model = %q", got)
+	}
+	rejected := strings.Repeat("🙂", 101)
+	if got := extractModel([]byte(`{"model":"` + rejected + `"}`)); got != "" {
+		t.Fatalf("202-code-unit model = %q, want empty", got)
+	}
+}
+
 func TestHandlerNonClaudeMessagesPassThrough(t *testing.T) {
 	SetAllowedModelBases([]string{"gpt-5.4"})
 	t.Cleanup(func() { SetAllowedModelBases(nil) })

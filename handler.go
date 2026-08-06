@@ -181,7 +181,7 @@ func extractModel(body []byte) string {
 		return ""
 	}
 	model, err := node.String()
-	if err != nil {
+	if err != nil || u16len(model) > 200 {
 		return ""
 	}
 	return model
