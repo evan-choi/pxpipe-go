@@ -4,6 +4,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
+	"slices"
 	"sort"
 	"unicode/utf8"
 	"unsafe"
@@ -193,24 +194,31 @@ func appendJSObjectPair(b []byte, key string, value any, comma bool) []byte {
 
 func appendJSObject(b []byte, m map[string]any) []byte {
 	ordered := objKeyOrder(m)
-	seen := make(map[string]struct{}, len(ordered))
 	b = append(b, '{')
 	first := true
+	emitted := 0
 	for _, k := range ordered {
 		v, ok := m[k]
 		if !ok {
 			continue
 		}
-		seen[k] = struct{}{}
 		b = appendJSObjectPair(b, k, v, !first)
 		first = false
+		emitted++
+	}
+	keyCount := len(m)
+	if _, ok := m[orderKey]; ok {
+		keyCount--
+	}
+	if emitted == keyCount {
+		return append(b, '}')
 	}
 	var extras []string
 	for k := range m {
 		if k == orderKey {
 			continue
 		}
-		if _, done := seen[k]; !done {
+		if !slices.Contains(ordered, k) {
 			extras = append(extras, k)
 		}
 	}
