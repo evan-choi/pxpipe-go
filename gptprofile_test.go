@@ -172,6 +172,7 @@ func TestBuiltInModelMatchers(t *testing.T) {
 		"claude-3-5-sonnet": true, "claude-opus-4-6": true,
 		"claude-opus-4-7": false, "claude-fable-5": false,
 		"claude-sonnet-new-4": false, "not-claude": false,
+		"claude-bad-prefix/claude-3-5": true,
 	}
 	for model, want := range pre47 {
 		if got := isPre47Claude(model); got != want {

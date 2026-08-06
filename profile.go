@@ -36,44 +36,48 @@ func isClaudeModel(model string) bool {
 
 func isPre47Claude(m string) bool {
 	const prefix = "claude-"
-	start := strings.Index(m, prefix)
-	if start < 0 {
-		return false
-	}
-	version := m[start+len(prefix):]
-	if len(version) == 0 {
-		return false
-	}
-	if version[0] < '0' || version[0] > '9' {
-		i := 0
-		for i < len(version) && version[i] >= 'a' && version[i] <= 'z' {
-			i++
-		}
-		if i == 0 || i == len(version) || version[i] != '-' {
+	for {
+		start := strings.Index(m, prefix)
+		if start < 0 {
 			return false
 		}
-		version = version[i+1:]
-	}
-	digits := digitPrefixLen(version)
-	if digits == 0 {
-		return false
-	}
-	major, err := strconv.Atoi(version[:digits])
-	if err != nil {
-		return false
-	}
-	minor := 0
-	version = version[digits:]
-	if len(version) > 1 && version[0] == '-' {
-		digits = digitPrefixLen(version[1:])
-		if digits > 0 {
-			minor, err = strconv.Atoi(version[1 : 1+digits])
-			if err != nil {
-				return false
+		version := m[start+len(prefix):]
+		if len(version) == 0 {
+			return false
+		}
+		if version[0] < '0' || version[0] > '9' {
+			i := 0
+			for i < len(version) && version[i] >= 'a' && version[i] <= 'z' {
+				i++
+			}
+			if i == 0 || i == len(version) || version[i] != '-' {
+				m = version
+				continue
+			}
+			version = version[i+1:]
+		}
+		digits := digitPrefixLen(version)
+		if digits == 0 {
+			m = version
+			continue
+		}
+		major, err := strconv.Atoi(version[:digits])
+		if err != nil {
+			return false
+		}
+		minor := 0
+		version = version[digits:]
+		if len(version) > 1 && version[0] == '-' {
+			digits = digitPrefixLen(version[1:])
+			if digits > 0 {
+				minor, err = strconv.Atoi(version[1 : 1+digits])
+				if err != nil {
+					return false
+				}
 			}
 		}
+		return major < 4 || (major == 4 && minor < 7)
 	}
-	return major < 4 || (major == 4 && minor < 7)
 }
 
 func resolveProfile(model string) *modelProfile {
