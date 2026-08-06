@@ -317,18 +317,28 @@ func planGptCollapse(turns []historyTurn, protectedPrefix int, isProfitable gptP
 
 	maxImages := maxInt(0, o.MaxImages)
 	type renderedSection struct {
-		s, e int
-		imgs []*render.RenderedImage
+		s, e   int
+		source string
+		imgs   []*render.RenderedImage
 	}
 	var rendered []renderedSection
 	imgCount := 0
 	collapseEnd := pp
 	for _, sec := range sections {
-		sectionText := joinTurns(turns, sec.s, sec.e, -1)
+		sectionText := ""
+		sectionRender := ""
+		if pinIdx < 0 && sec.s == pp && sec.e == rawEnd {
+			sectionText = text
+			sectionRender = renderText
+		} else {
+			sectionText = joinTurns(turns, sec.s, sec.e, -1)
+		}
 		if sectionText == "" {
 			continue
 		}
-		sectionRender := historyMaybeReflow(sectionText, o.Reflow)
+		if sectionRender == "" {
+			sectionRender = historyMaybeReflow(sectionText, o.Reflow)
+		}
 		sectionImgs, err := render.RenderTextToPngs(sectionRender, o.Cols, o.Style, o.MaxHeightPx, nil)
 		if err != nil {
 			return base, err
@@ -336,7 +346,7 @@ func planGptCollapse(turns []historyTurn, protectedPrefix int, isProfitable gptP
 		if imgCount+len(sectionImgs) > maxImages {
 			break
 		}
-		rendered = append(rendered, renderedSection{sec.s, sec.e, sectionImgs})
+		rendered = append(rendered, renderedSection{sec.s, sec.e, sectionText, sectionImgs})
 		imgCount += len(sectionImgs)
 		collapseEnd = sec.e
 	}
@@ -345,16 +355,15 @@ func planGptCollapse(turns []historyTurn, protectedPrefix int, isProfitable gptP
 	var imagesBefore, imagesAfter []*render.RenderedImage
 	var imageSources, imageSourcesAfter []string
 	for _, r := range rendered {
-		source := joinTurns(turns, r.s, r.e, -1)
 		if pinConsumed && r.s >= pinIdx+1 {
 			imagesAfter = append(imagesAfter, r.imgs...)
 			for range r.imgs {
-				imageSourcesAfter = append(imageSourcesAfter, source)
+				imageSourcesAfter = append(imageSourcesAfter, r.source)
 			}
 		} else {
 			imagesBefore = append(imagesBefore, r.imgs...)
 			for range r.imgs {
-				imageSources = append(imageSources, source)
+				imageSources = append(imageSources, r.source)
 			}
 		}
 	}
@@ -367,11 +376,14 @@ func planGptCollapse(turns []historyTurn, protectedPrefix int, isProfitable gptP
 	if pinConsumed {
 		pinText = turns[pinIdx].UserText
 	}
-	skip := -1
-	if pinConsumed {
-		skip = pinIdx
+	collapsedText := rendered[0].source
+	if len(rendered) > 1 {
+		parts := make([]string, len(rendered))
+		for i := range rendered {
+			parts[i] = rendered[i].source
+		}
+		collapsedText = strings.Join(parts, "\n\n")
 	}
-	collapsedText := joinTurns(turns, pp, collapseEnd, skip)
 	droppedCodepoints := map[rune]int{}
 	droppedChars := 0
 	for _, img := range imagesBefore {
