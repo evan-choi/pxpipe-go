@@ -18,9 +18,6 @@ import (
 type HandlerOptions struct {
 	// AnthropicUpstream is the Anthropic API base. Default https://api.anthropic.com.
 	AnthropicUpstream *url.URL
-	// Upstream is the legacy shared API base, used when a provider-specific upstream is nil.
-	// Deprecated: use AnthropicUpstream and OpenAIUpstream.
-	Upstream *url.URL
 	// OpenAIUpstream is the OpenAI API base. Default https://api.openai.com.
 	OpenAIUpstream *url.URL
 	// APIKey overrides or supplies the Anthropic x-api-key header.
@@ -84,12 +81,6 @@ var passthroughPrefixes = []string{
 // configured provider upstream, rewriting POST bodies on supported Anthropic
 // and OpenAI routes. Responses (including SSE streams) pass through untouched.
 func NewHandler(opts HandlerOptions) http.Handler {
-	if opts.AnthropicUpstream == nil {
-		opts.AnthropicUpstream = opts.Upstream
-	}
-	if opts.OpenAIUpstream == nil {
-		opts.OpenAIUpstream = opts.Upstream
-	}
 	if opts.AnthropicUpstream == nil {
 		opts.AnthropicUpstream = &url.URL{Scheme: "https", Host: "api.anthropic.com"}
 	}

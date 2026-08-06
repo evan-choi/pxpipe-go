@@ -51,55 +51,13 @@ func requestRoute(t *testing.T, client *http.Client, target string, headers http
 	return <-seen
 }
 
-func TestHandlerUpstreamResolution(t *testing.T) {
+func TestHandlerProviderUpstreamDefaults(t *testing.T) {
 	defaultHandler := NewHandler(HandlerOptions{}).(*handler)
 	if got := defaultHandler.opts.AnthropicUpstream.String(); got != "https://api.anthropic.com" {
 		t.Fatalf("default AnthropicUpstream = %q", got)
 	}
 	if got := defaultHandler.opts.OpenAIUpstream.String(); got != "https://api.openai.com" {
 		t.Fatalf("default OpenAIUpstream = %q", got)
-	}
-
-	seen := make(chan routeObservation, 1)
-	legacy, legacyURL := routeUpstream(t, "legacy", seen)
-	defer legacy.Close()
-	canonical, canonicalURL := routeUpstream(t, "canonical", seen)
-	defer canonical.Close()
-	tests := []struct {
-		name    string
-		options HandlerOptions
-		path    string
-		want    string
-	}{
-		{name: "legacy Anthropic fallback", options: HandlerOptions{Upstream: legacyURL}, path: "/v1/messages", want: "legacy"},
-		{name: "legacy OpenAI fallback", options: HandlerOptions{Upstream: legacyURL}, path: "/v1/responses", want: "legacy"},
-		{
-			name: "Anthropic precedence",
-			options: HandlerOptions{
-				AnthropicUpstream: canonicalURL,
-				Upstream:          legacyURL,
-			},
-			path: "/v1/messages",
-			want: "canonical",
-		},
-		{
-			name: "OpenAI precedence",
-			options: HandlerOptions{
-				OpenAIUpstream: canonicalURL,
-				Upstream:       legacyURL,
-			},
-			path: "/v1/responses",
-			want: "canonical",
-		},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			proxy := httptest.NewServer(NewHandler(tt.options))
-			defer proxy.Close()
-			if got := requestRoute(t, proxy.Client(), proxy.URL+tt.path, nil, seen); got.provider != tt.want {
-				t.Fatalf("provider = %q, want %q", got.provider, tt.want)
-			}
-		})
 	}
 }
 

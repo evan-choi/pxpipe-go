@@ -56,9 +56,7 @@ ANTHROPIC_BASE_URL=http://127.0.0.1:47821 claude
 Canonical `/v1/messages` requests go to `AnthropicUpstream`; canonical
 `/v1/chat/completions`, `/v1/responses`, and `/v1/responses/*` requests go to
 `OpenAIUpstream`. `/v1/models` uses the request's auth style to choose between
-them. Both upstreams have the public API defaults shown above. The old
-`Upstream` field remains as a deprecated shared fallback for either
-provider-specific field.
+them. Both upstreams have the public API defaults shown above.
 
 Provider-prefixed paths (`/anthropic/*`, `/openai/*`,
 `/google-ai-studio/*`, `/compat/*`) keep their full path and go to
