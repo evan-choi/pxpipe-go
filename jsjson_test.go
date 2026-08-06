@@ -45,6 +45,20 @@ func TestJSStringifyObjectOrderAndExtras(t *testing.T) {
 	}
 }
 
+func TestJSStringifyAnthropicImage(t *testing.T) {
+	png := []byte{0, 1, 2, 253, 254, 255}
+	block := makeImageBlock(png)
+	got := string(jsStringify(block))
+	want := `{"type":"image","source":{"type":"base64","media_type":"image/png","data":"AAEC/f7/"}}`
+	if got != want {
+		t.Fatalf("jsStringify(image) = %s, want %s", got, want)
+	}
+	messages := []any{map[string]any{"content": []any{block}}}
+	if got, want := historyImageSha8(messages), sha8("AAEC/f7/"); got != want {
+		t.Fatalf("historyImageSha8() = %s, want %s", got, want)
+	}
+}
+
 func TestOpenAIJSONCapacity(t *testing.T) {
 	for _, tc := range []struct {
 		body, image, want int
@@ -136,5 +150,15 @@ func BenchmarkJSStringifyString(b *testing.B) {
 	b.ResetTimer()
 	for range b.N {
 		benchmarkJSONString = jsStringifyString(m)
+	}
+}
+
+func BenchmarkJSStringifyAnthropicImage(b *testing.B) {
+	png := make([]byte, 256<<10)
+	b.SetBytes(int64(len(png)))
+	b.ReportAllocs()
+	b.ResetTimer()
+	for range b.N {
+		benchmarkJSONBytes = jsStringify(makeImageBlock(png))
 	}
 }

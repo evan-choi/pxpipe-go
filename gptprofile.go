@@ -165,6 +165,19 @@ func flagshipGptProfile(v GptVisionCost) *GptModelProfile {
 	}
 }
 
+var (
+	gpt5NanoProfile  = miniNanoProfile(2.46, gpt5Pricing)
+	baseNanoProfile  = miniNanoProfile(2.46, basePricing)
+	gpt5MiniProfile  = miniNanoProfile(1.62, gpt5Pricing)
+	baseMiniProfile  = miniNanoProfile(1.62, basePricing)
+	gpt5PatchProfile = flagshipGptProfile(
+		GptVisionCost{Regime: "patch", Multiplier: 1, PatchCap: 10000},
+	)
+	gpt5TileProfile = flagshipGptProfile(
+		GptVisionCost{Regime: "tile", Base: 70, PerTile: 140},
+	)
+)
+
 var o13Profile = &GptModelProfile{
 	Vision:            GptVisionCost{Regime: "tile", Base: 75, PerTile: 150},
 	CacheReadRate:     basePricing.cacheReadRate,
@@ -245,41 +258,76 @@ var gemini36FlashProfile = &GptModelProfile{
 }
 
 func isGeminiModel(model string) bool {
-	id := strings.ToLower(model)
-	return id == "gemini-3.6-flash" || id == "google/gemini-3.6-flash"
+	return model == "gemini-3.6-flash" || model == "google/gemini-3.6-flash"
 }
 
 func isGrokModel(m string) bool { return strings.HasPrefix(m, "grok-") }
 
-var miniNanoRe = regexp.MustCompile(`^(?:gpt-5(?:\.\d+)?|gpt-4\.1)-(?:mini|nano)`)
-var gpt5FlagshipRe = regexp.MustCompile(`^gpt-5\.\d`)
-var o13Re = regexp.MustCompile(`^o[13]`)
+func digitPrefixLen(s string) int {
+	i := 0
+	for i < len(s) && s[i] >= '0' && s[i] <= '9' {
+		i++
+	}
+	return i
+}
 
 func isMiniNanoPatch(m string) bool {
-	return miniNanoRe.MatchString(m) || strings.HasPrefix(m, "o4-mini")
+	if strings.HasPrefix(m, "o4-mini") {
+		return true
+	}
+	var suffix string
+	switch {
+	case strings.HasPrefix(m, "gpt-5-"):
+		suffix = m[len("gpt-5-"):]
+	case strings.HasPrefix(m, "gpt-5."):
+		rest := m[len("gpt-5."):]
+		digits := digitPrefixLen(rest)
+		if digits == 0 || digits == len(rest) || rest[digits] != '-' {
+			return false
+		}
+		suffix = rest[digits+1:]
+	case strings.HasPrefix(m, "gpt-4.1-"):
+		suffix = m[len("gpt-4.1-"):]
+	default:
+		return false
+	}
+	return strings.HasPrefix(suffix, "mini") || strings.HasPrefix(suffix, "nano")
+}
+
+func isGpt5Flagship(m string) bool {
+	return len(m) > len("gpt-5.") && strings.HasPrefix(m, "gpt-5.") &&
+		m[len("gpt-5.")] >= '0' && m[len("gpt-5.")] <= '9'
+}
+
+func isO13Model(m string) bool {
+	return len(m) >= 2 && m[0] == 'o' && (m[1] == '1' || m[1] == '3')
 }
 
 // resolveGptBuiltin mirrors BUILTIN_RULES order exactly.
 func resolveGptBuiltin(m string) *GptModelProfile {
-	if isClaudeModel(m) {
+	if strings.Contains(m, "claude") || strings.Contains(m, "anthropic") {
 		return resolveClaudeGptProfile(m)
 	}
+	if isMiniNanoPatch(m) {
+		if strings.HasPrefix(m, "gpt-5") {
+			if strings.Contains(m, "nano") {
+				return gpt5NanoProfile
+			}
+			return gpt5MiniProfile
+		}
+		if strings.Contains(m, "nano") {
+			return baseNanoProfile
+		}
+		return baseMiniProfile
+	}
 	switch {
-	case isMiniNanoPatch(m) && strings.Contains(m, "nano") && strings.HasPrefix(m, "gpt-5"):
-		return miniNanoProfile(2.46, gpt5Pricing)
-	case isMiniNanoPatch(m) && strings.Contains(m, "nano"):
-		return miniNanoProfile(2.46, basePricing)
-	case isMiniNanoPatch(m) && strings.HasPrefix(m, "gpt-5"):
-		return miniNanoProfile(1.62, gpt5Pricing)
-	case isMiniNanoPatch(m):
-		return miniNanoProfile(1.62, basePricing)
 	case m == "gpt-5.6-sol" || strings.HasPrefix(m, "gpt-5.6-sol-"):
 		return gpt56SolProfile
-	case gpt5FlagshipRe.MatchString(m):
-		return flagshipGptProfile(GptVisionCost{Regime: "patch", Multiplier: 1, PatchCap: 10000})
+	case isGpt5Flagship(m):
+		return gpt5PatchProfile
 	case strings.HasPrefix(m, "gpt-5"):
-		return flagshipGptProfile(GptVisionCost{Regime: "tile", Base: 70, PerTile: 140})
-	case o13Re.MatchString(m):
+		return gpt5TileProfile
+	case isO13Model(m):
 		return o13Profile
 	case isGrokModel(m):
 		return grokProfile
@@ -287,12 +335,23 @@ func resolveGptBuiltin(m string) *GptModelProfile {
 	return DefaultGptProfile
 }
 
-// candidateIds returns both spellings of a vendor-qualified id.
-func candidateIds(m string) []string {
+// candidateIds returns both spellings of a vendor-qualified id without
+// allocating a result slice on the request path.
+func candidateIds(m string) ([2]string, int) {
 	if slash := strings.LastIndexByte(m, '/'); slash >= 0 {
-		return []string{m, m[slash+1:]}
+		return [2]string{m, m[slash+1:]}, 2
 	}
-	return []string{m}
+	return [2]string{m}, 1
+}
+
+var bracketVariantRe = regexp.MustCompile(`\[[^\]]*\]`)
+
+func stripBracketVariants(s string) string {
+	start := strings.IndexByte(s, '[')
+	if start < 0 || strings.IndexByte(s[start+1:], ']') < 0 {
+		return s
+	}
+	return bracketVariantRe.ReplaceAllString(s, "")
 }
 
 // --- env override (PXPIPE_GPT_PROFILES) ------------------------------------
@@ -590,14 +649,12 @@ func gptEnvProfiles() (map[string]*GptModelProfile, []string) {
 	return profiles, order
 }
 
-var bracketVariantRe = regexp.MustCompile(`\[[^\]]*\]`)
-
 // ResolveGptProfile resolves the render/pricing profile for a model id,
 // mirroring resolveGptProfile in gpt-model-profiles.ts.
 func ResolveGptProfile(model string) *GptModelProfile {
-	m := bracketVariantRe.ReplaceAllString(strings.ToLower(model), "")
-	ids := candidateIds(m)
-	for _, id := range ids {
+	m := stripBracketVariants(strings.ToLower(model))
+	ids, idCount := candidateIds(m)
+	for _, id := range ids[:idCount] {
 		if isGeminiModel(id) {
 			return gemini36FlashProfile
 		}
@@ -608,7 +665,7 @@ func ResolveGptProfile(model string) *GptModelProfile {
 		bestLen := -1
 		for _, k := range order {
 			p := env[k]
-			for _, id := range ids {
+			for _, id := range ids[:idCount] {
 				if strings.HasPrefix(id, k) && len(k) > bestLen {
 					best = p
 					bestLen = len(k)
@@ -619,24 +676,23 @@ func ResolveGptProfile(model string) *GptModelProfile {
 			return best
 		}
 	}
-	if len(ids) > 1 {
+	if idCount > 1 {
 		if q := resolveGptBuiltin(ids[0]); q != DefaultGptProfile {
 			return q
 		}
 	}
-	return resolveGptBuiltin(ids[len(ids)-1])
+	return resolveGptBuiltin(ids[idCount-1])
 }
 
 // hasDeclaredGptProfile reports whether the operator declared this id in
 // PXPIPE_GPT_PROFILES.
-func hasDeclaredGptProfile(m string) bool {
+func hasDeclaredGptProfile(ids [2]string, idCount int) bool {
 	env, _ := gptEnvProfiles()
 	if len(env) == 0 {
 		return false
 	}
-	ids := candidateIds(m)
 	for k := range env {
-		for _, id := range ids {
+		for _, id := range ids[:idCount] {
 			if strings.HasPrefix(id, k) {
 				return true
 			}
@@ -649,10 +705,10 @@ func hasDeclaredGptProfile(m string) bool {
 // does not match that family's profile test (e.g. gemini-3.6-pro).
 func IsMisresolvedModelId(model string) bool {
 	m := strings.ToLower(model)
-	if hasDeclaredGptProfile(m) {
+	ids, idCount := candidateIds(m)
+	if hasDeclaredGptProfile(ids, idCount) {
 		return false
 	}
-	ids := candidateIds(m)
 	type guard struct {
 		mentions func(string) bool
 		matches  func(string) bool
@@ -663,7 +719,7 @@ func IsMisresolvedModelId(model string) bool {
 	}
 	for _, g := range guards {
 		mentioned, matched := false, false
-		for _, id := range ids {
+		for _, id := range ids[:idCount] {
 			if g.mentions(id) {
 				mentioned = true
 			}

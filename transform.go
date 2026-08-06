@@ -2,7 +2,9 @@ package pxpipe
 
 import (
 	"container/list"
+	"crypto/sha256"
 	"encoding/base64"
+	"encoding/hex"
 	"fmt"
 	"regexp"
 	"sort"
@@ -855,6 +857,9 @@ func renderToolDoc(t map[string]any) string {
 
 func approxBlockBytes(blk map[string]any) int {
 	src, _ := asMap(blk["source"])
+	if png, ok := src["data"].(pngBase64); ok {
+		return len(png)
+	}
 	b64, _ := getStr(src, "data")
 	pad := 0
 	if strings.HasSuffix(b64, "==") {
@@ -885,7 +890,7 @@ func textToImageBlocks(text string, cols int, shrinkWidth bool, style render.Ren
 	}
 	out := &renderedBlocks{droppedCodepoints: map[rune]int{}}
 	for _, img := range imgs {
-		out.blocks = append(out.blocks, makeImageBlock(base64.StdEncoding.EncodeToString(img.PNG)))
+		out.blocks = append(out.blocks, makeImageBlock(img.PNG))
 		out.pngs = append(out.pngs, img.PNG)
 		out.dims = append(out.dims, imageDim{img.Width, img.Height})
 		out.droppedChars += img.DroppedChars
@@ -919,22 +924,40 @@ func historyImageSha8(messages []any) string {
 	if !ok {
 		return ""
 	}
-	var concat strings.Builder
+	h := sha256.New()
+	var scratch [16 << 10]byte
+	hasData := false
 	for _, bv := range arr {
 		if blockType(bv) == "image" {
 			if bm, ok := asMap(bv); ok {
 				if src, ok := asMap(bm["source"]); ok {
-					if data, ok := getStr(src, "data"); ok {
-						concat.WriteString(data)
+					switch data := src["data"].(type) {
+					case string:
+						if len(data) > 0 {
+							hasData = true
+							_, _ = h.Write(unsafe.Slice(unsafe.StringData(data), len(data)))
+						}
+					case pngBase64:
+						if len(data) > 0 {
+							hasData = true
+							for len(data) > 0 {
+								n := minInt(len(data), 12<<10)
+								encoded := base64.StdEncoding.EncodedLen(n)
+								base64.StdEncoding.Encode(scratch[:encoded], data[:n])
+								_, _ = h.Write(scratch[:encoded])
+								data = data[n:]
+							}
+						}
 					}
 				}
 			}
 		}
 	}
-	if concat.Len() == 0 {
+	if !hasData {
 		return ""
 	}
-	return sha8(concat.String())
+	var sum [sha256.Size]byte
+	return hex.EncodeToString(h.Sum(sum[:0])[:4])
 }
 
 func relocateAnchorToHistoryImage(messages []any, anchorOrdinal int, hasOrdinal bool) {
@@ -1264,7 +1287,7 @@ func applyPins(req map[string]any, info *TransformInfo, pins []pin) {
 	}
 }
 
-func finalizeEarly(req map[string]any, info *TransformInfo, o *resolvedOptions, droppedCodepoints map[rune]int, pins []pin) ([]byte, bool, error) {
+func finalizeEarly(req map[string]any, bodyBytes int, info *TransformInfo, o *resolvedOptions, droppedCodepoints map[rune]int, pins []pin) ([]byte, bool, error) {
 	collapsed := false
 	if msgs, ok := asArr(req["messages"]); ok && len(msgs) > 0 {
 		protectedPrefix := 0
@@ -1279,7 +1302,7 @@ func finalizeEarly(req map[string]any, info *TransformInfo, o *resolvedOptions, 
 	}
 	applyPins(req, info, pins)
 	info.OutgoingTextChars = countOutgoingTextChars(req)
-	return jsStringify(req), collapsed, nil
+	return jsStringifyCap(req, openAIJSONCapacity(bodyBytes, info.ImageBytes)), collapsed, nil
 }
 
 const imageInstructionHeaderBase = "=================== SESSION CONFIGURATION PAGES ===================\n" +
@@ -1469,7 +1492,7 @@ func transformParsed(req map[string]any, body []byte, o *resolvedOptions, info *
 
 	if u16len(combined) < o.MinCompressChars {
 		info.Reason = "below_min_chars (" + strconv.Itoa(u16len(combined)) + " < " + strconv.Itoa(o.MinCompressChars) + ")"
-		finalBody, collapsed, err := finalizeEarly(req, info, o, droppedCodepoints, pins)
+		finalBody, collapsed, err := finalizeEarly(req, len(body), info, o, droppedCodepoints, pins)
 		if err != nil {
 			return nil, err
 		}
@@ -1507,7 +1530,7 @@ func transformParsed(req map[string]any, body []byte, o *resolvedOptions, info *
 	) {
 		info.Reason = "not_profitable (slab=" + strconv.Itoa(u16len(combined)) + " chars)"
 		bumpPassthrough(info, "not_profitable")
-		finalBody, collapsed, err := finalizeEarly(req, info, o, droppedCodepoints, pins)
+		finalBody, collapsed, err := finalizeEarly(req, len(body), info, o, droppedCodepoints, pins)
 		if err != nil {
 			return nil, err
 		}
@@ -1528,14 +1551,13 @@ func transformParsed(req map[string]any, body []byte, o *resolvedOptions, info *
 	}
 	var imageBlocks []any
 	for i, img := range images {
-		b64 := base64.StdEncoding.EncodeToString(img.PNG)
 		info.ImageBytes += len(img.PNG)
 		info.ImagePixels += img.Width * img.Height
 		info.DroppedChars += img.DroppedChars
 		for cp, n := range img.DroppedCodepoints {
 			droppedCodepoints[cp] += n
 		}
-		block := makeImageBlock(b64)
+		block := makeImageBlock(img.PNG)
 		if i == len(images)-1 && hasSystemStaticCC {
 			block["cache_control"] = demoteRelocatedCacheControl(systemStaticCC)
 		}
@@ -1667,7 +1689,7 @@ func transformParsed(req map[string]any, body []byte, o *resolvedOptions, info *
 	}
 	applyPins(req, info, pins)
 	info.OutgoingTextChars = countOutgoingTextChars(req)
-	return jsStringify(req), nil
+	return jsStringifyCap(req, openAIJSONCapacity(len(body), info.ImageBytes)), nil
 }
 
 func compressToolResults(req map[string]any, o *resolvedOptions, info *TransformInfo, denseGeo gateGeometry, droppedCodepoints map[rune]int) error {
