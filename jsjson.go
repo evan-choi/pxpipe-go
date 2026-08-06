@@ -128,6 +128,15 @@ func jsStringify(v any) []byte {
 	return appendJSValue(nil, v)
 }
 
+func jsStringifyString(v any) string {
+	b := jsStringify(v)
+	if len(b) == 0 {
+		return ""
+	}
+	// jsStringify returns a fresh buffer that no caller mutates after this view.
+	return unsafe.String(unsafe.SliceData(b), len(b))
+}
+
 func appendJSValue(b []byte, v any) []byte {
 	switch tv := v.(type) {
 	case nil:

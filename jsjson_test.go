@@ -7,6 +7,7 @@ import (
 )
 
 var benchmarkJSONBytes []byte
+var benchmarkJSONString string
 
 func TestParseOrderedJSONByteView(t *testing.T) {
 	body := []byte(`{"first":1,"second":"value"}`)
@@ -31,7 +32,7 @@ func TestJSStringifyObjectOrderAndExtras(t *testing.T) {
 	delete(m, "removed")
 	m["third"] = 3
 	m["second"] = 2
-	if got, want := string(jsStringify(m)), `{"first":1,"second":2,"third":3}`; got != want {
+	if got, want := jsStringifyString(m), `{"first":1,"second":2,"third":3}`; got != want {
 		t.Fatalf("jsStringify() = %s, want %s", got, want)
 	}
 
@@ -100,5 +101,20 @@ func BenchmarkAppendJSLargeOrderedObject(b *testing.B) {
 	b.ResetTimer()
 	for range b.N {
 		benchmarkJSONBytes = appendJSValue(buf[:0], m)
+	}
+}
+
+func BenchmarkJSStringifyString(b *testing.B) {
+	m := make(map[string]any, 65)
+	keys := make([]string, 64)
+	for i := range keys {
+		keys[i] = "key" + strconv.Itoa(i)
+		m[keys[i]] = true
+	}
+	setObjKeyOrder(m, keys)
+	b.ReportAllocs()
+	b.ResetTimer()
+	for range b.N {
+		benchmarkJSONString = jsStringifyString(m)
 	}
 }

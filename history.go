@@ -199,7 +199,7 @@ func blocksToText(content any) string {
 			}
 		case "tool_use":
 			name, _ := getStr(blk, "name")
-			parts = append(parts, "[tool_use "+name+"]\n"+string(jsStringify(blk["input"])))
+			parts = append(parts, "[tool_use "+name+"]\n"+jsStringifyString(blk["input"]))
 		case "tool_result":
 			inner := blk["content"]
 			var innerText string

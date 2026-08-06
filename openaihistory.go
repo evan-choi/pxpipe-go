@@ -140,7 +140,7 @@ func safeJSONString(v any) string {
 	if v == nil {
 		return ""
 	}
-	return string(jsStringify(v))
+	return jsStringifyString(v)
 }
 
 // findClosedBoundary returns the last index i in [from, cutoffExclusive) where

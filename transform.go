@@ -823,7 +823,7 @@ func renderToolDoc(t map[string]any) string {
 		parts = append(parts, desc)
 	}
 	if schema, has := t["input_schema"]; has {
-		parts = append(parts, "```json\n"+string(jsStringify(schema))+"\n```")
+		parts = append(parts, "```json\n"+jsStringifyString(schema)+"\n```")
 	}
 	return strings.Join(parts, "\n")
 }
