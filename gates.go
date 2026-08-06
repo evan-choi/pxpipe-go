@@ -211,19 +211,53 @@ func compactSlabWhitespace(text string) string {
 	if text == "" {
 		return text
 	}
-	lines := strings.Split(text, "\n")
-	for i, l := range lines {
-		end := len(l)
-		for end > 0 {
-			c := l[end-1]
+	last := text[len(text)-1]
+	needsCompaction := last == ' ' || last == '\t'
+	for at := 0; !needsCompaction; {
+		rel := strings.IndexByte(text[at:], '\n')
+		if rel < 0 {
+			break
+		}
+		i := at + rel
+		needsCompaction = i > 0 && (text[i-1] == ' ' || text[i-1] == '\t') ||
+			i+2 < len(text) && text[i+1] == '\n' && text[i+2] == '\n'
+		at = i + 1
+	}
+	if !needsCompaction {
+		return text
+	}
+	var b strings.Builder
+	b.Grow(len(text))
+	lineStart := 0
+	newlineRun := 0
+	for {
+		rel := strings.IndexByte(text[lineStart:], '\n')
+		lineEnd := len(text)
+		if rel >= 0 {
+			lineEnd = lineStart + rel
+		}
+		trimmedEnd := lineEnd
+		for trimmedEnd > lineStart {
+			c := text[trimmedEnd-1]
 			if c != ' ' && c != '\t' {
 				break
 			}
-			end--
+			trimmedEnd--
 		}
-		lines[i] = l[:end]
+		if trimmedEnd > lineStart {
+			b.WriteString(text[lineStart:trimmedEnd])
+			newlineRun = 0
+		}
+		if rel < 0 {
+			break
+		}
+		if newlineRun < 2 {
+			b.WriteByte('\n')
+			newlineRun++
+		}
+		lineStart = lineEnd + 1
 	}
-	return newlineRun3Re.ReplaceAllString(strings.Join(lines, "\n"), "\n\n")
+	return b.String()
 }
 
 func maybeReflow(text string, enabled bool) string {
