@@ -661,40 +661,65 @@ const tagObservationsMax = 4096
 
 var (
 	tagObsMu   sync.Mutex
-	tagObsMap  = map[string]*list.Element{}
+	tagObsMap  = map[tagObsKey]*list.Element{}
 	tagObsList = list.New()
 )
 
+type tagObsKey struct {
+	session string
+	tag     string
+}
+
 type tagObsEntry struct {
-	key  string
-	hash uint32
+	key        string
+	sessionLen int
+	hash       uint32
 }
 
 func observeStaticTagChurn(sessionKey string, tagOrder []string, tagContents map[string]string) []string {
+	var inlineHashes [32]uint32
+	hashes := inlineHashes[:]
+	if len(tagOrder) > len(inlineHashes) {
+		hashes = make([]uint32, len(tagOrder))
+	} else {
+		hashes = hashes[:len(tagOrder)]
+	}
+	for i, tag := range tagOrder {
+		hashes[i] = fnv1aU16(tagContents[tag])
+	}
+
 	tagObsMu.Lock()
 	defer tagObsMu.Unlock()
 	var churned []string
-	for _, tag := range tagOrder {
-		inner := tagContents[tag]
-		key := sessionKey + "\x00" + tag
-		hash := fnv1aU16(inner)
-		if el, ok := tagObsMap[key]; ok {
-			if el.Value.(*tagObsEntry).hash != hash {
+	for i, tag := range tagOrder {
+		hash := hashes[i]
+		lookupKey := tagObsKey{session: sessionKey, tag: tag}
+		if el, ok := tagObsMap[lookupKey]; ok {
+			entry := el.Value.(*tagObsEntry)
+			if entry.hash != hash {
 				churned = append(churned, tag)
+				entry.hash = hash
 			}
-			tagObsList.Remove(el)
-			delete(tagObsMap, key)
+			tagObsList.MoveToBack(el)
+			continue
 		}
-		el := tagObsList.PushBack(&tagObsEntry{key: key, hash: hash})
-		tagObsMap[key] = el
+
+		key := sessionKey + "\x00" + tag
+		entry := &tagObsEntry{key: key, sessionLen: len(sessionKey), hash: hash}
+		el := tagObsList.PushBack(entry)
+		tagObsMap[tagObsKey{session: key[:entry.sessionLen], tag: key[entry.sessionLen+1:]}] = el
 	}
 	for len(tagObsMap) > tagObservationsMax {
 		oldest := tagObsList.Front()
 		if oldest == nil {
 			break
 		}
+		oldestEntry := oldest.Value.(*tagObsEntry)
 		tagObsList.Remove(oldest)
-		delete(tagObsMap, oldest.Value.(*tagObsEntry).key)
+		delete(tagObsMap, tagObsKey{
+			session: oldestEntry.key[:oldestEntry.sessionLen],
+			tag:     oldestEntry.key[oldestEntry.sessionLen+1:],
+		})
 	}
 	return churned
 }
