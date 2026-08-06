@@ -922,13 +922,13 @@ func planResponsesMixedCollapse(items []any, old []responsesCompletedRound, stat
 	for _, run := range runs {
 		eligible = append(eligible, run...)
 	}
-	var allTextParts []string
+	allTextParts := make([]string, len(eligible))
 	allBaselineTokens := 0
-	for _, unit := range eligible {
-		allTextParts = append(allTextParts, unit.Text)
+	for i, unit := range eligible {
+		allTextParts[i] = unit.Text
 		allBaselineTokens += unit.BaselineTokens
 	}
-	allText := strings.Join(allTextParts, "\n\n")
+	allText, allTextEnds := joinTextPrefixes(allTextParts)
 	if len(eligible) == 0 {
 		base.Reason = "no_closed_prefix"
 		return base, nil
@@ -948,21 +948,23 @@ func planResponsesMixedCollapse(items []any, old []responsesCompletedRound, stat
 	var segments []responsesPairCollapseSegment
 	remainingImages := maxImages
 	hitImageCap := false
+	unitCursor := 0
 	for _, run := range runs {
+		runStart := unitCursor
+		unitCursor += len(run)
 		if remainingImages == 0 {
 			hitImageCap = true
 			break
 		}
-		texts := make([]string, len(run))
-		for i := range run {
-			texts[i] = run[i].Text
+		sourceStart := 0
+		if runStart > 0 {
+			sourceStart = allTextEnds[runStart-1] + 2
 		}
-		source, prefixEnds := joinTextPrefixes(texts)
 		low, high := 0, len(run)+1
 		var best renderedUnits
 		for low+1 < high {
 			count := (low + high) / 2
-			planned := prepareUnitText(source[:prefixEnds[count-1]], o)
+			planned := prepareUnitText(allText[sourceStart:allTextEnds[runStart+count-1]], o)
 			imageCount := render.CountTextPages(planned.RenderedText, o.Cols, o.Style, o.MaxHeightPx)
 			if imageCount > 0 && imageCount <= remainingImages {
 				low = count
@@ -1104,11 +1106,11 @@ func planResponsesPairCollapse(items []any, isProfitable gptProfitableFn, o gptH
 		return base, nil
 	}
 
-	var allTextParts []string
-	for _, round := range old {
-		allTextParts = append(allTextParts, round.Text)
+	allTextParts := make([]string, len(old))
+	for i, round := range old {
+		allTextParts[i] = round.Text
 	}
-	allText := strings.Join(allTextParts, "\n\n")
+	allText, allTextEnds := joinTextPrefixes(allTextParts)
 	if allText == "" || o.tokenCounts.count(allText) < o.MinCollapseTokens {
 		base.Reason = "below_min_tokens"
 		base.CollapsedChars = u16len(allText)
@@ -1137,21 +1139,23 @@ func planResponsesPairCollapse(items []any, isProfitable gptProfitableFn, o gptH
 	var segments []responsesPairCollapseSegment
 	remainingImages := maxImages
 	hitImageCap := false
+	roundCursor := 0
 	for _, run := range runs {
+		runStart := roundCursor
+		roundCursor += len(run)
 		if remainingImages == 0 {
 			hitImageCap = true
 			break
 		}
-		texts := make([]string, len(run))
-		for i := range run {
-			texts[i] = run[i].Text
+		sourceStart := 0
+		if runStart > 0 {
+			sourceStart = allTextEnds[runStart-1] + 2
 		}
-		source, prefixEnds := joinTextPrefixes(texts)
 		low, high := 0, len(run)+1
 		var best renderedUnits
 		for low+1 < high {
 			count := (low + high) / 2
-			planned := prepareUnitText(source[:prefixEnds[count-1]], o)
+			planned := prepareUnitText(allText[sourceStart:allTextEnds[runStart+count-1]], o)
 			imageCount := render.CountTextPages(planned.RenderedText, o.Cols, o.Style, o.MaxHeightPx)
 			if imageCount > 0 && imageCount <= remainingImages {
 				low = count
