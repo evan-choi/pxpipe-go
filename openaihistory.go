@@ -419,22 +419,12 @@ func safeJSONKey(item map[string]any, key string) string {
 	return safeJSONString(v)
 }
 
-func responseCallText(item map[string]any) string {
-	name := "tool"
-	if s, ok := item["name"].(string); ok {
-		name = s
-	}
-	return "[tool_use " + name + "]\n" + safeJSONKey(item, "arguments")
-}
-
-func responseOutputText(item map[string]any) string {
-	return "[tool_result]\n" + safeJSONKey(item, "output")
-}
-
 type responsesCompletedPair struct {
 	CallIndex    int
 	OutputIndex  int
-	Text         string
+	Name         string
+	Arguments    string
+	Output       string
 	CallTokens   int
 	OutputTokens int
 }
@@ -447,6 +437,7 @@ type responsesCompletedRound struct {
 	Text         string
 	CallTokens   int
 	OutputTokens int
+	textEnd      int
 }
 
 func responseItemType(item any) string {
@@ -589,7 +580,7 @@ func responseReferencedIds(items []any) map[string]struct{} {
 
 // classifyResponsesPairs classifies tool state and returns old (imageable)
 // rounds plus counters.
-func classifyResponsesPairs(items []any, keepRecentPairs int, tokenCounts gptTokenCounter) ([]responsesCompletedRound, responsesPairState) {
+func classifyResponsesPairs(items []any, keepRecentPairs int, tokenCounts gptTokenCounter) ([]responsesCompletedRound, string, responsesPairState) {
 	calls := map[string][]int{}
 	outputs := map[string][]int{}
 	missingIDItems := 0
@@ -627,19 +618,20 @@ func classifyResponsesPairs(items []any, keepRecentPairs int, tokenCounts gptTok
 			callIndex, outputIndex := cs[0], os[0]
 			call := items[callIndex].(map[string]any)
 			output := items[outputIndex].(map[string]any)
-			callJSON := jsStringify(call)
-			outTokens := 0
-			if s, ok := output["output"].(string); ok {
-				outTokens = tokenCounts.count(s)
-			} else {
-				outTokens = tokenCounts.count(safeJSONString(output["output"]))
+			name := "tool"
+			if s, ok := call["name"].(string); ok {
+				name = s
 			}
+			arguments := safeJSONKey(call, "arguments")
+			outputText := safeJSONKey(output, "output")
 			pairByCallIndex[callIndex] = responsesCompletedPair{
 				CallIndex:    callIndex,
 				OutputIndex:  outputIndex,
-				Text:         responseCallText(call) + "\n" + responseOutputText(output),
-				CallTokens:   tokenCounts.count(string(callJSON)),
-				OutputTokens: outTokens,
+				Name:         name,
+				Arguments:    arguments,
+				Output:       outputText,
+				CallTokens:   tokenCounts.count(jsStringifyString(call)),
+				OutputTokens: tokenCounts.count(outputText),
 			}
 		case len(cs) > 0 && len(os) == 0:
 			openCalls += len(cs)
@@ -709,21 +701,16 @@ func classifyResponsesPairs(items []any, keepRecentPairs int, tokenCounts gptTok
 		for _, pair := range byOutput {
 			indices = append(indices, pair.OutputIndex)
 		}
-		var texts []string
 		callTokens, outputTokens := 0, 0
-		for _, pair := range byOutput {
-			texts = append(texts, pair.Text)
-		}
 		for _, pair := range roundCalls {
 			callTokens += pair.CallTokens
 			outputTokens += pair.OutputTokens
 		}
 		completed = append(completed, responsesCompletedRound{
-			Pairs:        roundCalls,
+			Pairs:        byOutput,
 			Indices:      indices,
 			StartIndex:   i,
 			EndIndex:     j - 1,
-			Text:         strings.Join(texts, "\n\n"),
 			CallTokens:   callTokens,
 			OutputTokens: outputTokens,
 		})
@@ -736,6 +723,44 @@ func classifyResponsesPairs(items []any, keepRecentPairs int, tokenCounts gptTok
 		if _, ok := acceptedCallIndices[callIndex]; !ok {
 			malformedItems += 2
 		}
+	}
+	textBytes := 0
+	for i, round := range completed {
+		if i > 0 {
+			textBytes += 2
+		}
+		for j, pair := range round.Pairs {
+			if j > 0 {
+				textBytes += 2
+			}
+			textBytes += len("[tool_use ") + len(pair.Name) + len("]\n") + len(pair.Arguments) +
+				len("\n[tool_result]\n") + len(pair.Output)
+		}
+	}
+	var textBuilder strings.Builder
+	textBuilder.Grow(textBytes)
+	for i := range completed {
+		if i > 0 {
+			textBuilder.WriteString("\n\n")
+		}
+		for j, pair := range completed[i].Pairs {
+			if j > 0 {
+				textBuilder.WriteString("\n\n")
+			}
+			textBuilder.WriteString("[tool_use ")
+			textBuilder.WriteString(pair.Name)
+			textBuilder.WriteString("]\n")
+			textBuilder.WriteString(pair.Arguments)
+			textBuilder.WriteString("\n[tool_result]\n")
+			textBuilder.WriteString(pair.Output)
+		}
+		completed[i].textEnd = textBuilder.Len()
+	}
+	completedText := textBuilder.String()
+	textStart := 0
+	for i := range completed {
+		completed[i].Text = completedText[textStart:completed[i].textEnd]
+		textStart = completed[i].textEnd + 2
 	}
 
 	keep := maxInt(0, keepRecentPairs)
@@ -756,7 +781,11 @@ func classifyResponsesPairs(items []any, keepRecentPairs int, tokenCounts gptTok
 		imageableCallTokens += round.CallTokens
 		imageableOutputTokens += round.OutputTokens
 	}
-	return old, responsesPairState{
+	oldText := ""
+	if recentStart > 0 {
+		oldText = completedText[:completed[recentStart-1].textEnd]
+	}
+	return old, oldText, responsesPairState{
 		CompletedPairs:                completedPairs,
 		RecentCompletedPairs:          completedPairs - oldPairs,
 		OldCompletedPairs:             oldPairs,
@@ -1096,7 +1125,7 @@ func finalizeResponsesPlan(base gptCollapsePlan, segments []responsesPairCollaps
 // planResponsesPairCollapse renders only old, unambiguously completed
 // Responses call/output rounds (or defers to the mixed planner per profile).
 func planResponsesPairCollapse(items []any, isProfitable gptProfitableFn, o gptHistoryOptions) (gptCollapsePlan, error) {
-	old, state := classifyResponsesPairs(items, o.KeepRecentPairs, o.tokenCounts)
+	old, allText, state := classifyResponsesPairs(items, o.KeepRecentPairs, o.tokenCounts)
 	if o.ResponsesMode == "mixed" {
 		return planResponsesMixedCollapse(items, old, state, isProfitable, o)
 	}
@@ -1106,11 +1135,6 @@ func planResponsesPairCollapse(items []any, isProfitable gptProfitableFn, o gptH
 		return base, nil
 	}
 
-	allTextParts := make([]string, len(old))
-	for i, round := range old {
-		allTextParts[i] = round.Text
-	}
-	allText, allTextEnds := joinTextPrefixes(allTextParts)
 	if allText == "" || o.tokenCounts.count(allText) < o.MinCollapseTokens {
 		base.Reason = "below_min_tokens"
 		base.CollapsedChars = u16len(allText)
@@ -1149,13 +1173,13 @@ func planResponsesPairCollapse(items []any, isProfitable gptProfitableFn, o gptH
 		}
 		sourceStart := 0
 		if runStart > 0 {
-			sourceStart = allTextEnds[runStart-1] + 2
+			sourceStart = old[runStart-1].textEnd + 2
 		}
 		low, high := 0, len(run)+1
 		var best renderedUnits
 		for low+1 < high {
 			count := (low + high) / 2
-			planned := prepareUnitText(allText[sourceStart:allTextEnds[runStart+count-1]], o)
+			planned := prepareUnitText(allText[sourceStart:old[runStart+count-1].textEnd], o)
 			imageCount := render.CountTextPages(planned.RenderedText, o.Cols, o.Style, o.MaxHeightPx)
 			if imageCount > 0 && imageCount <= remainingImages {
 				low = count

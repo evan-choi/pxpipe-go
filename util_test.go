@@ -3,6 +3,7 @@ package pxpipe
 import (
 	"bytes"
 	"encoding/base64"
+	"encoding/json"
 	"testing"
 )
 
@@ -40,6 +41,27 @@ func TestJoinTextPrefixes(t *testing.T) {
 		if got := source[:end]; got != want[i] {
 			t.Fatalf("prefix %d = %q, want %q", i, got, want[i])
 		}
+	}
+}
+
+func TestClassifyResponsesPairsBuildsSharedText(t *testing.T) {
+	items := []any{
+		map[string]any{"type": "function_call", "call_id": "a", "name": "first", "arguments": map[string]any{"x": json.Number("1")}},
+		map[string]any{"type": "function_call", "call_id": "b", "name": "second", "arguments": "raw-b"},
+		map[string]any{"type": "function_call_output", "call_id": "b", "output": []any{"b"}},
+		map[string]any{"type": "function_call_output", "call_id": "a", "output": map[string]any{"ok": true}},
+	}
+	want := "[tool_use second]\nraw-b\n[tool_result]\n[\"b\"]\n\n" +
+		"[tool_use first]\n{\"x\":1}\n[tool_result]\n{\"ok\":true}"
+	old, text, state := classifyResponsesPairs(items, 0, nil)
+	if text != want {
+		t.Fatalf("completed text = %q, want %q", text, want)
+	}
+	if len(old) != 1 || old[0].Text != want || len(old[0].Pairs) != 2 {
+		t.Fatalf("completed rounds = %#v, want one two-pair round", old)
+	}
+	if state.CompletedPairs != 2 || state.OldCompletedPairs != 2 {
+		t.Fatalf("pair state = %+v, want two old completed pairs", state)
 	}
 }
 
