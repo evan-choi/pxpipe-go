@@ -156,7 +156,7 @@ Known deviations:
 
 ## Performance
 
-![pxpipe versus pxpipe-go benchmark: pxpipe-go is 6.2 to 45.9 times faster across four workloads](docs/benchmark-improvements.png)
+![pxpipe versus pxpipe-go benchmark: pxpipe-go is 6.2 to 45.9 times faster across four workloads and uses 57.5% less peak RSS](docs/benchmark-improvements.png)
 
 Measured on an Apple M1 Pro with Node 26.5.0 and Go 1.26.3. Values are medians
 of five runs with three timed iterations per run, comparing `pxpipe@508fc9d`
@@ -170,6 +170,27 @@ architecture and request content.
 | TransformOpenAIChat | 120.60 ms | 18.32 ms | 6.6× |
 | TransformOpenAIResponses | 646.80 ms | 89.36 ms | 7.2× |
 
+Peak RSS was measured over the full four-benchmark suite in a fresh process
+for each run:
+
+| implementation | median peak RSS | relative to pxpipe |
+|---|---:|---:|
+| pxpipe | 305.95 MiB | baseline |
+| pxpipe-go | 129.89 MiB | 57.5% lower |
+
+Go's `-benchmem` output reports the following allocation volume per operation:
+
+| benchmark | B/op | allocs/op |
+|---|---:|---:|
+| TransformBigClaudeCode | 9,306,912 | 7,255 |
+| RenderDensePage | 803,085 | 73 |
+| TransformOpenAIChat | 10,447,445 | 185,095 |
+| TransformOpenAIResponses | 37,828,464 | 682,346 |
+
+Raw GC counts are not compared because V8 and Go use different collectors and
+event semantics. Peak RSS is the cross-runtime memory metric; `B/op` and
+`allocs/op` identify allocation pressure within the Go implementation.
+
 Reproduce the comparison with:
 
 ```bash
@@ -180,6 +201,20 @@ done
 go test -run '^$' \
   -bench '^(BenchmarkTransformBigClaudeCode|BenchmarkRenderDensePage|BenchmarkTransformOpenAIChat|BenchmarkTransformOpenAIResponses)$' \
   -benchtime=3x -benchmem -count=5 .
+```
+
+On macOS, reproduce peak RSS by running each suite in a fresh process five
+times and taking the median `maximum resident set size` value (reported in
+bytes):
+
+```bash
+for benchmark_run in 1 2 3 4 5; do
+  (cd ../pxpipe &&
+    /usr/bin/time -l pnpm exec tsx ../pxpipe-go/tools/bench-ts.ts >/dev/null)
+  /usr/bin/time -l go test -run '^$' \
+    -bench '^(BenchmarkTransformBigClaudeCode|BenchmarkRenderDensePage|BenchmarkTransformOpenAIChat|BenchmarkTransformOpenAIResponses)$' \
+    -benchtime=3x -count=1 . >/dev/null
+done
 ```
 
 At `pxpipe-go@f464a22`, the Responses profile is dominated by PNG rendering and
