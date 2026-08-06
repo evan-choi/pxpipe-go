@@ -171,14 +171,18 @@ type EnvFields struct {
 // TransformInfo is the per-request diagnostic block (Anthropic-path subset of
 // the TS TransformInfo).
 type TransformInfo struct {
-	Compressed           bool               `json:"compressed"`
-	Reason               string             `json:"reason,omitempty"`
-	OrigChars            int                `json:"origChars"`
-	CompressedChars      int                `json:"compressedChars"`
-	ImageCount           int                `json:"imageCount"`
-	ImageBytes           int                `json:"imageBytes"`
-	ImagePixels          int                `json:"imagePixels,omitempty"`
-	OutgoingTextChars    int                `json:"outgoingTextChars,omitempty"`
+	Compressed        bool   `json:"compressed"`
+	Reason            string `json:"reason,omitempty"`
+	OrigChars         int    `json:"origChars"`
+	CompressedChars   int    `json:"compressedChars"`
+	ImageCount        int    `json:"imageCount"`
+	ImageBytes        int    `json:"imageBytes"`
+	ImagePixels       int    `json:"imagePixels,omitempty"`
+	OutgoingTextChars int    `json:"outgoingTextChars,omitempty"`
+
+	SerializedRequestBytes int    `json:"serializedRequestBytes,omitempty"`
+	SizeLimitOutcome       string `json:"sizeLimitOutcome,omitempty"`
+
 	PinChars             int                `json:"pinChars,omitempty"`
 	PinError             string             `json:"pinError,omitempty"`
 	StaticChars          int                `json:"staticChars"`

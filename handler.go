@@ -9,6 +9,7 @@ import (
 	"net/url"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/bytedance/sonic"
 )
@@ -46,6 +47,15 @@ type HandlerOptions struct {
 	// RewritePath optionally maps the outbound path after protocol detection and
 	// before upstream selection. It is useful with custom ProtocolOf routes.
 	RewritePath func(path string, protocol Protocol) string
+	// UpstreamHeadersTimeout aborts when upstream response headers do not arrive.
+	// Nil defaults to 5 minutes; zero or a negative duration disables it.
+	UpstreamHeadersTimeout *time.Duration
+	// UpstreamIdleTimeout aborts a response stream after no bytes arrive.
+	// Nil defaults to 2 minutes; zero or a negative duration disables it.
+	UpstreamIdleTimeout *time.Duration
+	// DuplicateHold rejects an identical in-flight request during this window.
+	// Nil defaults to 1 minute; zero or a negative duration disables it.
+	DuplicateHold *time.Duration
 }
 
 const defaultMaxBodyBytes = 256 << 20
@@ -78,6 +88,7 @@ func NewHandler(opts HandlerOptions) http.Handler {
 		opts.MaxBodyBytes = defaultMaxBodyBytes
 	}
 	h := &handler{opts: opts}
+	transport := newReliabilityTransport(opts.Transport, resolveReliabilityConfig(opts))
 	h.proxy = &httputil.ReverseProxy{
 		Rewrite: func(pr *httputil.ProxyRequest) {
 			protocol, _ := pr.In.Context().Value(protocolContextKey{}).(Protocol)
@@ -115,7 +126,8 @@ func NewHandler(opts HandlerOptions) http.Handler {
 				}
 			}
 		},
-		Transport: opts.Transport,
+		Transport:    transport,
+		ErrorHandler: proxyErrorHandler,
 		// Negative FlushInterval streams SSE tokens as they arrive.
 		FlushInterval: -1,
 	}
@@ -194,12 +206,11 @@ func DefaultProtocolOf(pathname string) Protocol {
 	return ProtocolNone
 }
 
-func (h *handler) transformFor(surface Protocol, body []byte) *TransformResult {
+func (h *handler) transformFor(surface Protocol, body []byte, model string) *TransformResult {
 	var base TransformOptions
 	if h.opts.Transform != nil {
 		base = *h.opts.Transform
 	}
-	model := extractModel(body)
 	if surface == ProtocolAnthropicMessages {
 		return TransformAnthropicMessages(TransformInput{Body: body, Model: model, Options: &base})
 	}
@@ -256,11 +267,18 @@ func (h *handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		originalBody.Close()
-		res := h.transformFor(surface, body)
+		model := extractModel(body)
+		res := h.transformFor(surface, body, model)
+		body = res.Body
+		limitMessage, overLimit := applySerializedRequestLimit(res, model)
 		if h.opts.OnResult != nil {
 			h.opts.OnResult(r, res)
 		}
-		body = res.Body
+		if overLimit {
+			writeProtocolError(w, surface, http.StatusRequestEntityTooLarge, "request_too_large", limitMessage)
+			return
+		}
+		r = withBodyDigest(r, body)
 		r.Body = io.NopCloser(bytes.NewReader(body))
 		r.ContentLength = int64(len(body))
 		r.Header.Set("Content-Length", strconv.Itoa(len(body)))
