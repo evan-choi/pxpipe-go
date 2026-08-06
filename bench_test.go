@@ -44,9 +44,23 @@ func BenchmarkGptEnvProfilesStableHitParallel(b *testing.B) {
 
 func BenchmarkResolveGptProfileStableHit(b *testing.B) {
 	b.Setenv("PXPIPE_GPT_PROFILES", "")
-	b.ReportAllocs()
-	for range b.N {
-		benchmarkGptProfile = ResolveGptProfile("openai/gpt-5.6-sol-20260101")
+	models := []struct {
+		name string
+		id   string
+	}{
+		{"sol", "openai/gpt-5.6-sol-20260101"},
+		{"flagship", "openai/gpt-5.4-20260801"},
+		{"mini", "openai/gpt-5-mini-20260801"},
+		{"o3", "openai/o3-20260801"},
+		{"gemini", "google/gemini-3.6-flash"},
+	}
+	for _, model := range models {
+		b.Run(model.name, func(b *testing.B) {
+			b.ReportAllocs()
+			for range b.N {
+				benchmarkGptProfile = ResolveGptProfile(model.id)
+			}
+		})
 	}
 }
 
