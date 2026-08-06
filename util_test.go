@@ -33,6 +33,16 @@ func TestU16Slice(t *testing.T) {
 	}
 }
 
+func TestJoinTextPrefixes(t *testing.T) {
+	source, ends := joinTextPrefixes([]string{"한글", "", "tail\n"})
+	want := []string{"한글", "한글\n\n", "한글\n\n\n\ntail\n"}
+	for i, end := range ends {
+		if got := source[:end]; got != want[i] {
+			t.Fatalf("prefix %d = %q, want %q", i, got, want[i])
+		}
+	}
+}
+
 func TestHistoryImageSha8ConcatSemantics(t *testing.T) {
 	imageBlock := func(data string) map[string]any {
 		return map[string]any{"type": "image", "source": map[string]any{"data": data}}
