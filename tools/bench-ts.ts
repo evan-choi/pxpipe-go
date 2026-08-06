@@ -1,18 +1,18 @@
 /**
  * TS-side counterpart of the Go benchmarks: same fixtures, same operations.
- * Run from the pxpipe (TS) repo root:
- *   pnpm exec tsx ../pxpipe-go/tools/bench-ts.ts
+ * Run from the pxpipe submodule root:
+ *   pnpm exec tsx ../tools/bench-ts.ts
  */
 import { readFileSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-import { transformRequest } from '../../pxpipe/src/core/transform.js';
-import { renderTextToImages } from '../../pxpipe/src/core/library.js';
+import { transformRequest } from '../pxpipe/src/core/transform.js';
+import { renderTextToImages } from '../pxpipe/src/core/library.js';
 import {
   transformOpenAIChatCompletions,
   transformOpenAIResponses,
-} from '../../pxpipe/src/core/openai.js';
+} from '../pxpipe/src/core/openai.js';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..', 'testdata');
 
