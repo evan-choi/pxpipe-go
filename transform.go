@@ -646,7 +646,7 @@ func splitStaticDynamic(text string) staticDynamicSplit {
 		i = end + len(closer)
 	}
 
-	out.staticText = strings.TrimSpace(newlineRun3Re.ReplaceAllString(sb, "\n\n"))
+	out.staticText = strings.TrimSpace(collapseNewlineRuns(sb))
 	out.dynamicText = strings.Join(dynamicParts, "\n\n")
 	out.blockCount = len(dynamicParts)
 	out.unknownTags = unknownOrder

@@ -205,7 +205,30 @@ func isCompressionProfitableAmortized(text string, cols, imageCountCap int, char
 
 // --- whitespace compaction + reflow ---------------------------------------
 
-var newlineRun3Re = regexp.MustCompile(`\n{3,}`)
+func collapseNewlineRuns(text string) string {
+	start := strings.Index(text, "\n\n\n")
+	if start < 0 {
+		return text
+	}
+	var b strings.Builder
+	b.Grow(len(text))
+	b.WriteString(text[:start])
+	for {
+		end := start + 3
+		for end < len(text) && text[end] == '\n' {
+			end++
+		}
+		b.WriteString("\n\n")
+		next := strings.Index(text[end:], "\n\n\n")
+		if next < 0 {
+			b.WriteString(text[end:])
+			return b.String()
+		}
+		next += end
+		b.WriteString(text[end:next])
+		start = next
+	}
+}
 
 func compactSlabWhitespace(text string) string {
 	if text == "" {
