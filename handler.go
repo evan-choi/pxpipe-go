@@ -62,17 +62,19 @@ type HandlerOptions struct {
 }
 
 const (
-	defaultMaxBodyBytes  = 256 << 20
+	defaultMaxBodyBytes = 256 << 20
 	// Bound allocation based on the untrusted Content-Length header.
 	maxBodyPreallocBytes = 1 << 20
 )
 
 type handler struct {
-	opts  HandlerOptions
-	proxy *httputil.ReverseProxy
+	opts     HandlerOptions
+	proxy    *httputil.ReverseProxy
+	sessions *sessionStateStore
 }
 
 type protocolContextKey struct{}
+type sessionContextKey struct{}
 
 var passthroughPrefixes = []string{
 	"/anthropic/",
@@ -83,7 +85,8 @@ var passthroughPrefixes = []string{
 
 // NewHandler returns an http.Handler that forwards everything to the
 // configured provider upstream, rewriting POST bodies on supported Anthropic
-// and OpenAI routes. Responses (including SSE streams) pass through untouched.
+// and OpenAI routes. Responses (including SSE streams) are forwarded
+// byte-for-byte while Anthropic cache accounting is observed.
 func NewHandler(opts HandlerOptions) http.Handler {
 	if opts.AnthropicUpstream == nil {
 		opts.AnthropicUpstream = &url.URL{Scheme: "https", Host: "api.anthropic.com"}
@@ -94,7 +97,7 @@ func NewHandler(opts HandlerOptions) http.Handler {
 	if opts.MaxBodyBytes <= 0 {
 		opts.MaxBodyBytes = defaultMaxBodyBytes
 	}
-	h := &handler{opts: opts}
+	h := &handler{opts: opts, sessions: newSessionStateStore()}
 	transport := newReliabilityTransport(opts.Transport, resolveReliabilityConfig(opts))
 	h.proxy = &httputil.ReverseProxy{
 		Rewrite: func(pr *httputil.ProxyRequest) {
@@ -132,6 +135,42 @@ func NewHandler(opts HandlerOptions) http.Handler {
 					pr.Out.Header.Set("Authorization", "Bearer "+token)
 				}
 			}
+		},
+		ModifyResponse: func(res *http.Response) error {
+			if res.Request == nil {
+				return nil
+			}
+			if protocol, _ := res.Request.Context().Value(protocolContextKey{}).(Protocol); protocol != ProtocolAnthropicMessages {
+				return nil
+			}
+			sessionKey, _ := res.Request.Context().Value(sessionContextKey{}).(string)
+			if sessionKey == "" {
+				return nil
+			}
+			if res.Body == nil {
+				return nil
+			}
+			if res.StatusCode == http.StatusRequestEntityTooLarge {
+				h.sessions.markCacheDead(sessionKey)
+				return nil
+			}
+			if res.Header.Get("Content-Encoding") != "" && !strings.EqualFold(res.Header.Get("Content-Encoding"), "identity") {
+				return nil
+			}
+			if (res.StatusCode < 200 || res.StatusCode >= 300) && res.StatusCode != http.StatusBadRequest {
+				return nil
+			}
+			observer := newAnthropicAccountingObserver(
+				res.StatusCode,
+				res.Header.Get("Content-Type"),
+				func(result anthropicResponseAccounting) {
+					h.sessions.accountAnthropicResponse(sessionKey, res.StatusCode, result.usage, result.errorBody)
+				},
+			)
+			if !attachReliabilityBodyObserver(res.Body, observer) {
+				res.Body = &anthropicAccountingReadCloser{body: res.Body, observer: observer}
+			}
+			return nil
 		},
 		Transport:    transport,
 		ErrorHandler: proxyErrorHandler,
@@ -223,6 +262,7 @@ func (h *handler) transformFor(surface Protocol, body []byte, model string) *Tra
 		base = *transform
 	}
 	if surface == ProtocolAnthropicMessages {
+		base.historySessions = h.sessions
 		if !isClaudeModel(model) {
 			res := &TransformResult{
 				Body:   body,
@@ -315,6 +355,9 @@ func (h *handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		model := extractModel(body)
 		res := h.transformFor(surface, body, model)
 		body = res.Body
+		if surface == ProtocolAnthropicMessages && res.Info != nil && res.Info.FirstUserSha8 != "" {
+			r = r.WithContext(context.WithValue(r.Context(), sessionContextKey{}, res.Info.FirstUserSha8))
+		}
 		limitMessage, overLimit := applySerializedRequestLimit(res, model)
 		if h.opts.OnResult != nil {
 			h.opts.OnResult(r, res)
