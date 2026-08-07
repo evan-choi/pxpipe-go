@@ -20,6 +20,8 @@ type Options struct {
 	Routes    []Route
 	Authority *Authority
 	Transport http.RoundTripper
+	// NonproxyHandler serves origin-form requests received on the proxy listener.
+	NonproxyHandler http.Handler
 }
 
 // OriginalSchemeHeader carries the pre-rewrite request scheme over the private
@@ -59,6 +61,9 @@ func NewProxy(options Options) (*Proxy, error) {
 	}
 
 	engine := goproxy.NewProxyHttpServer()
+	if options.NonproxyHandler != nil {
+		engine.NonproxyHandler = options.NonproxyHandler
+	}
 	engine.Logger = log.New(io.Discard, "", 0)
 	engine.KeepAcceptEncoding = true
 	engine.AllowHTTP2 = true
@@ -113,6 +118,14 @@ func (p *Proxy) Serve(listener net.Listener) error {
 // net/http cannot drain itself.
 func (p *Proxy) Shutdown(ctx context.Context) error {
 	err := p.server.Shutdown(ctx)
+	p.closeConnections()
+	return err
+}
+
+// Close immediately stops the proxy and closes hijacked tunnels that net/http
+// does not own after CONNECT handling.
+func (p *Proxy) Close() error {
+	err := p.server.Close()
 	p.closeConnections()
 	return err
 }
