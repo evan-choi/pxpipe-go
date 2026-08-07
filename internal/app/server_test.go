@@ -3,6 +3,7 @@ package app
 import (
 	"bufio"
 	"bytes"
+	"compress/gzip"
 	"context"
 	"io"
 	"net"
@@ -57,9 +58,19 @@ func TestRunServerPrintsGuideAndShutsDown(t *testing.T) {
 }
 
 func TestServeHandlerLogsAnthropicUsage(t *testing.T) {
-	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+	const usageBody = `{"usage":{"input_tokens":100,"output_tokens":5,"cache_creation_input_tokens":20,"cache_read_input_tokens":30}}`
+	acceptedEncoding := make(chan string, 1)
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		acceptedEncoding <- r.Header.Get("Accept-Encoding")
 		w.Header().Set("Content-Type", "application/json")
-		_, _ = io.WriteString(w, `{"usage":{"input_tokens":100,"output_tokens":5,"cache_creation_input_tokens":20,"cache_read_input_tokens":30}}`)
+		if r.Header.Get("Accept-Encoding") != "identity" {
+			w.Header().Set("Content-Encoding", "gzip")
+			compressed := gzip.NewWriter(w)
+			_, _ = io.WriteString(compressed, usageBody)
+			_ = compressed.Close()
+			return
+		}
+		_, _ = io.WriteString(w, usageBody)
 	}))
 	defer upstream.Close()
 	upstreamURL, _ := url.Parse(upstream.URL)
@@ -69,13 +80,22 @@ func TestServeHandlerLogsAnthropicUsage(t *testing.T) {
 	server := httptest.NewServer(handler)
 	defer server.Close()
 
-	response, err := http.Post(server.URL+"/v1/messages", "application/json",
+	request, err := http.NewRequest(http.MethodPost, server.URL+"/v1/messages",
 		strings.NewReader(`{"model":"claude-fable-5","messages":[{"role":"user","content":"hi"}]}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	request.Header.Set("Content-Type", "application/json")
+	request.Header.Set("Accept-Encoding", "gzip, br")
+	response, err := server.Client().Do(request)
 	if err != nil {
 		t.Fatal(err)
 	}
 	_, _ = io.Copy(io.Discard, response.Body)
 	response.Body.Close()
+	if got := <-acceptedEncoding; got != "identity" {
+		t.Fatalf("upstream Accept-Encoding = %q, want identity", got)
+	}
 
 	var got string
 	deadline := time.Now().Add(time.Second)
