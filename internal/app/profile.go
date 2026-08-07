@@ -66,14 +66,17 @@ func (p profile) routes(transformUpstream *url.URL) []mitm.Route {
 type originalUpstreamKey struct{}
 
 func (p profile) handler(transport http.RoundTripper, transformPath string) http.Handler {
-	transformer := pxpipe.NewHandler(pxpipe.HandlerOptions{
-		Transport:  transport,
-		ProtocolOf: p.protocolOf,
-		UpstreamFor: func(r *http.Request, _ pxpipe.Protocol) *url.URL {
-			upstream, _ := r.Context().Value(originalUpstreamKey{}).(*url.URL)
-			return upstream
-		},
-	})
+	return p.handlerWithOptions(transport, transformPath, pxpipe.HandlerOptions{})
+}
+
+func (p profile) handlerWithOptions(transport http.RoundTripper, transformPath string, opts pxpipe.HandlerOptions) http.Handler {
+	opts.Transport = transport
+	opts.ProtocolOf = p.protocolOf
+	opts.UpstreamFor = func(r *http.Request, _ pxpipe.Protocol) *url.URL {
+		upstream, _ := r.Context().Value(originalUpstreamKey{}).(*url.URL)
+		return upstream
+	}
+	transformer := pxpipe.NewHandler(opts)
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		path, ok := stripTransformPath(r.URL.Path, transformPath)
 		if !ok {
