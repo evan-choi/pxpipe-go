@@ -6,12 +6,14 @@ import (
 	"encoding/base64"
 	"encoding/hex"
 	"fmt"
+	"hash"
 	"regexp"
 	"runtime"
 	"sort"
 	"strconv"
 	"strings"
 	"sync"
+	"time"
 	"unsafe"
 
 	"github.com/evan-choi/pxpipe-go/render"
@@ -62,6 +64,8 @@ type TransformOptions struct {
 	CollapseHistory *bool
 	// GptHistory overrides GPT-path history-collapse tuning.
 	GptHistory *GptHistoryOptions
+
+	historySessions *sessionStateStore
 }
 
 type resolvedOptions struct {
@@ -81,7 +85,10 @@ type resolvedOptions struct {
 	Reflow                     bool
 	KeepSharp                  func(KeepSharpBlock) bool
 	EmitRecoverable            bool
+	historySessions            *sessionStateStore
 }
+
+var defaultHistorySessions = newSessionStateStore()
 
 func resolveOptions(opts *TransformOptions) *resolvedOptions {
 	o := &resolvedOptions{
@@ -95,6 +102,7 @@ func resolveOptions(opts *TransformOptions) *resolvedOptions {
 		CharsPerToken:              4,
 		HistoryAmortizationHorizon: 1,
 		Reflow:                     true,
+		historySessions:            defaultHistorySessions,
 	}
 	if opts == nil {
 		return o
@@ -142,6 +150,9 @@ func resolveOptions(opts *TransformOptions) *resolvedOptions {
 	}
 	o.KeepSharp = opts.KeepSharp
 	o.EmitRecoverable = opts.EmitRecoverable
+	if opts.historySessions != nil {
+		o.historySessions = opts.historySessions
+	}
 	return o
 }
 
@@ -187,41 +198,53 @@ type TransformInfo struct {
 	SerializedRequestBytes int    `json:"serializedRequestBytes,omitempty"`
 	SizeLimitOutcome       string `json:"sizeLimitOutcome,omitempty"`
 
-	PinChars             int                `json:"pinChars,omitempty"`
-	PinError             string             `json:"pinError,omitempty"`
-	StaticChars          int                `json:"staticChars"`
-	DynamicChars         int                `json:"dynamicChars"`
-	DynamicBlockCount    int                `json:"dynamicBlockCount"`
-	UnknownStaticTags    []string           `json:"unknownStaticTags,omitempty"`
-	ChurningStaticTags   []string           `json:"churningStaticTags,omitempty"`
-	Env                  *EnvFields         `json:"env,omitempty"`
-	SystemSha8           string             `json:"systemSha8,omitempty"`
-	FirstUserSha8        string             `json:"firstUserSha8,omitempty"`
-	FirstImagePNG        []byte             `json:"-"`
-	FirstImageWidth      int                `json:"firstImageWidth,omitempty"`
-	FirstImageHeight     int                `json:"firstImageHeight,omitempty"`
-	ImagePNGs            [][]byte           `json:"-"`
-	ImageDims            []imageDim         `json:"imageDims,omitempty"`
-	ImageSourceText      string             `json:"imageSourceText,omitempty"`
-	ToolResultImgs       int                `json:"toolResultImgs,omitempty"`
-	ToolDocsChars        int                `json:"toolDocsChars,omitempty"`
-	DroppedChars         int                `json:"droppedChars"`
-	DroppedCodepointsTop map[string]int     `json:"droppedCodepointsTop,omitempty"`
-	PassthroughReasons   map[string]int     `json:"passthroughReasons,omitempty"`
-	GateEval             *slabGateEval      `json:"gateEval,omitempty"`
-	BucketChars          map[string]int     `json:"bucketChars,omitempty"`
-	HistoryTextChars     int                `json:"historyTextChars,omitempty"`
-	KeptSharpBlocks      int                `json:"keptSharpBlocks,omitempty"`
-	Recoverable          []RecoverableBlock `json:"recoverable,omitempty"`
-	TruncatedToolResults int                `json:"truncatedToolResults,omitempty"`
-	OmittedChars         int                `json:"omittedChars,omitempty"`
-	CollapsedTurns       int                `json:"collapsedTurns,omitempty"`
-	CollapsedChars       int                `json:"collapsedChars,omitempty"`
-	CollapsedImages      int                `json:"collapsedImages,omitempty"`
-	HistoryImageSha      string             `json:"historyImageSha,omitempty"`
-	CachePrefixSha8      string             `json:"cachePrefixSha8,omitempty"`
-	CachePrefixBytes     int                `json:"cachePrefixBytes,omitempty"`
-	HistoryReason        string             `json:"historyReason,omitempty"`
+	PinChars               int                `json:"pinChars,omitempty"`
+	PinError               string             `json:"pinError,omitempty"`
+	StaticChars            int                `json:"staticChars"`
+	DynamicChars           int                `json:"dynamicChars"`
+	DynamicBlockCount      int                `json:"dynamicBlockCount"`
+	UnknownStaticTags      []string           `json:"unknownStaticTags,omitempty"`
+	ChurningStaticTags     []string           `json:"churningStaticTags,omitempty"`
+	Env                    *EnvFields         `json:"env,omitempty"`
+	SystemSha8             string             `json:"systemSha8,omitempty"`
+	FirstUserSha8          string             `json:"firstUserSha8,omitempty"`
+	FirstImagePNG          []byte             `json:"-"`
+	FirstImageWidth        int                `json:"firstImageWidth,omitempty"`
+	FirstImageHeight       int                `json:"firstImageHeight,omitempty"`
+	ImagePNGs              [][]byte           `json:"-"`
+	ImageDims              []imageDim         `json:"imageDims,omitempty"`
+	ImageSourceText        string             `json:"imageSourceText,omitempty"`
+	ToolResultImgs         int                `json:"toolResultImgs,omitempty"`
+	NativeImages           int                `json:"nativeImages,omitempty"`
+	ImageBudgetSkips       int                `json:"imageBudgetSkips,omitempty"`
+	WireImages             int                `json:"wireImages,omitempty"`
+	ToolDocsChars          int                `json:"toolDocsChars,omitempty"`
+	DroppedChars           int                `json:"droppedChars"`
+	DroppedCodepointsTop   map[string]int     `json:"droppedCodepointsTop,omitempty"`
+	PassthroughReasons     map[string]int     `json:"passthroughReasons,omitempty"`
+	GateEval               *slabGateEval      `json:"gateEval,omitempty"`
+	BucketChars            map[string]int     `json:"bucketChars,omitempty"`
+	HistoryTextChars       int                `json:"historyTextChars,omitempty"`
+	KeptSharpBlocks        int                `json:"keptSharpBlocks,omitempty"`
+	Recoverable            []RecoverableBlock `json:"recoverable,omitempty"`
+	TruncatedToolResults   int                `json:"truncatedToolResults,omitempty"`
+	OmittedChars           int                `json:"omittedChars,omitempty"`
+	CollapsedTurns         int                `json:"collapsedTurns,omitempty"`
+	CollapsedChars         int                `json:"collapsedChars,omitempty"`
+	CollapsedImages        int                `json:"collapsedImages,omitempty"`
+	HistoryImageSha        string             `json:"historyImageSha,omitempty"`
+	HistoryFreezeStep      int                `json:"historyFreezeStep,omitempty"`
+	HistoryPackFill        bool               `json:"historyPackFill,omitempty"`
+	HistoryBudgetTrimmed   bool               `json:"historyBudgetTrimmed,omitempty"`
+	CachePrefixSha8        string             `json:"cachePrefixSha8,omitempty"`
+	CachePrefixBytes       int                `json:"cachePrefixBytes,omitempty"`
+	CachePrefixToolsSha8   string             `json:"cachePrefixToolsSha8,omitempty"`
+	CachePrefixSystemSha8  string             `json:"cachePrefixSystemSha8,omitempty"`
+	CachePrefixHeadSha8    string             `json:"cachePrefixHeadSha8,omitempty"`
+	CachePrefixMarkedSha8  string             `json:"cachePrefixMarkedSha8,omitempty"`
+	CachePrefixMarkedBytes int                `json:"cachePrefixMarkedBytes,omitempty"`
+	CachePrefixMarkerPos   string             `json:"cachePrefixMarkerPos,omitempty"`
+	HistoryReason          string             `json:"historyReason,omitempty"`
 
 	// GPT-path (OpenAI Chat/Responses) fields.
 	ImageTokens          int                   `json:"imageTokens,omitempty"`
@@ -423,16 +446,31 @@ func demoteRelocatedCacheControl(cc any) any {
 }
 
 func stripBillingLine(text string) (kept string, body string) {
-	nl := strings.Index(text, "\n")
-	first := text
-	if nl >= 0 {
-		first = text[:nl]
-	}
-	if strings.HasPrefix(first, "x-anthropic-billing-header:") {
-		if nl < 0 {
-			return first, ""
+	const prefix = "x-anthropic-billing-header:"
+	lineStart := 0
+	for lineStart <= len(text) {
+		lineEnd := strings.IndexByte(text[lineStart:], '\n')
+		if lineEnd < 0 {
+			lineEnd = len(text)
+		} else {
+			lineEnd += lineStart
 		}
-		return first, text[nl+1:]
+		if strings.HasPrefix(text[lineStart:lineEnd], prefix) {
+			kept = text[lineStart:lineEnd]
+			if lineEnd < len(text) {
+				// Remove the trailing newline, preserving the break before a mid-text header.
+				return kept, text[:lineStart] + text[lineEnd+1:]
+			}
+			cut := lineStart
+			if cut > 0 {
+				cut--
+			}
+			return kept, text[:cut]
+		}
+		if lineEnd == len(text) {
+			break
+		}
+		lineStart = lineEnd + 1
 	}
 	return "", text
 }
@@ -937,15 +975,36 @@ func recordRecoverable(info *TransformInfo, emit bool, kind, toolUseID, text str
 }
 
 func historyImageSha8(messages []any) string {
-	if len(messages) == 0 {
-		return ""
+	var arr []any
+	var firstContent []any
+	for _, mv := range messages {
+		synthetic, ok := asMap(mv)
+		if !ok {
+			continue
+		}
+		content, ok := asArr(synthetic["content"])
+		if !ok || len(content) == 0 {
+			continue
+		}
+		if firstContent == nil {
+			firstContent = content
+		}
+		if blockType(content[0]) != "text" {
+			continue
+		}
+		first, _ := asMap(content[0])
+		if text, _ := getStr(first, "text"); text == HistorySyntheticIntro {
+			arr = content
+			break
+		}
 	}
-	synthetic, ok := asMap(messages[0])
-	if !ok {
-		return ""
+	if len(arr) == 0 {
+		// Low-level callers historically passed an isolated synthetic content
+		// shape without the banner. Production collapse output always takes the
+		// banner-selected path above.
+		arr = firstContent
 	}
-	arr, ok := asArr(synthetic["content"])
-	if !ok {
+	if len(arr) == 0 {
 		return ""
 	}
 	h := sha256.New()
@@ -1092,7 +1151,79 @@ func putCachePrefixScratch(scratch []byte) {
 	}
 }
 
-func cachePrefixDigest(req map[string]any) (string, int, bool) {
+type cachePrefixDigests struct {
+	sha8        string
+	bytes       int
+	toolsSha8   string
+	systemSha8  string
+	headSha8    string
+	markedSha8  string
+	markedBytes int
+	markerPos   string
+}
+
+type cachePrefixHash struct {
+	h     hash.Hash
+	sum   *[sha256.Size]byte
+	parts int
+}
+
+var cachePrefixSeparator = [1]byte{0}
+
+func newCachePrefixHash() cachePrefixHash {
+	return cachePrefixHash{h: sha256.New(), sum: new([sha256.Size]byte)}
+}
+
+func (h *cachePrefixHash) reset() {
+	h.h.Reset()
+	h.parts = 0
+}
+
+func (h *cachePrefixHash) writeString(part string) (separated bool) {
+	separated = h.parts > 0
+	if separated {
+		_, _ = h.h.Write(cachePrefixSeparator[:])
+	}
+	_, _ = h.h.Write(unsafe.Slice(unsafe.StringData(part), len(part)))
+	h.parts++
+	return separated
+}
+
+func (h *cachePrefixHash) sha8() string {
+	digest := h.h.Sum(h.sum[:0])
+	var encoded [8]byte
+	hex.Encode(encoded[:], digest[:4])
+	return string(encoded[:])
+}
+
+type cachePrefixHashSet struct {
+	main, system, head cachePrefixHash
+}
+
+var cachePrefixHashCache = make(chan cachePrefixHashSet, runtime.GOMAXPROCS(0))
+
+func getCachePrefixHashes() cachePrefixHashSet {
+	select {
+	case hashes := <-cachePrefixHashCache:
+		hashes.main.reset()
+		hashes.system.reset()
+		hashes.head.reset()
+		return hashes
+	default:
+		return cachePrefixHashSet{
+			main: newCachePrefixHash(), system: newCachePrefixHash(), head: newCachePrefixHash(),
+		}
+	}
+}
+
+func putCachePrefixHashes(hashes cachePrefixHashSet) {
+	select {
+	case cachePrefixHashCache <- hashes:
+	default:
+	}
+}
+
+func cachePrefixDiagnostics(req map[string]any) (cachePrefixDigests, bool) {
 	msgs, _ := asArr(req["messages"])
 	boundary := -1
 	for i, mv := range msgs {
@@ -1126,59 +1257,132 @@ func cachePrefixDigest(req map[string]any) (string, int, bool) {
 		}
 	}
 	if boundary < 0 {
-		return "", 0, false
+		return cachePrefixDigests{}, false
 	}
-	h := sha256.New()
-	var separator [1]byte
-	scratch := getCachePrefixScratch()
-	partCount := 0
-	prefixUnits := 0
-	appendString := func(s string) {
-		if partCount > 0 {
-			_, _ = h.Write(separator[:])
-			prefixUnits++
-		}
-		_, _ = h.Write(unsafe.Slice(unsafe.StringData(s), len(s)))
-		prefixUnits += u16len(s)
-		partCount++
-	}
-	appendValue := func(v any) {
-		scratch = appendJSValue(scratch[:0], v)
-		appendString(unsafe.String(unsafe.SliceData(scratch), len(scratch)))
-	}
-	if tools, ok := asArr(req["tools"]); ok {
-		for _, t := range tools {
-			appendValue(t)
-		}
-	}
-	if s, ok := req["system"].(string); ok {
-		appendString(s)
-	} else if arr, ok := asArr(req["system"]); ok {
-		for _, b := range arr {
-			appendValue(b)
-		}
-	}
-	for i := 0; i <= boundary; i++ {
+	markerPos := ""
+	markerMessage, markerBlock := -1, -1
+	for i := len(msgs) - 1; i >= 0 && markerMessage < 0; i-- {
 		m, ok := asMap(msgs[i])
 		if !ok {
 			continue
 		}
-		if s, ok := m["content"].(string); ok {
-			appendString(s)
-		} else if arr, ok := asArr(m["content"]); ok {
-			for _, bv := range arr {
-				if s, ok := bv.(string); ok {
-					appendString(s)
-				} else {
-					appendValue(bv)
+		arr, ok := asArr(m["content"])
+		if !ok {
+			continue
+		}
+		for k := len(arr) - 1; k >= 0; k-- {
+			if bm, ok := asMap(arr[k]); ok {
+				if _, has := bm["cache_control"]; has {
+					markerMessage, markerBlock = i, k
+					markerPos = "m" + strconv.Itoa(i) + ".b" + strconv.Itoa(k)
+					break
 				}
 			}
 		}
 	}
-	var sum [sha256.Size]byte
-	digest := hex.EncodeToString(h.Sum(sum[:0])[:4])
+
+	hashes := getCachePrefixHashes()
+	mainHash := &hashes.main
+	systemHash := &hashes.system
+	headHash := &hashes.head
+	mainUnits := 0
+	scratch := getCachePrefixScratch()
+	writePart := func(part string, component *cachePrefixHash) {
+		if mainHash.writeString(part) {
+			mainUnits++
+		}
+		mainUnits += u16len(part)
+		if component != nil {
+			component.writeString(part)
+		}
+	}
+	writeValue := func(v any, component *cachePrefixHash) {
+		scratch = appendJSValue(scratch[:0], v)
+		writePart(unsafe.String(unsafe.SliceData(scratch), len(scratch)), component)
+	}
+	if tools, ok := asArr(req["tools"]); ok {
+		for _, tool := range tools {
+			writeValue(tool, nil)
+		}
+	}
+	toolsSha8 := mainHash.sha8()
+	if system, ok := req["system"].(string); ok {
+		writePart(system, systemHash)
+	} else if blocks, ok := asArr(req["system"]); ok {
+		for _, block := range blocks {
+			writeValue(block, systemHash)
+		}
+	}
+	markedSha8, markedUnits := "", 0
+	if markerMessage < 0 {
+		markedSha8, markedUnits = mainHash.sha8(), mainUnits
+	}
+	allSha8, allUnits := "", 0
+	messageLimit := boundary
+	if markerMessage > messageLimit {
+		messageLimit = markerMessage
+	}
+	for i := 0; i <= messageLimit; i++ {
+		message, ok := asMap(msgs[i])
+		if !ok {
+			continue
+		}
+		if content, ok := message["content"].(string); ok {
+			includeAll := i <= boundary
+			if includeAll || i <= markerMessage {
+				var component *cachePrefixHash
+				if includeAll {
+					component = headHash
+				}
+				writePart(content, component)
+			}
+			if i == boundary {
+				allSha8, allUnits = mainHash.sha8(), mainUnits
+			}
+			continue
+		}
+		blocks, ok := asArr(message["content"])
+		if !ok {
+			continue
+		}
+		for k, block := range blocks {
+			includeAll := i <= boundary
+			includeMarked := i < markerMessage || (i == markerMessage && k <= markerBlock)
+			if !includeAll && !includeMarked {
+				continue
+			}
+			var component *cachePrefixHash
+			if includeAll {
+				component = headHash
+			}
+			if content, ok := block.(string); ok {
+				writePart(content, component)
+			} else {
+				writeValue(block, component)
+			}
+			if i == markerMessage && k == markerBlock {
+				markedSha8, markedUnits = mainHash.sha8(), mainUnits
+			}
+		}
+		if i == boundary {
+			allSha8, allUnits = mainHash.sha8(), mainUnits
+		}
+	}
+	result := cachePrefixDigests{
+		sha8: allSha8, bytes: allUnits,
+		toolsSha8: toolsSha8, systemSha8: systemHash.sha8(), headSha8: headHash.sha8(),
+		markedSha8: markedSha8, markedBytes: markedUnits, markerPos: markerPos,
+	}
+	putCachePrefixHashes(hashes)
 	putCachePrefixScratch(scratch)
-	return digest, prefixUnits, true
+	return result, true
+}
+
+// cachePrefixDigest retains the original aggregate helper used by benchmarks
+// and low-level tests; transform telemetry uses cachePrefixDiagnostics above.
+func cachePrefixDigest(req map[string]any) (string, int, bool) {
+	pfx, ok := cachePrefixDiagnostics(req)
+	return pfx.sha8, pfx.bytes, ok
 }
 
 func countOutgoingTextChars(req map[string]any) int {
@@ -1267,12 +1471,107 @@ func countOutgoingTextChars(req map[string]any) int {
 	return n
 }
 
+const historyImageSafetyMargin = 5
+
+// countNativeImages counts image blocks at both Anthropic message nesting levels.
+// Before transformation this is the caller's image count; afterward it is the
+// provider-facing wire count.
+func countNativeImages(messages []any) int {
+	n := 0
+	for _, mv := range messages {
+		m, ok := asMap(mv)
+		if !ok {
+			continue
+		}
+		arr, ok := asArr(m["content"])
+		if !ok {
+			continue
+		}
+		for _, bv := range arr {
+			switch blockType(bv) {
+			case "image":
+				n++
+			case "tool_result":
+				bm, _ := asMap(bv)
+				inner, _ := asArr(bm["content"])
+				for _, iv := range inner {
+					if blockType(iv) == "image" {
+						n++
+					}
+				}
+			}
+		}
+	}
+	return n
+}
+
+func imageHeadroom(info *TransformInfo) int {
+	return maxInt(0, AnthropicMaxImages-historyImageSafetyMargin-info.ImageCount-info.NativeImages)
+}
+
+func recordImageBudgetSkip(info *TransformInfo) {
+	bumpPassthrough(info, "image_budget")
+	info.ImageBudgetSkips++
+}
+
+func finalizeWireTelemetry(req map[string]any, info *TransformInfo) {
+	msgs, _ := asArr(req["messages"])
+	info.WireImages = countNativeImages(msgs)
+}
+
 // --- history collapse wrapper -------------------------------------------------
+
+type historyGridTuning struct {
+	pageChars     int
+	imageBudget   int
+	packFill      bool
+	minFreezeStep int
+}
+
+func resolveHistoryGridTuning(info *TransformInfo, geo gateGeometry) historyGridTuning {
+	return historyGridTuning{
+		pageChars:   maxInt(1, geo.maxChars),
+		imageBudget: maxInt(1, minInt(AnthropicHistoryImageBudget, imageHeadroom(info))),
+	}
+}
+
+func applyHistoryGridTuning(o *historyCollapseOptions, tuning historyGridTuning) {
+	o.pageChars = tuning.pageChars
+	o.imageBudget = tuning.imageBudget
+	o.packFill = tuning.packFill
+	o.minFreezeStep = tuning.minFreezeStep
+}
+
+func recordHistoryGridInfo(info *TransformInfo, histInfo *historyCollapseInfo, tuning historyGridTuning) {
+	info.HistoryFreezeStep = histInfo.freezeStep
+	if histInfo.budgetTrimmed {
+		info.HistoryBudgetTrimmed = true
+	}
+	if tuning.packFill {
+		info.HistoryPackFill = true
+	}
+}
 
 func runHistoryCollapse(req map[string]any, info *TransformInfo, o *resolvedOptions, droppedCodepoints map[rune]int, protectedPrefix int, relocate bool) (bool, error) {
 	msgs, ok := asArr(req["messages"])
 	if !ok || len(msgs) == 0 {
 		return false, nil
+	}
+	if imageHeadroom(info) <= 0 {
+		recordImageBudgetSkip(info)
+		if info.HistoryReason == "" {
+			info.HistoryReason = "too_many_images"
+		}
+		return false, nil
+	}
+	sessionKey := ""
+	packFill := false
+	minFreezeStep := 0
+	if info.FirstUserSha8 != "" && o.historySessions != nil {
+		state := o.historySessions.noteHistoryRequest(info.FirstUserSha8, time.Now())
+		sessionKey = info.FirstUserSha8
+		packFill = state.cold
+		minFreezeStep = state.minFreezeStep
 	}
 	historyCpt := HistoryCharsPerToken
 	if o.charsPerTokenSet {
@@ -1292,11 +1591,27 @@ func runHistoryCollapse(req map[string]any, info *TransformInfo, o *resolvedOpti
 	ho.reflow = o.Reflow
 	ho.style = geo.style
 	ho.maxHeightPx = geo.maxHeightPx
+	tuning := resolveHistoryGridTuning(info, geo)
+	tuning.packFill = packFill
+	tuning.minFreezeStep = minFreezeStep
+	applyHistoryGridTuning(&ho, tuning)
 	newMessages, histInfo, err := collapseHistory(msgs, profitable, ho)
 	if err != nil {
 		return false, err
 	}
 	if histInfo.collapsedTurns > 0 {
+		// The renderer owns pagination, so accept a collapse only after its actual
+		// image count fits the shared budget. req and transform telemetry are still
+		// untouched here, making an over-budget render an atomic no-op.
+		if histInfo.collapsedImages > tuning.imageBudget {
+			recordImageBudgetSkip(info)
+			info.HistoryReason = "too_many_images"
+			return false, nil
+		}
+		recordHistoryGridInfo(info, histInfo, tuning)
+		if histInfo.freezeStep > 0 {
+			o.historySessions.recordFreezeStep(sessionKey, histInfo.freezeStep)
+		}
 		req["messages"] = newMessages
 		info.CollapsedTurns = histInfo.collapsedTurns
 		info.CollapsedChars = histInfo.collapsedChars
@@ -1318,6 +1633,10 @@ func runHistoryCollapse(req map[string]any, info *TransformInfo, o *resolvedOpti
 			relocateAnchorToHistoryImage(newMessages, histInfo.carryOverImageOrdinal, true)
 		}
 		return true, nil
+	}
+	recordHistoryGridInfo(info, histInfo, tuning)
+	if histInfo.freezeStep > 0 {
+		o.historySessions.recordFreezeStep(sessionKey, histInfo.freezeStep)
 	}
 	if histInfo.reason != "" {
 		info.HistoryReason = histInfo.reason
@@ -1351,6 +1670,7 @@ func finalizeEarly(req map[string]any, bodyBytes int, info *TransformInfo, o *re
 	}
 	applyPins(req, info, pins)
 	info.OutgoingTextChars = countOutgoingTextChars(req)
+	finalizeWireTelemetry(req, info)
 	return jsStringifyCap(req, openAIJSONCapacity(bodyBytes, info.ImageBytes)), collapsed, nil
 }
 
@@ -1399,6 +1719,9 @@ func TransformRequest(body []byte, opts *TransformOptions) (outBody []byte, info
 }
 
 func transformParsed(req map[string]any, body []byte, o *resolvedOptions, info *TransformInfo, droppedCodepoints map[rune]int) ([]byte, error) {
+	msgsAtEntry, _ := asArr(req["messages"])
+	info.NativeImages = countNativeImages(msgsAtEntry)
+
 	// Step 0: fold user pins and strip their commands from the outbound copy.
 	var pins []pin
 	pinsRewrote := false
@@ -1568,6 +1891,22 @@ func transformParsed(req map[string]any, body []byte, o *resolvedOptions, info *
 	}
 	header += "\n====================== BEGIN RENDERED CONTEXT ======================\n"
 	combinedWithHeader := header + combined
+	if imageHeadroom(info) <= 0 {
+		info.Reason = "image_budget"
+		recordImageBudgetSkip(info)
+		finalBody, collapsed, err := finalizeEarly(req, len(body), info, o, droppedCodepoints, pins)
+		if err != nil {
+			return nil, err
+		}
+		if collapsed {
+			info.Compressed = true
+			return finalBody, nil
+		}
+		if pinsRewrote {
+			return finalBody, nil
+		}
+		return body, nil
+	}
 	slabCols := render.ShrinkColsToContent(combinedWithHeader, o.Cols, 1, denseGeo.style.Font)
 	slabGate := evalCompressionProfitability(
 		combinedWithHeader, slabCols, 0, slabCpt, o.PriorWarmTokens, o.PriorWarmImageTokens, false, denseGeo,
@@ -1594,11 +1933,26 @@ func transformParsed(req map[string]any, body []byte, o *resolvedOptions, info *
 		}
 		return body, nil
 	}
-
 	// Step 3: render the slab to PNG pages.
 	images, err := render.RenderTextToPngs(combinedWithHeader, slabCols, denseGeo.style, denseGeo.maxHeightPx, nil)
 	if err != nil {
 		return nil, err
+	}
+	if len(images) > imageHeadroom(info) {
+		info.Reason = "image_budget (slab needs " + strconv.Itoa(len(images)) + ", headroom " + strconv.Itoa(imageHeadroom(info)) + ")"
+		recordImageBudgetSkip(info)
+		finalBody, collapsed, err := finalizeEarly(req, len(body), info, o, droppedCodepoints, pins)
+		if err != nil {
+			return nil, err
+		}
+		if collapsed {
+			info.Compressed = true
+			return finalBody, nil
+		}
+		if pinsRewrote {
+			return finalBody, nil
+		}
+		return body, nil
 	}
 	var imageBlocks []any
 	for i, img := range images {
@@ -1710,9 +2064,15 @@ func transformParsed(req map[string]any, body []byte, o *resolvedOptions, info *
 	}
 
 	info.Compressed = true
-	if sha, bytes, ok := cachePrefixDigest(req); ok {
-		info.CachePrefixSha8 = sha
-		info.CachePrefixBytes = bytes
+	if pfx, ok := cachePrefixDiagnostics(req); ok {
+		info.CachePrefixSha8 = pfx.sha8
+		info.CachePrefixBytes = pfx.bytes
+		info.CachePrefixToolsSha8 = pfx.toolsSha8
+		info.CachePrefixSystemSha8 = pfx.systemSha8
+		info.CachePrefixHeadSha8 = pfx.headSha8
+		info.CachePrefixMarkedSha8 = pfx.markedSha8
+		info.CachePrefixMarkedBytes = pfx.markedBytes
+		info.CachePrefixMarkerPos = pfx.markerPos
 	}
 	if len(droppedCodepoints) > 0 {
 		type cpCount struct {
@@ -1740,6 +2100,7 @@ func transformParsed(req map[string]any, body []byte, o *resolvedOptions, info *
 	}
 	applyPins(req, info, pins)
 	info.OutgoingTextChars = countOutgoingTextChars(req)
+	finalizeWireTelemetry(req, info)
 	return jsStringifyCap(req, openAIJSONCapacity(len(body), info.ImageBytes)), nil
 }
 
@@ -1779,6 +2140,11 @@ func compressToolResults(req map[string]any, o *resolvedOptions, info *Transform
 					rewritten = append(rewritten, bv)
 					continue
 				}
+				if imageHeadroom(info) <= 0 {
+					recordImageBudgetSkip(info)
+					rewritten = append(rewritten, bv)
+					continue
+				}
 				inner := compactSlabWhitespace(innerStr)
 				innerR := maybeReflow(inner, o.Reflow)
 				if u16len(innerR) < o.MinToolResultChars {
@@ -1786,19 +2152,25 @@ func compressToolResults(req map[string]any, o *resolvedOptions, info *Transform
 					rewritten = append(rewritten, bv)
 					continue
 				}
+				resultImageCap := minInt(o.MaxImagesPerToolResult, imageHeadroom(info))
 				if !isCompressionProfitable(innerR, denseGeo.cols, o.MaxImagesPerToolResult, o.CharsPerToken, 0, 0, true, denseGeo.maxChars, denseGeo) {
 					bumpPassthrough(info, "not_profitable")
 					rewritten = append(rewritten, bv)
 					continue
 				}
-				paged := truncateForBudget(innerR, o.MaxImagesPerToolResult, denseGeo.cols, denseGeo.maxChars, linesPerImage)
-				if paged.truncated {
-					info.TruncatedToolResults++
-					info.OmittedChars += paged.omittedChars
-				}
+				paged := truncateForBudget(innerR, resultImageCap, denseGeo.cols, denseGeo.maxChars, linesPerImage)
 				rb, err := textToImageBlocks(paged.text, o.Cols, true, denseGeo.style, denseGeo.maxHeightPx)
 				if err != nil {
 					return err
+				}
+				if len(rb.blocks) > imageHeadroom(info) {
+					recordImageBudgetSkip(info)
+					rewritten = append(rewritten, bv)
+					continue
+				}
+				if paged.truncated {
+					info.TruncatedToolResults++
+					info.OmittedChars += paged.omittedChars
 				}
 				info.ImagePNGs = append(info.ImagePNGs, rb.pngs...)
 				info.ImageDims = append(info.ImageDims, rb.dims...)
@@ -1848,6 +2220,11 @@ func compressToolResults(req map[string]any, o *resolvedOptions, info *Transform
 						newInner = append(newInner, iv)
 						continue
 					}
+					if imageHeadroom(info) <= 0 {
+						recordImageBudgetSkip(info)
+						newInner = append(newInner, iv)
+						continue
+					}
 					innerText := compactSlabWhitespace(innerTextRaw)
 					innerTextR := maybeReflow(innerText, o.Reflow)
 					if u16len(innerTextR) < o.MinToolResultChars {
@@ -1855,19 +2232,25 @@ func compressToolResults(req map[string]any, o *resolvedOptions, info *Transform
 						newInner = append(newInner, iv)
 						continue
 					}
+					resultImageCap := minInt(o.MaxImagesPerToolResult, imageHeadroom(info))
 					if !isCompressionProfitable(innerTextR, denseGeo.cols, o.MaxImagesPerToolResult, o.CharsPerToken, 0, 0, true, denseGeo.maxChars, denseGeo) {
 						bumpPassthrough(info, "not_profitable")
 						newInner = append(newInner, iv)
 						continue
 					}
-					paged := truncateForBudget(innerTextR, o.MaxImagesPerToolResult, denseGeo.cols, denseGeo.maxChars, linesPerImage)
-					if paged.truncated {
-						info.TruncatedToolResults++
-						info.OmittedChars += paged.omittedChars
-					}
+					paged := truncateForBudget(innerTextR, resultImageCap, denseGeo.cols, denseGeo.maxChars, linesPerImage)
 					rb, err := textToImageBlocks(paged.text, o.Cols, true, denseGeo.style, denseGeo.maxHeightPx)
 					if err != nil {
 						return err
+					}
+					if len(rb.blocks) > imageHeadroom(info) {
+						recordImageBudgetSkip(info)
+						newInner = append(newInner, iv)
+						continue
+					}
+					if paged.truncated {
+						info.TruncatedToolResults++
+						info.OmittedChars += paged.omittedChars
 					}
 					info.ImagePNGs = append(info.ImagePNGs, rb.pngs...)
 					info.ImageDims = append(info.ImageDims, rb.dims...)

@@ -8,6 +8,7 @@
   "dynamicChars": 0,
   "dynamicBlockCount": 0,
   "droppedChars": 0,
+  "nativeImages": 0,
   "firstUserSha8": "b4716b1f",
   "systemSha8": "9e4b43fc",
   "gateEval": {
@@ -33068,5 +33069,11 @@
   "historyReason": "no_closed_prefix",
   "cachePrefixSha8": "d2c89aec",
   "cachePrefixBytes": 26757,
-  "outgoingTextChars": 89
+  "cachePrefixToolsSha8": "e3b0c442",
+  "cachePrefixSystemSha8": "e3b0c442",
+  "cachePrefixHeadSha8": "d2c89aec",
+  "cachePrefixMarkedSha8": "e3b0c442",
+  "cachePrefixMarkedBytes": 0,
+  "outgoingTextChars": 89,
+  "wireImages": 2
 }

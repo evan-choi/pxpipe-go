@@ -24,6 +24,8 @@ const (
 	verbatimTailChars               = 1400
 	userTextMaxChars                = 2000
 	endOfRenderedContext            = "[End of rendered context.]"
+	AnthropicMaxImages              = 100
+	AnthropicHistoryImageBudget     = 80
 )
 
 type profitableFn func(text string, cols int) bool
@@ -38,6 +40,10 @@ type historyCollapseOptions struct {
 	reflow            bool
 	style             render.RenderStyle
 	maxHeightPx       int
+	pageChars         int
+	imageBudget       int
+	packFill          bool
+	minFreezeStep     int
 }
 
 func historyDefaults() historyCollapseOptions {
@@ -51,6 +57,10 @@ func historyDefaults() historyCollapseOptions {
 		reflow:            true,
 		style:             render.DenseRenderStyle,
 		maxHeightPx:       render.MaxHeightPx,
+		pageChars:         render.MaxCharsPerImage(100),
+		imageBudget:       AnthropicHistoryImageBudget,
+		packFill:          false,
+		minFreezeStep:     0,
 	}
 }
 
@@ -65,6 +75,8 @@ type historyCollapseInfo struct {
 	carryOverImageOrdinal int
 	hasCarryOver          bool
 	reason                string
+	freezeStep            int
+	budgetTrimmed         bool
 	droppedChars          int
 	droppedCodepoints     map[rune]int
 }
@@ -178,6 +190,10 @@ func staleFreshnessHints(text string) string {
 }
 
 func blocksToText(content any) string {
+	return blocksToTextSkipping(content, nil)
+}
+
+func blocksToTextSkipping(content any, skipped map[int]struct{}) string {
 	if s, ok := content.(string); ok {
 		return s
 	}
@@ -186,7 +202,10 @@ func blocksToText(content any) string {
 		return ""
 	}
 	var parts []string
-	for _, bv := range arr {
+	for i, bv := range arr {
+		if _, skip := skipped[i]; skip {
+			continue
+		}
 		blk, ok := asMap(bv)
 		if !ok {
 			continue
@@ -249,33 +268,36 @@ func messageCacheControl(m map[string]any) (any, bool) {
 	return nil, false
 }
 
-func messagesToHistorySegments(messages []any, upToExclusive, fromInclusive int) (text, slotText string) {
-	var textOut, slotOut []string
-	for i := fromInclusive; i < upToExclusive; i++ {
-		m, ok := asMap(messages[i])
-		if !ok {
-			continue
-		}
-		role, _ := getStr(m, "role")
-		content := m["content"]
-		if role == "user" {
-			content = withoutTypedUserText(content)
-		}
-		body := blocksToText(content)
-		if strings.TrimSpace(body) == "" {
-			continue
-		}
-		tag := "user"
-		mark := render.SlotMarkUser
-		if role == "assistant" {
-			tag = "assistant"
-			mark = render.SlotMarkAssistant
-		}
-		attr := ` t="` + strconv.Itoa(i) + `"`
-		textOut = append(textOut, "<"+tag+attr+">\n"+body+"\n</"+tag+">")
-		slotOut = append(slotOut, render.RoleSlotSegment(tag, body, mark, attr))
+func historyMessageBody(m map[string]any) (body, typed, tag, mark string) {
+	role, _ := getStr(m, "role")
+	tag, mark = "user", render.SlotMarkUser
+	if role == "assistant" {
+		tag, mark = "assistant", render.SlotMarkAssistant
 	}
-	return strings.Join(textOut, "\n\n"), strings.Join(slotOut, "\n\n")
+
+	content := m["content"]
+	if role == "user" {
+		var typedIdx map[int]struct{}
+		typed, typedIdx = splitUserTyped(content)
+		if _, isString := content.(string); !isString {
+			body = blocksToTextSkipping(content, typedIdx)
+		}
+	} else {
+		body = blocksToText(content)
+	}
+	if strings.TrimSpace(body) == "" {
+		body = ""
+	}
+	return body, typed, tag, mark
+}
+
+func decimalDigits(n int) int {
+	digits := 1
+	for n >= 10 {
+		n /= 10
+		digits++
+	}
+	return digits
 }
 
 func compactPreview(text string) string {
@@ -317,37 +339,13 @@ func verbatimTaskText(text string) string {
 		u16Slice(t, tl-verbatimTailChars, tl)
 }
 
-func withoutTypedUserText(content any) any {
-	if _, ok := content.(string); ok {
-		return ""
-	}
-	arr, ok := asArr(content)
-	if !ok {
-		return content
-	}
-	_, typedIdx := splitUserTyped(content)
-	if len(typedIdx) == 0 {
-		return content
-	}
-	var out []any
-	for i, bv := range arr {
-		if _, drop := typedIdx[i]; !drop {
-			out = append(out, bv)
-		}
-	}
-	if out == nil {
-		out = []any{}
-	}
-	return out
-}
-
 func typedUserText(content any) string {
 	text, _ := splitUserTyped(content)
 	return text
 }
 
 func splitUserTyped(content any) (string, map[int]struct{}) {
-	typedIdx := map[int]struct{}{}
+	var typedIdx map[int]struct{}
 	if s, ok := content.(string); ok {
 		return strings.TrimSpace(s), typedIdx
 	}
@@ -387,6 +385,9 @@ func splitUserTyped(content any) (string, map[int]struct{}) {
 			continue
 		}
 		parts = append(parts, text)
+		if typedIdx == nil {
+			typedIdx = make(map[int]struct{})
+		}
 		typedIdx[i] = struct{}{}
 	}
 	return strings.Join(parts, "\n\n"), typedIdx
@@ -507,6 +508,11 @@ func demoteProtectedMessage(mv any, idx int) any {
 func userTurnBlocks(messages []any, fromInclusive, upToExclusive int, onImage func(*render.RenderedImage)) ([]any, error) {
 	var out []any
 	var pending []string
+	type imagedUser struct {
+		idx   int
+		typed string
+	}
+	var imaged []imagedUser
 	flush := func() {
 		if len(pending) == 0 {
 			return
@@ -530,9 +536,25 @@ func userTurnBlocks(messages []any, fromInclusive, upToExclusive int, onImage fu
 			pending = append(pending, `<user t="`+strconv.Itoa(i)+`">`+typed+`</user>`)
 			continue
 		}
-		flush()
+		imaged = append(imaged, imagedUser{idx: i, typed: typed})
+	}
+	flush()
+	if len(imaged) > 0 {
+		const previewLimit = 8
+		previews := make([]string, 0, len(imaged))
+		rendered := make([]string, 0, len(imaged))
+		for k, u := range imaged {
+			preview := `<user t="` + strconv.Itoa(u.idx) + `"> (` + strconv.Itoa(u16len(u.typed)) + ` chars)`
+			if k >= len(imaged)-previewLimit {
+				preview += " Preview: " + compactPreview(u.typed)
+			}
+			previews = append(previews, preview)
+			rendered = append(rendered, `<user t="`+strconv.Itoa(u.idx)+`">`+"\n"+u.typed+"\n</user>")
+		}
+		out = append(out, textBlock(`[`+strconv.Itoa(len(imaged))+` user turn(s) from this session were too long to carry as text; they are rendered verbatim, in turn order, in the image(s) immediately below, separate from the history transcript. Each begins with its own <user t="N"> tag. PRIOR context, not the current request.
+`+strings.Join(previews, "\n")+`]`))
 		imgs, err := render.RenderTextToPngsWithCharLimit(
-			`<user t="`+strconv.Itoa(i)+"\">\n"+typed+"\n</user>",
+			strings.Join(rendered, "\n\n"),
 			render.DenseContentCols,
 			render.DenseContentCharsPerImage,
 			render.DenseRenderStyle,
@@ -542,13 +564,11 @@ func userTurnBlocks(messages []any, fromInclusive, upToExclusive int, onImage fu
 		if err != nil {
 			return nil, err
 		}
-		out = append(out, textBlock(`[<user t="`+strconv.Itoa(i)+`"> was too long to carry as text (`+strconv.Itoa(u16len(typed))+` chars); it is rendered verbatim in the image(s) immediately below, separate from the history transcript. PRIOR context, not the current request. Preview: `+compactPreview(typed)+`]`))
 		for _, img := range imgs {
 			out = append(out, makeImageBlock(img.PNG))
 			onImage(img)
 		}
 	}
-	flush()
 	return out, nil
 }
 
@@ -610,7 +630,135 @@ func collapseHistory(messages []any, isProfitable profitableFn, o historyCollaps
 		info.reason = "prefix_too_short"
 		return messages, info, nil
 	}
-	text, _ := messagesToHistorySegments(messages, collapseLen, protectedPrefix)
+
+	// Anthropic rejects the whole request past AnthropicMaxImages with an opaque
+	// 500, so the budget is a hard constraint we must enforce before the wire.
+	budget := o.imageBudget
+	pageChars := o.pageChars
+	if pageChars < 1 {
+		pageChars = 1
+	}
+	type messageCost struct {
+		text       int
+		userImage  int
+		textTotal  int
+		imageTotal int
+		index      int
+		body       string
+		tag        string
+		mark       string
+	}
+	costs := make([]messageCost, 0, collapseLen-protectedPrefix)
+	for i := protectedPrefix; i < collapseLen; i++ {
+		m, ok := asMap(messages[i])
+		if !ok {
+			cost := messageCost{index: i}
+			if len(costs) > 0 {
+				cost.textTotal = costs[len(costs)-1].textTotal
+				cost.imageTotal = costs[len(costs)-1].imageTotal
+			}
+			costs = append(costs, cost)
+			continue
+		}
+		body, typed, tag, mark := historyMessageBody(m)
+		textLen := 0
+		if body != "" {
+			// Include the role wrapper and the inter-segment blank line, matching
+			// the previous per-message strings.Join accounting exactly.
+			textLen = u16len(body) + 14 + 2*len(tag) + decimalDigits(i)
+		}
+		userLen := 0
+		if typedLen := u16len(typed); typedLen > userTextMaxChars {
+			userLen = typedLen + 20
+		}
+		cost := messageCost{
+			text: textLen, userImage: userLen, index: i,
+			body: body, tag: tag, mark: mark,
+		}
+		if len(costs) > 0 {
+			cost.textTotal = costs[len(costs)-1].textTotal
+			cost.imageTotal = costs[len(costs)-1].imageTotal
+		}
+		cost.textTotal += textLen
+		cost.imageTotal += userLen
+		costs = append(costs, cost)
+	}
+	rangeTotal := func(from, to int, userImages bool) int {
+		if to > len(costs) {
+			to = len(costs)
+		}
+		if from >= to {
+			return 0
+		}
+		total := costs[to-1].textTotal
+		if userImages {
+			total = costs[to-1].imageTotal
+		}
+		if from > 0 {
+			if userImages {
+				total -= costs[from-1].imageTotal
+			} else {
+				total -= costs[from-1].textTotal
+			}
+		}
+		return total
+	}
+	joinSegments := func(from, to int, withSlots bool) (string, string) {
+		if from < 0 {
+			from = 0
+		}
+		if to > len(costs) {
+			to = len(costs)
+		}
+		var textOut, slotOut strings.Builder
+		wrote := false
+		for i := from; i < to; i++ {
+			cost := &costs[i]
+			if cost.body == "" {
+				continue
+			}
+			if wrote {
+				textOut.WriteString("\n\n")
+				if withSlots {
+					slotOut.WriteString("\n\n")
+				}
+			}
+			index := strconv.Itoa(cost.index)
+			attr := ` t="` + index + `"`
+			textOut.WriteByte('<')
+			textOut.WriteString(cost.tag)
+			textOut.WriteString(attr)
+			textOut.WriteString(">\n")
+			textOut.WriteString(cost.body)
+			textOut.WriteString("\n</")
+			textOut.WriteString(cost.tag)
+			textOut.WriteByte('>')
+			if withSlots {
+				slotOut.WriteString(render.RoleSlotSegment(cost.tag, cost.body, cost.mark, attr))
+			}
+			wrote = true
+		}
+		return textOut.String(), slotOut.String()
+	}
+	perfectPages := ceilDiv(rangeTotal(0, len(costs), false), pageChars) +
+		ceilDiv(rangeTotal(0, len(costs), true), pageChars)
+	if budget > 0 && perfectPages > budget {
+		acc := 0
+		k := 0
+		for k < len(costs) && acc+costs[k].text+costs[k].userImage <= budget*pageChars {
+			acc += costs[k].text + costs[k].userImage
+			k++
+		}
+		trimmedLen := findClosedPrefixBoundary(messages, protectedPrefix+k) + 1
+		if trimmedLen-protectedPrefix < o.minCollapsePrefix {
+			info.reason = "over_budget"
+			return messages, info, nil
+		}
+		collapseLen = trimmedLen
+		info.budgetTrimmed = true
+	}
+
+	text, _ := joinSegments(0, collapseLen-protectedPrefix, false)
 	if text == "" {
 		info.reason = "render_empty"
 		return messages, info, nil
@@ -630,10 +778,56 @@ func collapseHistory(messages []any, isProfitable profitableFn, o historyCollaps
 		return messages, info, nil
 	}
 
-	step := o.freezeChunk
-	if step <= 0 {
-		step = collapseLen - protectedPrefix
+	// The grid step is adaptive. Doubling merges neighbouring chunks while
+	// keeping every coarse boundary on the append-only base grid.
+	baseStep := o.freezeChunk
+	if baseStep <= 0 {
+		baseStep = collapseLen - protectedPrefix
 	}
+	rangeLen := collapseLen - protectedPrefix
+	pagesFor := func(step int) int {
+		pages := 0
+		for a := 0; a < rangeLen; a += step {
+			b := a + step
+			if b > rangeLen {
+				b = rangeLen
+			}
+			if chars := rangeTotal(a, b, false); chars > 0 {
+				pages += ceilDiv(chars, pageChars)
+			}
+			if chars := rangeTotal(a, b, true); chars > 0 {
+				pages += ceilDiv(chars, pageChars)
+			}
+		}
+		return pages
+	}
+	markSplits := 0
+	for i := protectedPrefix; i < collapseLen; i++ {
+		if m, ok := asMap(messages[i]); ok {
+			if _, has := messageCacheControl(m); has {
+				markSplits++
+			}
+		}
+	}
+	step := baseStep
+	for step < o.minFreezeStep && step < rangeLen {
+		step *= 2
+	}
+	packedPages := ceilDiv(rangeTotal(0, rangeLen, false), pageChars)
+	if packedPages < 1 {
+		packedPages = 1
+	}
+	goal := int(^uint(0) >> 1)
+	if budget > 0 {
+		goal = budget
+	}
+	if o.packFill && packedPages+1 < goal {
+		goal = packedPages + 1
+	}
+	for step < rangeLen && pagesFor(step)+markSplits > goal {
+		step *= 2
+	}
+	info.freezeStep = step
 	ends := map[int]struct{}{}
 	for e := protectedPrefix + step; e < collapseLen; e += step {
 		ends[e] = struct{}{}
@@ -677,7 +871,7 @@ func collapseHistory(messages []any, isProfitable profitableFn, o historyCollaps
 	}
 	chunkStart := protectedPrefix
 	for _, chunkEnd := range sortedEnds {
-		segText, segSlot := messagesToHistorySegments(messages, chunkEnd, chunkStart)
+		segText, segSlot := joinSegments(chunkStart-protectedPrefix, chunkEnd-protectedPrefix, true)
 		userFrom := chunkStart
 		chunkStart = chunkEnd
 		if segText == "" {

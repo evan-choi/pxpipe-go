@@ -8,6 +8,7 @@
   "dynamicChars": 0,
   "dynamicBlockCount": 0,
   "droppedChars": 0,
+  "nativeImages": 0,
   "firstUserSha8": "dff4a74b",
   "toolDocsChars": 24486,
   "systemSha8": "6d69e90b",
@@ -212045,13 +212046,21 @@
   "passthroughReasons": {
     "below_threshold": 10
   },
+  "historyFreezeStep": 10,
   "collapsedTurns": 10,
   "collapsedChars": 14586,
   "collapsedImages": 1,
   "historyReason": "collapsed",
   "historyTextChars": 14586,
-  "historyImageSha": "6ebe4098",
+  "historyImageSha": "f2db601f",
   "cachePrefixSha8": "be74a17c",
   "cachePrefixBytes": 278463,
-  "outgoingTextChars": 48496
+  "cachePrefixToolsSha8": "298440e4",
+  "cachePrefixSystemSha8": "2c7cc806",
+  "cachePrefixHeadSha8": "8dac0156",
+  "cachePrefixMarkedSha8": "21d6407f",
+  "cachePrefixMarkedBytes": 162791,
+  "cachePrefixMarkerPos": "m0.b3",
+  "outgoingTextChars": 48496,
+  "wireImages": 5
 }
