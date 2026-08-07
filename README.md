@@ -9,9 +9,10 @@ This port provides a Go **library** and a CLI. Embed the library into your own
 Go server as an `http.Handler` reverse proxy or as pure functions over request
 bodies. It covers the Anthropic Messages surface **and** the OpenAI Chat
 Completions / Responses surfaces (the GPT path, including the o200k-exact
-profitability gate and GPT history imaging). The CLI currently provides a
-Claude Code MITM proof of concept. The dashboard, savings measurement, offline
-export CLI, and Gemini/Google surface remain out of scope.
+profitability gate and GPT history imaging). The CLI provides process-scoped
+MITM launchers for Claude Code, OpenCode, and Codex plus a standalone reverse
+proxy with terminal request telemetry. The dashboard, offline export CLI, and
+Gemini/Google surface remain out of scope.
 
 ## Install
 
@@ -32,23 +33,73 @@ the child unchanged:
 
 ```bash
 pxpipe claude --model opus
+PXPIPE_MODELS=gpt-5.6-sol pxpipe opencode --model openai/gpt-5.6-sol
+PXPIPE_MODELS=gpt-5.6-sol pxpipe codex --model gpt-5.6-sol
 ```
 
-Use `run` for another executable. During this PoC it uses the same Claude API
-profile:
+The Claude profile transforms HTTP requests whose paths end in `/messages` and
+preserves `ANTHROPIC_BASE_URL` HTTP(S) overrides. The OpenCode profile covers
+paths ending in `/messages`, `/chat/completions`, or `/responses` and disables
+OpenCode's experimental WebSocket transport. The Codex profile transforms
+paths ending in `/responses`; Codex must use a provider configured with
+`supports_websockets=false` because WebSocket request bodies cannot be
+transformed. These routes are independent of the provider domain and preserve
+the original scheme, authority, path, and query after transformation, so custom
+base URLs and localhost intermediaries work without config-file discovery.
+
+Any other executable can use the Claude-compatible profile directly:
 
 ```bash
-pxpipe run another-cli --its-child-flag
+pxpipe another-cli --its-child-flag
 ```
+
+If the executable is literally named `serve` or `help`, disambiguate it with
+`pxpipe -- <executable> [args...]`.
 
 The CLI starts process-scoped listeners on kernel-assigned
 `127.0.0.1` ports, inherits the child's terminal streams and exit status, and
 does not install its CA into the system trust store. Only the child receives
-the proxy and CA environment. Requests matching the configured Messages route
-are transformed; other paths and hosts retain their original destination.
+the proxy and CA environment. Requests matching the profile's Messages, Chat
+Completions, or Responses routes are transformed; other paths and hosts retain
+their original destination. The named profiles can use arbitrary provider
+domains, so they decrypt the child's HTTPS connections to inspect the request
+path; non-matching requests are forwarded unchanged to their original
+destination. When `ANTHROPIC_UNIX_SOCKET` is already set, pxpipe opens a
+process-scoped Unix socket for Claude Code, transforms matching HTTP requests,
+and forwards them over the original socket. The original socket path is never
+exposed to the child.
 
-Actual Claude API proxy use, CA trust, SSE, OAuth, telemetry, and remote-control
-traffic have not yet been validated against the installed Claude Code release.
+Command startup and process-scoped CA/proxy injection have been smoke-tested
+against the installed Claude Code, OpenCode, and Codex releases. Local Codex
+path routing, transformation, and upstream restoration are integration-tested;
+live OpenCode and Codex inference still need provider end-to-end validation.
+
+### Standalone server
+
+Run a loopback reverse proxy on port `47821`, or select another port with
+`-p`/`--port`:
+
+```bash
+pxpipe serve
+pxpipe serve --port 8080
+```
+
+Startup prints ready-to-run Claude and OpenAI base URL commands. Point clients
+at the displayed address, for example:
+
+```bash
+ANTHROPIC_BASE_URL=http://localhost:47821 claude
+OPENAI_BASE_URL=http://localhost:47821/v1 codex
+```
+
+The terminal shows the 20 most recent requests with status, endpoint, model,
+whether context was sent as text or images, cache hits, and token estimates.
+Anthropic `Sent` and cache values use provider-reported usage with cache reads
+weighted at `0.1x` and cache creation at `1.25x`. For transformed requests,
+`As text` and `Saved/lost` are local estimates based on transform diagnostics;
+OpenAI token columns are shown as `-` until OpenAI response usage parsing is
+available. Redirected/non-terminal output emits one row per request instead of
+redrawing the table. The server shuts down gracefully on interrupt or SIGTERM.
 
 ## Use as an embedded reverse proxy
 
@@ -147,6 +198,10 @@ h := pxpipe.NewHandler(pxpipe.HandlerOptions{
 
 `ProtocolOf` chooses the request-body transform. `RewritePath` chooses the
 outbound API path, which also controls direct Anthropic/OpenAI routing.
+`UpstreamFor` can select an HTTP(S) upstream per request and protocol; a
+non-nil result takes precedence over `AnthropicUpstream` and `OpenAIUpstream`.
+`OnResponseComplete` runs after a response body reaches a clean EOF and includes
+Anthropic JSON/SSE token usage when present.
 
 ## Use as a pure transform
 
