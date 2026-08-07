@@ -11,8 +11,8 @@ bodies. It covers the Anthropic Messages surface **and** the OpenAI Chat
 Completions / Responses surfaces (the GPT path, including the o200k-exact
 profitability gate and GPT history imaging). The CLI provides process-scoped
 MITM launchers for Claude Code, OpenCode, and Codex plus a standalone reverse
-proxy with terminal request telemetry. The dashboard, offline export CLI, and
-Gemini/Google surface remain out of scope.
+and forward proxy with terminal request telemetry. The dashboard, offline
+export CLI, and Gemini/Google surface remain out of scope.
 
 ## Install
 
@@ -77,24 +77,35 @@ live OpenCode and Codex inference still need provider end-to-end validation.
 
 ### Standalone server
 
-Run a loopback reverse proxy on port `47821`, or select another port with
-`-p`/`--port`:
+Run a loopback reverse/forward proxy on port `47821`, or select another port
+with `-p`/`--port`:
 
 ```bash
 pxpipe serve
 pxpipe serve --port 8080
 ```
 
-Startup prints ready-to-run Claude and OpenAI base URL commands. Point clients
-at the displayed address, for example:
+Startup presents ready-to-run Claude and Codex commands. In a terminal, click
+the `[copy]` button at the right of either line to copy the full command through
+OSC 52. Point clients at the displayed address, for example:
 
 ```bash
 ANTHROPIC_BASE_URL=http://localhost:47821 claude
-OPENAI_BASE_URL=http://localhost:47821/v1 codex
+NO_PROXY= no_proxy= HTTPS_PROXY=http://localhost:47821 https_proxy=http://localhost:47821 HTTP_PROXY=http://localhost:47821 http_proxy=http://localhost:47821 CODEX_CA_CERTIFICATE='/path/to/pxpipe/mitm-ca.pem' codex
 ```
 
-The terminal shows the 20 most recent requests with status, endpoint, model,
-whether context was sent as text or images, cache hits, and token estimates.
+The displayed Codex command supplies the generated CA and uses `serve` as a
+process-scoped forward proxy. It does not override `model_provider` or its base
+URL, so ChatGPT login, OpenAI API keys, custom provider credentials, and
+localhost intermediaries retain their original destination and authorization.
+Both uppercase and lowercase proxy variables are set by the generated command,
+and `NO_PROXY`/`no_proxy` are cleared so localhost providers are intercepted.
+The active Codex provider must set `supports_websockets=false` because WebSocket
+request bodies cannot be transformed.
+
+The Bubble Tea terminal view shows the 20 most recent requests with status,
+endpoint, model, whether context was sent as text or images, cache hits, and
+token estimates.
 Anthropic `Sent` and cache values use provider-reported usage with cache reads
 weighted at `0.1x` and cache creation at `1.25x`. For transformed requests,
 `As text` and `Saved/lost` are local estimates based on transform diagnostics;

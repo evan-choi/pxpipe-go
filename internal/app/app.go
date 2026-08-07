@@ -13,6 +13,7 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"sync"
 	"time"
 
 	"github.com/evan-choi/pxpipe-go/internal/mitm"
@@ -27,9 +28,9 @@ func Run(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 			return runProfile(context.Background(), p, stdin, stdout, stderr)
 		},
 		func(port int) error {
-			ctx, stop := signal.NotifyContext(context.Background(), shutdownSignals()...)
+			ctx, force, stop := notifyServeSignals()
 			defer stop()
-			return runServer(ctx, port, stdout)
+			return runServer(ctx, force, port, stdin, stdout)
 		},
 	)
 	command.SetArgs(normalizeCLIArgs(args))
@@ -38,6 +39,35 @@ func Run(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 		return 2
 	}
 	return *exitCode
+}
+
+func notifyServeSignals() (context.Context, <-chan struct{}, func()) {
+	ctx, cancel := context.WithCancel(context.Background())
+	signals := make(chan os.Signal, 2)
+	force := make(chan struct{}, 1)
+	stopped := make(chan struct{})
+	signal.Notify(signals, shutdownSignals()...)
+	go func() {
+		select {
+		case <-signals:
+			cancel()
+		case <-stopped:
+			return
+		}
+		select {
+		case <-signals:
+			force <- struct{}{}
+		case <-stopped:
+		}
+	}()
+	var once sync.Once
+	return ctx, force, func() {
+		once.Do(func() {
+			signal.Stop(signals)
+			close(stopped)
+			cancel()
+		})
+	}
 }
 
 func runProfile(ctx context.Context, p profile, stdin io.Reader, stdout, stderr io.Writer) (int, error) {
