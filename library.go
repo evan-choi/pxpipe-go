@@ -29,6 +29,7 @@ type TransformInput struct {
 // ownership so hosts do not stack a second marker injector.
 type TransformResult struct {
 	Body    []byte
+	Model   string
 	Applied bool
 	Reason  Reason
 	Detail  string
@@ -94,7 +95,7 @@ func countCacheControlValue(v any) int {
 // TransformAnthropicMessages is the model-gated library entry mirroring the TS
 // transformAnthropicMessages wrapper.
 func TransformAnthropicMessages(input TransformInput) *TransformResult {
-	res := &TransformResult{}
+	res := &TransformResult{Model: input.Model}
 	if !IsSupportedModel(input.Model) {
 		res.Body = input.Body
 		res.Reason = ReasonUnsupportedModel

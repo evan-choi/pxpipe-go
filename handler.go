@@ -37,9 +37,15 @@ type HandlerOptions struct {
 	TransformFunc func() *TransformOptions
 	// Transport is used for upstream requests. Nil = http.DefaultTransport.
 	Transport http.RoundTripper
+	// UpstreamFor optionally resolves the upstream per request. A non-nil result
+	// overrides the protocol default while nil retains normal upstream routing.
+	UpstreamFor func(r *http.Request, protocol Protocol) *url.URL
 	// OnResult observes every transform outcome (nil-safe). Called before the
 	// request is forwarded; the result must not be mutated.
 	OnResult func(r *http.Request, res *TransformResult)
+	// OnResponseComplete observes a response after its body reaches a clean EOF.
+	// Usage is populated for Anthropic JSON and SSE responses when available.
+	OnResponseComplete func(r *http.Request, res ResponseResult)
 	// MaxBodyBytes caps buffered request bodies (0 = 256 MiB default). Bodies
 	// over the cap pass through untransformed.
 	MaxBodyBytes int64
@@ -59,6 +65,20 @@ type HandlerOptions struct {
 	// DuplicateHold rejects an identical in-flight request during this window.
 	// Nil defaults to 1 minute; zero or a negative duration disables it.
 	DuplicateHold *time.Duration
+}
+
+// ResponseResult describes a completed upstream response.
+type ResponseResult struct {
+	StatusCode int
+	Usage      *ResponseUsage
+}
+
+// ResponseUsage contains provider-reported token usage.
+type ResponseUsage struct {
+	InputTokens              int64
+	OutputTokens             int64
+	CacheCreationInputTokens int64
+	CacheReadInputTokens     int64
 }
 
 const (
@@ -115,6 +135,12 @@ func NewHandler(opts HandlerOptions) http.Handler {
 			if openAI {
 				target = opts.OpenAIUpstream
 			}
+			if opts.UpstreamFor != nil {
+				if dynamicTarget := opts.UpstreamFor(pr.In, protocol); dynamicTarget != nil {
+					target = dynamicTarget
+					openAI = protocol == ProtocolOpenAIChat || protocol == ProtocolOpenAIResponses
+				}
+			}
 			pr.SetURL(target)
 			pr.Out.Host = target.Host
 			if openAI {
@@ -140,31 +166,63 @@ func NewHandler(opts HandlerOptions) http.Handler {
 			if res.Request == nil {
 				return nil
 			}
+			notify := func(usage *anthropicUsage) {
+				if opts.OnResponseComplete == nil {
+					return
+				}
+				result := ResponseResult{StatusCode: res.StatusCode}
+				if usage != nil {
+					result.Usage = &ResponseUsage{
+						InputTokens:              usage.InputTokens,
+						OutputTokens:             usage.OutputTokens,
+						CacheCreationInputTokens: usage.CacheCreationInputTokens,
+						CacheReadInputTokens:     usage.CacheReadInputTokens,
+					}
+				}
+				opts.OnResponseComplete(res.Request, result)
+			}
+			observeWithoutUsage := func() {
+				if opts.OnResponseComplete == nil {
+					return
+				}
+				if res.Body == nil {
+					notify(nil)
+					return
+				}
+				res.Body = wrapResponseCompletion(res.Body, func() { notify(nil) })
+			}
 			if protocol, _ := res.Request.Context().Value(protocolContextKey{}).(Protocol); protocol != ProtocolAnthropicMessages {
+				observeWithoutUsage()
 				return nil
 			}
 			sessionKey, _ := res.Request.Context().Value(sessionContextKey{}).(string)
-			if sessionKey == "" {
-				return nil
-			}
 			if res.Body == nil {
+				notify(nil)
 				return nil
 			}
 			if res.StatusCode == http.StatusRequestEntityTooLarge {
-				h.sessions.markCacheDead(sessionKey)
+				if sessionKey != "" {
+					h.sessions.markCacheDead(sessionKey)
+				}
+				observeWithoutUsage()
 				return nil
 			}
 			if res.Header.Get("Content-Encoding") != "" && !strings.EqualFold(res.Header.Get("Content-Encoding"), "identity") {
+				observeWithoutUsage()
 				return nil
 			}
 			if (res.StatusCode < 200 || res.StatusCode >= 300) && res.StatusCode != http.StatusBadRequest {
+				observeWithoutUsage()
 				return nil
 			}
 			observer := newAnthropicAccountingObserver(
 				res.StatusCode,
 				res.Header.Get("Content-Type"),
 				func(result anthropicResponseAccounting) {
-					h.sessions.accountAnthropicResponse(sessionKey, res.StatusCode, result.usage, result.errorBody)
+					if sessionKey != "" {
+						h.sessions.accountAnthropicResponse(sessionKey, res.StatusCode, result.usage, result.errorBody)
+					}
+					notify(result.usage)
 				},
 			)
 			if !attachReliabilityBodyObserver(res.Body, observer) {
@@ -178,6 +236,42 @@ func NewHandler(opts HandlerOptions) http.Handler {
 		FlushInterval: -1,
 	}
 	return h
+}
+
+type responseCompletionReadCloser struct {
+	body     io.ReadCloser
+	onEOF    func()
+	finished bool
+}
+
+type responseCompletionReadWriteCloser struct {
+	*responseCompletionReadCloser
+	writer io.Writer
+}
+
+func wrapResponseCompletion(body io.ReadCloser, onEOF func()) io.ReadCloser {
+	wrapped := &responseCompletionReadCloser{body: body, onEOF: onEOF}
+	if readWriter, ok := body.(io.ReadWriteCloser); ok {
+		return &responseCompletionReadWriteCloser{responseCompletionReadCloser: wrapped, writer: readWriter}
+	}
+	return wrapped
+}
+
+func (r *responseCompletionReadCloser) Read(p []byte) (int, error) {
+	n, err := r.body.Read(p)
+	if err == io.EOF && !r.finished {
+		r.finished = true
+		r.onEOF()
+	}
+	return n, err
+}
+
+func (r *responseCompletionReadCloser) Close() error {
+	return r.body.Close()
+}
+
+func (r *responseCompletionReadWriteCloser) Write(p []byte) (int, error) {
+	return r.writer.Write(p)
 }
 
 func isProviderPrefixedPath(pathname string) bool {
@@ -266,6 +360,7 @@ func (h *handler) transformFor(surface Protocol, body []byte, model string) *Tra
 		if !isClaudeModel(model) {
 			res := &TransformResult{
 				Body:   body,
+				Model:  model,
 				Reason: ReasonUnsupportedModel,
 				Detail: model,
 				Info:   &TransformInfo{Reason: "unsupported_model"},
@@ -275,7 +370,7 @@ func (h *handler) transformFor(surface Protocol, body []byte, model string) *Tra
 		}
 		return TransformAnthropicMessages(TransformInput{Body: body, Model: model, Options: &base})
 	}
-	res := &TransformResult{}
+	res := &TransformResult{Model: model}
 	if !IsSupportedGptModel(model) {
 		res.Body = body
 		res.Reason = ReasonUnsupportedModel
