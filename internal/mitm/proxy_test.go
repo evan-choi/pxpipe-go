@@ -300,6 +300,49 @@ func TestProxyShutdownClosesStalledMITMHandshake(t *testing.T) {
 	}
 }
 
+func TestProxyCloseClosesStalledMITMHandshake(t *testing.T) {
+	authority, err := LoadOrCreateAuthority(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	upstream, _ := url.Parse("http://127.0.0.1:1")
+	proxy, err := NewProxy(Options{
+		Routes:    []Route{{Host: "route.test", PathPrefix: "/", Upstream: upstream}},
+		Authority: authority,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	done := make(chan error, 1)
+	go func() { done <- proxy.Serve(listener) }()
+	client, err := net.Dial("tcp", listener.Addr().String())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer client.Close()
+	_, _ = io.WriteString(client, "CONNECT route.test:443 HTTP/1.1\r\nHost: route.test:443\r\n\r\n")
+	response, err := http.ReadResponse(bufio.NewReader(client), &http.Request{Method: http.MethodConnect})
+	if err != nil {
+		t.Fatal(err)
+	}
+	response.Body.Close()
+
+	if err := proxy.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if err := <-done; err != nil {
+		t.Fatal(err)
+	}
+	_ = client.SetReadDeadline(time.Now().Add(time.Second))
+	if _, err := client.Read(make([]byte, 1)); err == nil {
+		t.Fatal("stalled hijacked connection remained open after close")
+	}
+}
+
 func TestProxyShutdownClosesIdleRawTunnel(t *testing.T) {
 	origin, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
