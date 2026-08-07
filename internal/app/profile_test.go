@@ -9,6 +9,7 @@ import (
 	"strings"
 	"testing"
 
+	pxpipe "github.com/evan-choi/pxpipe-go"
 	"github.com/evan-choi/pxpipe-go/internal/mitm"
 )
 
@@ -31,6 +32,10 @@ func TestProfileEnvironment(t *testing.T) {
 		},
 		{
 			name: "codex", profile: codexProfile("codex", nil), caEnv: "CODEX_CA_CERTIFICATE",
+			hasHTTP: true, unset: []string{"NO_PROXY", "no_proxy"},
+		},
+		{
+			name: "generic", profile: genericProfile("other-cli", nil), caEnv: "NODE_EXTRA_CA_CERTS",
 			hasHTTP: true, unset: []string{"NO_PROXY", "no_proxy"},
 		},
 	}
@@ -107,6 +112,9 @@ func TestNamedProfilesExposeExpectedInferenceRoutes(t *testing.T) {
 			"*/messages", "*/chat/completions", "*/responses",
 		}},
 		{name: "codex", profile: codexProfile("codex", nil), want: []string{"*/responses"}},
+		{name: "generic", profile: genericProfile("other-cli", nil), want: []string{
+			"*/messages", "*/chat/completions", "*/responses",
+		}},
 	}
 	transformURL, err := url.Parse("http://127.0.0.1:1234")
 	if err != nil {
@@ -126,6 +134,23 @@ func TestNamedProfilesExposeExpectedInferenceRoutes(t *testing.T) {
 					t.Errorf("routes do not contain %q: %#v", want, got)
 				}
 			}
+			if len(got) != len(tt.want) {
+				t.Errorf("routes = %#v, want %#v", got, tt.want)
+			}
 		})
+	}
+}
+
+func TestGenericProfileRecognizesEverySupportedProtocol(t *testing.T) {
+	p := genericProfile("other-cli", nil)
+	tests := map[string]pxpipe.Protocol{
+		"/tenant/v1/messages":         pxpipe.ProtocolAnthropicMessages,
+		"/tenant/v1/chat/completions": pxpipe.ProtocolOpenAIChat,
+		"/tenant/v1/responses":        pxpipe.ProtocolOpenAIResponses,
+	}
+	for path, want := range tests {
+		if got := p.protocolOf(path); got != want {
+			t.Errorf("protocolOf(%q) = %v, want %v", path, got, want)
+		}
 	}
 }

@@ -47,7 +47,8 @@ transformed. These routes are independent of the provider domain and preserve
 the original scheme, authority, path, and query after transformation, so custom
 base URLs and localhost intermediaries work without config-file discovery.
 
-Any other executable can use the Claude-compatible profile directly:
+Any other executable uses a protocol-neutral profile that transforms paths
+ending in `/messages`, `/chat/completions`, or `/responses`:
 
 ```bash
 pxpipe another-cli --its-child-flag

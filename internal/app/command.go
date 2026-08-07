@@ -85,11 +85,13 @@ func normalizeCLIArgs(args []string) []string {
 
 func profileForExecutable(command string, args []string) profile {
 	switch strings.ToLower(filepath.Base(command)) {
+	case "claude", "claude.exe":
+		return claudeProfile(command, args)
 	case "opencode", "opencode.exe":
 		return openCodeProfile(command, args)
 	case "codex", "codex.exe":
 		return codexProfile(command, args)
 	default:
-		return claudeProfile(command, args)
+		return genericProfile(command, args)
 	}
 }
