@@ -94,6 +94,11 @@ func newServeHandler(logger *requestLog, opts pxpipe.HandlerOptions) http.Handle
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		observation := &requestObservation{endpoint: r.URL.Path}
 		recorder := &statusResponseWriter{ResponseWriter: w}
+		if strings.HasSuffix(r.URL.Path, "/messages") {
+			// Usage accounting observes the response without changing its bytes, so
+			// request an uncompressed Anthropic stream rather than decoding in-proxy.
+			r.Header.Set("Accept-Encoding", "identity")
+		}
 		proxy.ServeHTTP(recorder, r.WithContext(context.WithValue(r.Context(), requestObservationKey{}, observation)))
 		status := recorder.status
 		if status == 0 {
