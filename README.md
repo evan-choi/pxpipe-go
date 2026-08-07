@@ -5,19 +5,50 @@ token-saving transform for the Anthropic Messages API that renders bulky
 context (system prompt, tool docs, old history, large tool results) into dense
 PNG pages, cutting input tokens by reading them through the vision channel.
 
-This port is a **library**: embed it into your own Go server either as an
-`http.Handler` reverse proxy or as pure functions over request bodies. It
-covers the Anthropic Messages surface **and** the OpenAI Chat Completions /
-Responses surfaces (the GPT path, including the o200k-exact profitability
-gate and GPT history imaging). It deliberately omits the TS project's
-dashboard, savings measurement, `warp` MITM mode, offline export CLI, and the
-Gemini/Google surface.
+This port provides a Go **library** and a CLI. Embed the library into your own
+Go server as an `http.Handler` reverse proxy or as pure functions over request
+bodies. It covers the Anthropic Messages surface **and** the OpenAI Chat
+Completions / Responses surfaces (the GPT path, including the o200k-exact
+profitability gate and GPT history imaging). The CLI currently provides a
+Claude Code MITM proof of concept. The dashboard, savings measurement, offline
+export CLI, and Gemini/Google surface remain out of scope.
 
 ## Install
 
 ```bash
 go get github.com/evan-choi/pxpipe-go
 ```
+
+Install the CLI from a checkout:
+
+```bash
+go install ./cmd/pxpipe
+```
+
+## Use the CLI
+
+Run an officially supported CLI directly and pass all following arguments to
+the child unchanged:
+
+```bash
+pxpipe claude --model opus
+```
+
+Use `run` for another executable. During this PoC it uses the same Claude API
+profile:
+
+```bash
+pxpipe run another-cli --its-child-flag
+```
+
+The CLI starts process-scoped listeners on kernel-assigned
+`127.0.0.1` ports, inherits the child's terminal streams and exit status, and
+does not install its CA into the system trust store. Only the child receives
+the proxy and CA environment. Requests matching the configured Messages route
+are transformed; other paths and hosts retain their original destination.
+
+Actual Claude API proxy use, CA trust, SSE, OAuth, telemetry, and remote-control
+traffic have not yet been validated against the installed Claude Code release.
 
 ## Use as an embedded reverse proxy
 
@@ -194,58 +225,63 @@ Known deviations:
 
 ## Performance
 
-![pxpipe versus pxpipe-go benchmark: pxpipe-go is 10.3 to 44.9 times faster across four workloads and uses 64.3% less peak RSS](docs/benchmark-improvements.png)
+![pxpipe versus pxpipe-go benchmark: pxpipe-go is 10.1 to 45.1 times faster across four workloads and uses 65.3% less peak RSS](docs/benchmark-improvements.png)
 
-Measured on an Apple M1 Pro with Node 26.5.0 and Go 1.26.5. Values are medians
-of five runs: three timed iterations per run for pxpipe and one-second
-benchmark windows for pxpipe-go. The comparison uses `pxpipe@a9b9759` and
-`pxpipe-go@0e0159d` (2026-08-06). Actual latency varies with CPU architecture
-and request content.
+Measured natively on an Apple M1 Pro running macOS 26.5.2, with Node 26.5.0
+and Go 1.26.5. Go used the machine-default `GOMAXPROCS=10` and no PGO profile.
+The comparison uses `pxpipe@a9b9759` and the current pxpipe-go worktree based
+on `27ef82c` (2026-08-07).
+
+Values are medians of five runs. Each pxpipe run performs two warmups and
+three timed iterations; its table value is the median per-run mean. Each
+pxpipe-go run uses a one-second benchmark window. Actual latency varies with
+CPU architecture, available cores, and request content.
 
 | benchmark | pxpipe time/op | pxpipe-go time/op | speedup |
 |---|---:|---:|---:|
-| TransformBigClaudeCode | 160.60 ms | 15.54 ms | 10.3× |
-| RenderDensePage | 392.20 ms | 8.73 ms | 44.9× |
-| TransformOpenAIChat | 119.10 ms | 7.00 ms | 17.0× |
-| TransformOpenAIResponses | 643.90 ms | 15.47 ms | 41.6× |
+| TransformBigClaudeCode | 162.60 ms | 16.12 ms | 10.1× |
+| RenderDensePage | 390.40 ms | 8.66 ms | 45.1× |
+| TransformOpenAIChat | 120.10 ms | 7.08 ms | 17.0× |
+| TransformOpenAIResponses | 650.40 ms | 15.79 ms | 41.2× |
 
 Peak RSS was measured over the full four-benchmark suite in a fresh process
 for each run:
 
 | implementation | median peak RSS | relative to pxpipe |
 |---|---:|---:|
-| pxpipe | 312.81 MiB | baseline |
-| pxpipe-go | 111.55 MiB | 64.3% lower |
+| pxpipe | 322.19 MiB | baseline |
+| pxpipe-go | 111.89 MiB | 65.3% lower |
 
 Go's `-benchmem` output reports the following allocation volume per operation:
 
 | benchmark | B/op | allocs/op |
 |---|---:|---:|
-| TransformBigClaudeCode | 2,433,839 | 3,746 |
-| RenderDensePage | 801,769 | 70 |
-| TransformOpenAIChat | 1,078,375 | 1,763 |
-| TransformOpenAIResponses | 1,991,467 | 2,073 |
+| TransformBigClaudeCode | 2,400,496 | 3,679 |
+| RenderDensePage | 801,775 | 70 |
+| TransformOpenAIChat | 1,078,492 | 1,763 |
+| TransformOpenAIResponses | 1,991,537 | 2,073 |
 
 Raw GC counts are not compared because V8 and Go use different collectors and
 event semantics. Peak RSS is the cross-runtime memory metric; `B/op` and
 `allocs/op` identify allocation pressure within the Go implementation.
 
-Reproduce the comparison with:
+After installing dependencies, reproduce the latency and allocation comparison
+from the repository root on Apple Silicon macOS:
 
 ```bash
 for benchmark_run in 1 2 3 4 5; do
   (cd pxpipe && pnpm exec tsx ../tools/bench-ts.ts)
 done
 
-GOTOOLCHAIN=go1.26.5 go test -run '^$' \
+GOTOOLCHAIN=go1.26.5 go test -pgo=off -run '^$' \
   -bench '^(BenchmarkTransformBigClaudeCode|BenchmarkRenderDensePage|BenchmarkTransformOpenAIChat|BenchmarkTransformOpenAIResponses)$' \
   -benchtime=1s -benchmem -count=5 .
 ```
 
-On macOS, reproduce peak RSS by running each suite in a fresh process five
-times and taking the median `maximum resident set size` value (reported in
-bytes). Build the Go benchmark binary first so the measurement excludes the
-compiler and `go` command:
+Reproduce peak RSS with macOS `/usr/bin/time -l` by running each full suite in
+a fresh process five times and taking the median `maximum resident set size`
+value (reported in bytes). Build the Go benchmark binary first so the
+measurement excludes the compiler and `go` command:
 
 ```bash
 for benchmark_run in 1 2 3 4 5; do
@@ -253,7 +289,8 @@ for benchmark_run in 1 2 3 4 5; do
     /usr/bin/time -l pnpm exec tsx ../tools/bench-ts.ts >/dev/null)
 done
 
-GOTOOLCHAIN=go1.26.5 go test -c -o /tmp/pxpipe-go-bench.test .
+GOTOOLCHAIN=go1.26.5 go test -pgo=off \
+  -c -o /tmp/pxpipe-go-bench.test .
 for benchmark_run in 1 2 3 4 5; do
   /usr/bin/time -l /tmp/pxpipe-go-bench.test -test.run '^$' \
     -test.bench '^(BenchmarkTransformBigClaudeCode|BenchmarkRenderDensePage|BenchmarkTransformOpenAIChat|BenchmarkTransformOpenAIResponses)$' \
@@ -263,6 +300,21 @@ done
 
 Linux ARM64 profiles show PNG rendering and zlib as the largest remaining CPU
 cost. The renderer uses zlib level 6; framebuffers and encoders are pooled.
+
+For production validation, run the native Linux harness inside an Alpine pod
+on the same EKS instance family and architecture as production. It rejects
+macOS, non-Alpine environments, architecture mismatches, Docker Desktop,
+LinuxKit, and WSL. Set `BENCH_GOMAXPROCS` to the pod's integer CPU limit:
+
+```bash
+BENCH_GOMAXPROCS=4 tools/bench-linux.sh /results/current
+BENCH_GOMAXPROCS=4 BENCH_PGO=1 tools/bench-linux.sh /results/current-pgo
+```
+
+Run the first command from clean baseline and candidate checkouts, then compare
+their `sequential.txt` and `parallel.txt` files with `benchstat`. PGO profiles
+are workload- and architecture-specific; do not ship a profile trained on a
+developer machine or an emulated CPU.
 
 ## Regenerating fixtures
 
