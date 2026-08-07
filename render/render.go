@@ -30,6 +30,7 @@ const (
 	DefaultCellHBonus         = 0
 	CellW                     = 5 + DefaultCellWBonus
 	CellH                     = 8 + DefaultCellHBonus
+	LinesPerImage             = (MaxHeightPx - 2*PadY) / CellH
 
 	tabWidth = 4
 
@@ -49,6 +50,15 @@ const (
 
 	gridInk = 25
 )
+
+// MaxCharsPerImage returns the real char capacity of one page at cols.
+// DenseContentCharsPerImage is only correct at DenseContentCols.
+func MaxCharsPerImage(cols int) int {
+	if cols < 1 {
+		cols = 1
+	}
+	return min(cols*LinesPerImage, ReadableCharsPerImage)
+}
 
 type RenderStyle struct {
 	Font          string `json:"font,omitempty"`
