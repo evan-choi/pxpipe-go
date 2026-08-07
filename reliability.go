@@ -184,6 +184,9 @@ func (t *reliabilityTransport) RoundTrip(req *http.Request) (*http.Response, err
 		release()
 		return nil, err
 	}
+	if resp.Request == nil {
+		resp.Request = req
+	}
 	if resp.Body == nil {
 		cancel(nil)
 		release()
@@ -336,10 +339,11 @@ func writeHashPart(w io.Writer, value []byte) {
 }
 
 type reliabilityBody struct {
-	body    io.ReadCloser
-	cancel  context.CancelCauseFunc
-	release func()
-	idle    time.Duration
+	body     io.ReadCloser
+	cancel   context.CancelCauseFunc
+	release  func()
+	idle     time.Duration
+	observer reliabilityBodyObserver
 
 	mu         sync.Mutex
 	timer      *time.Timer
@@ -352,6 +356,33 @@ type reliabilityBody struct {
 type reliabilityReadWriteBody struct {
 	*reliabilityBody
 	writer io.Writer
+}
+
+type reliabilityBodyObserver interface {
+	observeResponse([]byte)
+	completeResponse()
+}
+
+type reliabilityBodyObserverTarget interface {
+	attachResponseObserver(reliabilityBodyObserver) bool
+}
+
+func attachReliabilityBodyObserver(body io.ReadCloser, observer reliabilityBodyObserver) bool {
+	target, ok := body.(reliabilityBodyObserverTarget)
+	return ok && target.attachResponseObserver(observer)
+}
+
+func (b *reliabilityBody) attachResponseObserver(observer reliabilityBodyObserver) bool {
+	if observer == nil {
+		return false
+	}
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	if b.done || b.observer != nil {
+		return false
+	}
+	b.observer = observer
+	return true
 }
 
 func (b *reliabilityReadWriteBody) Write(p []byte) (int, error) {
@@ -383,17 +414,37 @@ func newReliabilityBody(
 func (b *reliabilityBody) Read(p []byte) (int, error) {
 	n, err := b.body.Read(p)
 	b.mu.Lock()
-	timeoutErr := b.timeoutErr
-	b.mu.Unlock()
-	if timeoutErr != nil {
+	if b.timeoutErr != nil {
+		timeoutErr := b.timeoutErr
+		b.mu.Unlock()
 		return n, timeoutErr
 	}
-	if n > 0 && b.idle > 0 {
-		b.arm(b.idle)
+	if b.done {
+		b.mu.Unlock()
+		return n, err
 	}
-	if err != nil {
-		b.finish(err)
+	if n > 0 && (err == nil || err == io.EOF) && b.observer != nil {
+		b.observer.observeResponse(p[:n])
 	}
+	if err == nil {
+		if n > 0 && b.idle > 0 {
+			b.armLocked(b.idle)
+		}
+		b.mu.Unlock()
+		return n, nil
+	}
+	b.done = true
+	if b.timer != nil {
+		b.timer.Stop()
+	}
+	observer := b.observer
+	b.mu.Unlock()
+
+	if err == io.EOF && observer != nil {
+		observer.completeResponse()
+	}
+	b.cancel(err)
+	b.release()
 	return n, err
 }
 
@@ -405,6 +456,10 @@ func (b *reliabilityBody) Close() error {
 func (b *reliabilityBody) arm(budget time.Duration) {
 	b.mu.Lock()
 	defer b.mu.Unlock()
+	b.armLocked(budget)
+}
+
+func (b *reliabilityBody) armLocked(budget time.Duration) {
 	if b.done {
 		return
 	}
