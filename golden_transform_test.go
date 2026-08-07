@@ -163,6 +163,9 @@ type goldenInfo struct {
 	ImageCount        int    `json:"imageCount"`
 	ImageBytes        int    `json:"imageBytes"`
 	ImagePixels       int    `json:"imagePixels"`
+	NativeImages      int    `json:"nativeImages"`
+	ImageBudgetSkips  int    `json:"imageBudgetSkips"`
+	WireImages        int    `json:"wireImages"`
 	StaticChars       int    `json:"staticChars"`
 	DynamicChars      int    `json:"dynamicChars"`
 	DynamicBlockCount int    `json:"dynamicBlockCount"`
@@ -179,24 +182,34 @@ type goldenInfo struct {
 		BurnTextSide  float64 `json:"burnTextSide"`
 		Profitable    bool    `json:"profitable"`
 	} `json:"gateEval"`
-	BucketChars          map[string]int `json:"bucketChars"`
-	PassthroughReasons   map[string]int `json:"passthroughReasons"`
-	CollapsedTurns       int            `json:"collapsedTurns"`
-	CollapsedChars       int            `json:"collapsedChars"`
-	CollapsedImages      int            `json:"collapsedImages"`
-	HistoryReason        string         `json:"historyReason"`
-	HistoryTextChars     int            `json:"historyTextChars"`
-	HistoryImageSha      string         `json:"historyImageSha"`
-	CachePrefixSha8      string         `json:"cachePrefixSha8"`
-	ImageSourceText      string         `json:"imageSourceText"`
-	ImageDims            []imageDim     `json:"imageDims"`
-	FirstImageWidth      int            `json:"firstImageWidth"`
-	FirstImageHeight     int            `json:"firstImageHeight"`
-	TruncatedToolResults int            `json:"truncatedToolResults"`
-	OmittedChars         int            `json:"omittedChars"`
-	KeptSharpBlocks      int            `json:"keptSharpBlocks"`
-	PinChars             int            `json:"pinChars"`
-	Recoverable          []struct {
+	BucketChars            map[string]int `json:"bucketChars"`
+	PassthroughReasons     map[string]int `json:"passthroughReasons"`
+	CollapsedTurns         int            `json:"collapsedTurns"`
+	CollapsedChars         int            `json:"collapsedChars"`
+	CollapsedImages        int            `json:"collapsedImages"`
+	HistoryReason          string         `json:"historyReason"`
+	HistoryTextChars       int            `json:"historyTextChars"`
+	HistoryImageSha        string         `json:"historyImageSha"`
+	HistoryFreezeStep      int            `json:"historyFreezeStep"`
+	HistoryPackFill        bool           `json:"historyPackFill"`
+	HistoryBudgetTrimmed   bool           `json:"historyBudgetTrimmed"`
+	CachePrefixSha8        string         `json:"cachePrefixSha8"`
+	CachePrefixBytes       int            `json:"cachePrefixBytes"`
+	CachePrefixToolsSha8   string         `json:"cachePrefixToolsSha8"`
+	CachePrefixSystemSha8  string         `json:"cachePrefixSystemSha8"`
+	CachePrefixHeadSha8    string         `json:"cachePrefixHeadSha8"`
+	CachePrefixMarkedSha8  string         `json:"cachePrefixMarkedSha8"`
+	CachePrefixMarkedBytes int            `json:"cachePrefixMarkedBytes"`
+	CachePrefixMarkerPos   string         `json:"cachePrefixMarkerPos"`
+	ImageSourceText        string         `json:"imageSourceText"`
+	ImageDims              []imageDim     `json:"imageDims"`
+	FirstImageWidth        int            `json:"firstImageWidth"`
+	FirstImageHeight       int            `json:"firstImageHeight"`
+	TruncatedToolResults   int            `json:"truncatedToolResults"`
+	OmittedChars           int            `json:"omittedChars"`
+	KeptSharpBlocks        int            `json:"keptSharpBlocks"`
+	PinChars               int            `json:"pinChars"`
+	Recoverable            []struct {
 		ID         string `json:"id"`
 		Kind       string `json:"kind"`
 		ToolUseID  string `json:"toolUseId"`
@@ -262,6 +275,9 @@ func TestGoldenTransform(t *testing.T) {
 			eqInt(t, "compressedChars", info.CompressedChars, wantInfo.CompressedChars)
 			eqInt(t, "imageCount", info.ImageCount, wantInfo.ImageCount)
 			eqInt(t, "imagePixels", info.ImagePixels, wantInfo.ImagePixels)
+			eqInt(t, "nativeImages", info.NativeImages, wantInfo.NativeImages)
+			eqInt(t, "imageBudgetSkips", info.ImageBudgetSkips, wantInfo.ImageBudgetSkips)
+			eqInt(t, "wireImages", info.WireImages, wantInfo.WireImages)
 			eqInt(t, "staticChars", info.StaticChars, wantInfo.StaticChars)
 			eqInt(t, "dynamicChars", info.DynamicChars, wantInfo.DynamicChars)
 			eqInt(t, "dynamicBlockCount", info.DynamicBlockCount, wantInfo.DynamicBlockCount)
@@ -275,6 +291,20 @@ func TestGoldenTransform(t *testing.T) {
 			eqInt(t, "collapsedImages", info.CollapsedImages, wantInfo.CollapsedImages)
 			eqStr(t, "historyReason", info.HistoryReason, wantInfo.HistoryReason)
 			eqInt(t, "historyTextChars", info.HistoryTextChars, wantInfo.HistoryTextChars)
+			eqInt(t, "historyFreezeStep", info.HistoryFreezeStep, wantInfo.HistoryFreezeStep)
+			if info.HistoryPackFill != wantInfo.HistoryPackFill {
+				t.Errorf("historyPackFill: got %v want %v", info.HistoryPackFill, wantInfo.HistoryPackFill)
+			}
+			if info.HistoryBudgetTrimmed != wantInfo.HistoryBudgetTrimmed {
+				t.Errorf("historyBudgetTrimmed: got %v want %v", info.HistoryBudgetTrimmed, wantInfo.HistoryBudgetTrimmed)
+			}
+			if (info.CachePrefixBytes > 0) != (wantInfo.CachePrefixBytes > 0) {
+				t.Errorf("cachePrefixBytes presence: got %d want %d", info.CachePrefixBytes, wantInfo.CachePrefixBytes)
+			}
+			if (info.CachePrefixMarkedBytes > 0) != (wantInfo.CachePrefixMarkedBytes > 0) {
+				t.Errorf("cachePrefixMarkedBytes presence: got %d want %d", info.CachePrefixMarkedBytes, wantInfo.CachePrefixMarkedBytes)
+			}
+			eqStr(t, "cachePrefixMarkerPos", info.CachePrefixMarkerPos, wantInfo.CachePrefixMarkerPos)
 			eqStr(t, "imageSourceText", info.ImageSourceText, wantInfo.ImageSourceText)
 			eqInt(t, "firstImageWidth", info.FirstImageWidth, wantInfo.FirstImageWidth)
 			eqInt(t, "firstImageHeight", info.FirstImageHeight, wantInfo.FirstImageHeight)
@@ -287,6 +317,16 @@ func TestGoldenTransform(t *testing.T) {
 			}
 			if (wantInfo.CachePrefixSha8 != "") != (info.CachePrefixSha8 != "") {
 				t.Errorf("cachePrefixSha8 presence: got %q want-present=%v", info.CachePrefixSha8, wantInfo.CachePrefixSha8 != "")
+			}
+			for name, pair := range map[string][2]string{
+				"cachePrefixToolsSha8":  {info.CachePrefixToolsSha8, wantInfo.CachePrefixToolsSha8},
+				"cachePrefixSystemSha8": {info.CachePrefixSystemSha8, wantInfo.CachePrefixSystemSha8},
+				"cachePrefixHeadSha8":   {info.CachePrefixHeadSha8, wantInfo.CachePrefixHeadSha8},
+				"cachePrefixMarkedSha8": {info.CachePrefixMarkedSha8, wantInfo.CachePrefixMarkedSha8},
+			} {
+				if (pair[0] != "") != (pair[1] != "") {
+					t.Errorf("%s presence: got %q want-present=%v", name, pair[0], pair[1] != "")
+				}
 			}
 			if wantInfo.ImageBytes > 0 {
 				ratio := float64(info.ImageBytes) / float64(wantInfo.ImageBytes)
