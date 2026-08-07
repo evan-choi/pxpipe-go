@@ -3,6 +3,7 @@ package pxpipe
 import (
 	"bufio"
 	"bytes"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -321,6 +322,166 @@ func TestHandlerStreamsSSE(t *testing.T) {
 	}
 	if events != 3 {
 		t.Errorf("got %d events, want 3", events)
+	}
+}
+
+func TestHandlerReportsResponseUsageAtEOF(t *testing.T) {
+	up := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		fmt.Fprint(w, `{"usage":{"input_tokens":12,"output_tokens":3,"cache_creation_input_tokens":4,"cache_read_input_tokens":5}}`)
+	}))
+	defer up.Close()
+	u, _ := url.Parse(up.URL)
+	completed := make(chan ResponseResult, 1)
+	srv := httptest.NewServer(NewHandler(HandlerOptions{
+		AnthropicUpstream: u,
+		OnResponseComplete: func(_ *http.Request, result ResponseResult) {
+			completed <- result
+		},
+	}))
+	defer srv.Close()
+
+	resp, err := http.Post(srv.URL+"/v1/messages", "application/json",
+		strings.NewReader(`{"model":"claude-fable-5","messages":[{"role":"user","content":"hi"}]}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := io.Copy(io.Discard, resp.Body); err != nil {
+		t.Fatal(err)
+	}
+	resp.Body.Close()
+
+	select {
+	case result := <-completed:
+		want := ResponseUsage{InputTokens: 12, OutputTokens: 3, CacheCreationInputTokens: 4, CacheReadInputTokens: 5}
+		if result.StatusCode != http.StatusOK || result.Usage == nil || *result.Usage != want {
+			t.Fatalf("response result = %+v, want status 200 usage %+v", result, want)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("response completion callback did not run")
+	}
+}
+
+func TestHandlerReportsAnthropicSSEUsageExactlyOnce(t *testing.T) {
+	up := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		fmt.Fprint(w, "event: message_start\ndata: {\"message\":{\"usage\":{\"input_tokens\":12,\"cache_read_input_tokens\":5}}}\n\n")
+		fmt.Fprint(w, "event: message_delta\ndata: {\"usage\":{\"output_tokens\":3}}\n\n")
+	}))
+	defer up.Close()
+	u, _ := url.Parse(up.URL)
+	completed := make(chan ResponseResult, 2)
+	srv := httptest.NewServer(NewHandler(HandlerOptions{
+		AnthropicUpstream: u,
+		OnResponseComplete: func(_ *http.Request, result ResponseResult) {
+			completed <- result
+		},
+	}))
+	defer srv.Close()
+
+	resp, err := http.Post(srv.URL+"/v1/messages", "application/json",
+		strings.NewReader(`{"model":"claude-fable-5","messages":[{"role":"user","content":"hi"}]}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := io.Copy(io.Discard, resp.Body); err != nil {
+		t.Fatal(err)
+	}
+	resp.Body.Close()
+	result := <-completed
+	if result.Usage == nil || result.Usage.InputTokens != 12 || result.Usage.OutputTokens != 3 || result.Usage.CacheReadInputTokens != 5 {
+		t.Fatalf("SSE response result = %+v", result)
+	}
+	select {
+	case duplicate := <-completed:
+		t.Fatalf("duplicate completion callback: %+v", duplicate)
+	default:
+	}
+}
+
+func TestHandlerSuppressesResponseCompletionAfterReadFailure(t *testing.T) {
+	zero := time.Duration(0)
+	var calls atomic.Int32
+	h := NewHandler(HandlerOptions{
+		Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
+			return &http.Response{
+				StatusCode: http.StatusOK,
+				Header:     make(http.Header),
+				Body: &fragmentReadCloser{
+					fragments: [][]byte{[]byte("partial")},
+					err:       errors.New("upstream stream failed"),
+				},
+				Request: req,
+			}, nil
+		}),
+		OnResponseComplete:     func(*http.Request, ResponseResult) { calls.Add(1) },
+		UpstreamHeadersTimeout: &zero,
+		UpstreamIdleTimeout:    &zero,
+		DuplicateHold:          &zero,
+	})
+	recorder := httptest.NewRecorder()
+	h.ServeHTTP(recorder, httptest.NewRequest(http.MethodGet, "/health", nil))
+	if calls.Load() != 0 {
+		t.Fatalf("completion calls after read failure = %d", calls.Load())
+	}
+}
+
+func TestHandlerReportsOpenAIResponseWithoutUsage(t *testing.T) {
+	up := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		fmt.Fprint(w, `{"ok":true}`)
+	}))
+	defer up.Close()
+	u, _ := url.Parse(up.URL)
+	completed := make(chan ResponseResult, 1)
+	srv := httptest.NewServer(NewHandler(HandlerOptions{
+		OpenAIUpstream: u,
+		OnResponseComplete: func(_ *http.Request, result ResponseResult) {
+			completed <- result
+		},
+	}))
+	defer srv.Close()
+
+	resp, err := http.Post(srv.URL+"/v1/responses", "application/json",
+		strings.NewReader(`{"model":"unsupported","input":[]}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := io.Copy(io.Discard, resp.Body); err != nil {
+		t.Fatal(err)
+	}
+	resp.Body.Close()
+
+	select {
+	case result := <-completed:
+		if result.StatusCode != http.StatusOK || result.Usage != nil {
+			t.Fatalf("response result = %+v", result)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("response completion callback did not run")
+	}
+}
+
+func TestResponseCompletionWrapperPreservesReadWriteBodies(t *testing.T) {
+	body := &readWriteCloseBuffer{}
+	_, _ = body.WriteString("response")
+	completed := 0
+	wrapper := wrapResponseCompletion(body, func() { completed++ })
+	readWriter, ok := wrapper.(io.ReadWriteCloser)
+	if !ok {
+		t.Fatal("response wrapper dropped io.ReadWriteCloser")
+	}
+	if _, err := io.ReadAll(readWriter); err != nil {
+		t.Fatal(err)
+	}
+	if completed != 1 {
+		t.Fatalf("completion calls = %d, want 1", completed)
+	}
+	if _, err := readWriter.Write([]byte("request")); err != nil {
+		t.Fatal(err)
+	}
+	if completed != 1 {
+		t.Fatalf("completion calls after write = %d, want 1", completed)
 	}
 }
 

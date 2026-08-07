@@ -6,6 +6,7 @@ import (
 	"net/http/httptest"
 	"net/url"
 	"strconv"
+	"strings"
 	"testing"
 )
 
@@ -205,5 +206,31 @@ func TestHandlerRewritesCustomProtocolPath(t *testing.T) {
 	got := requestRoute(t, proxy.Client(), proxy.URL+"/custom/chat?trace=1", nil, seen)
 	if got.provider != "openai" || got.path != "/v1/chat/completions" || got.query != "trace=1" {
 		t.Fatalf("custom route = %s %s?%s", got.provider, got.path, got.query)
+	}
+}
+
+func TestHandlerResolvesUpstreamPerRequest(t *testing.T) {
+	seen := make(chan routeObservation, 1)
+	upstream, upstreamURL := routeUpstream(t, "dynamic", seen)
+	defer upstream.Close()
+	var gotProtocol Protocol
+	proxy := httptest.NewServer(NewHandler(HandlerOptions{
+		ProtocolOf: func(path string) Protocol {
+			if strings.HasSuffix(path, "/responses") {
+				return ProtocolOpenAIResponses
+			}
+			return ProtocolNone
+		},
+		UpstreamFor: func(_ *http.Request, protocol Protocol) *url.URL {
+			gotProtocol = protocol
+			return upstreamURL
+		},
+	}))
+	defer proxy.Close()
+
+	got := requestRoute(t, proxy.Client(), proxy.URL+"/tenant/v1/responses?trace=1", nil, seen)
+	if gotProtocol != ProtocolOpenAIResponses || got.provider != "dynamic" ||
+		got.path != "/tenant/v1/responses" || got.query != "trace=1" {
+		t.Fatalf("dynamic route = protocol %v, %s %s?%s", gotProtocol, got.provider, got.path, got.query)
 	}
 }
