@@ -21,7 +21,7 @@ const (
 	gateMargin           = 1.10
 )
 
-var LinesPerImage = maxInt(1, (render.MaxHeightPx-2*render.PadY)/render.CellH)
+var LinesPerImage = render.LinesPerImage
 
 func maxInt(a, b int) int {
 	if a > b {
@@ -59,6 +59,7 @@ func denseGateGeometry(o *resolvedOptions) gateGeometry {
 	g := defaultGateGeometry()
 	profile := resolveProfile(o.Model)
 	g.cols = o.Cols
+	g.maxChars = render.MaxCharsPerImage(g.cols)
 	if profile != nil {
 		g.maxHeightPx = profile.maxHeightPx
 		g.style = profile.style
