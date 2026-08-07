@@ -7,11 +7,13 @@ import (
 	"strings"
 )
 
-// Route redirects matching requests to an upstream. A host without a port
-// matches that host on every port; PathPrefix is matched byte-for-byte.
+// Route redirects matching requests to an upstream. Host "*" matches every
+// authority; otherwise a host without a port matches that host on every port.
+// Exactly one of PathPrefix or PathSuffix must be set.
 type Route struct {
 	Host       string
 	PathPrefix string
+	PathSuffix string
 	Upstream   *url.URL
 }
 
@@ -23,8 +25,14 @@ func validateRoutes(routes []Route) error {
 		if strings.Contains(route.Host, "://") || strings.Contains(route.Host, "/") {
 			return fmt.Errorf("route %d: host must be an authority", i)
 		}
-		if route.PathPrefix == "" || !strings.HasPrefix(route.PathPrefix, "/") {
+		if (route.PathPrefix == "") == (route.PathSuffix == "") {
+			return fmt.Errorf("route %d: exactly one path prefix or suffix is required", i)
+		}
+		if route.PathPrefix != "" && !strings.HasPrefix(route.PathPrefix, "/") {
 			return fmt.Errorf("route %d: path prefix must start with /", i)
+		}
+		if route.PathSuffix != "" && !strings.HasPrefix(route.PathSuffix, "/") {
+			return fmt.Errorf("route %d: path suffix must start with /", i)
 		}
 		if route.Upstream == nil || route.Upstream.Host == "" ||
 			(route.Upstream.Scheme != "http" && route.Upstream.Scheme != "https") {
@@ -39,7 +47,7 @@ func validateRoutes(routes []Route) error {
 
 func matchingRoute(routes []Route, authority, path string) *Route {
 	for i := range routes {
-		if routeMatchesHost(routes[i].Host, authority) && strings.HasPrefix(path, routes[i].PathPrefix) {
+		if routeMatchesHost(routes[i].Host, authority) && routeMatchesPath(routes[i], path) {
 			return &routes[i]
 		}
 	}
@@ -56,12 +64,22 @@ func hostCouldMatch(routes []Route, authority string) bool {
 }
 
 func routeMatchesHost(pattern, authority string) bool {
+	if pattern == "*" {
+		return true
+	}
 	patternHost, patternPort := splitAuthority(pattern)
 	host, port := splitAuthority(authority)
 	if !strings.EqualFold(patternHost, host) {
 		return false
 	}
 	return patternPort == "" || patternPort == port
+}
+
+func routeMatchesPath(route Route, path string) bool {
+	if route.PathPrefix != "" {
+		return strings.HasPrefix(path, route.PathPrefix)
+	}
+	return strings.HasSuffix(path, route.PathSuffix)
 }
 
 func splitAuthority(authority string) (string, string) {

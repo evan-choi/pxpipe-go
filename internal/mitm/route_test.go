@@ -37,6 +37,20 @@ func TestPortSpecificRoute(t *testing.T) {
 	}
 }
 
+func TestWildcardSuffixRoute(t *testing.T) {
+	upstream, _ := url.Parse("http://127.0.0.1:1234")
+	routes := []Route{{Host: "*", PathSuffix: "/responses", Upstream: upstream}}
+	if !hostCouldMatch(routes, "custom-llm.example:443") {
+		t.Fatal("wildcard route did not opt an arbitrary host into MITM")
+	}
+	if matchingRoute(routes, "custom-llm.example:443", "/tenant/v1/responses") == nil {
+		t.Fatal("path suffix did not match an overridden provider path")
+	}
+	if matchingRoute(routes, "custom-llm.example:443", "/tenant/v1/responses/compact") != nil {
+		t.Fatal("path suffix matched a non-inference subresource")
+	}
+}
+
 func TestValidateRoutes(t *testing.T) {
 	httpUpstream, _ := url.Parse("http://localhost")
 	invalidUpstream, _ := url.Parse("ftp://localhost")
@@ -44,6 +58,9 @@ func TestValidateRoutes(t *testing.T) {
 		{PathPrefix: "/", Upstream: httpUpstream},
 		{Host: "https://example.com", PathPrefix: "/", Upstream: httpUpstream},
 		{Host: "example.com", PathPrefix: "v1", Upstream: httpUpstream},
+		{Host: "example.com", PathSuffix: "responses", Upstream: httpUpstream},
+		{Host: "example.com", Upstream: httpUpstream},
+		{Host: "example.com", PathPrefix: "/v1", PathSuffix: "/responses", Upstream: httpUpstream},
 		{Host: "example.com", PathPrefix: "/", Upstream: invalidUpstream},
 	}
 	for i, route := range tests {

@@ -90,6 +90,9 @@ func TestProxyRoutesMatchingPathAndPreservesOtherTraffic(t *testing.T) {
 	if seen.Host != origin.Listener.Addr().String() || seen.URL.Path != "/match" || seen.URL.RawQuery != "trace=1" {
 		t.Fatalf("routed request = host %q URL %q", seen.Host, seen.URL.String())
 	}
+	if got := seen.Header.Get(OriginalSchemeHeader); got != "https" {
+		t.Fatalf("original scheme header = %q", got)
+	}
 	if got := requestBody(t, client, origin.URL+"/other"); got != "origin" {
 		t.Fatalf("same-host fallback response = %q", got)
 	}
@@ -167,6 +170,81 @@ func TestProxyStreamsRoutedResponses(t *testing.T) {
 	case <-firstChunk:
 	case <-time.After(time.Second):
 		t.Fatal("routed stream did not reach target")
+	}
+	buffer := make([]byte, len("data: first\n\n"))
+	if _, err := io.ReadFull(response.Body, buffer); err != nil {
+		t.Fatal(err)
+	}
+	if string(buffer) != "data: first\n\n" {
+		t.Fatalf("first streamed chunk = %q", buffer)
+	}
+}
+
+func TestProxySupportsHTTP2InsideMITMTunnel(t *testing.T) {
+	firstChunk := make(chan struct{})
+	release := make(chan struct{})
+	target := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		_, _ = io.WriteString(w, "data: first\n\n")
+		w.(http.Flusher).Flush()
+		close(firstChunk)
+		<-release
+		_, _ = io.WriteString(w, "data: second\n\n")
+	}))
+	defer target.Close()
+	defer close(release)
+	targetURL, _ := url.Parse(target.URL)
+	origin := httptest.NewTLSServer(http.NotFoundHandler())
+	defer origin.Close()
+
+	authority, err := LoadOrCreateAuthority(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	proxy, err := NewProxy(Options{
+		Routes:    []Route{{Host: origin.Listener.Addr().String(), PathPrefix: "/h2", Upstream: targetURL}},
+		Authority: authority,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	done := make(chan error, 1)
+	go func() { done <- proxy.Serve(listener) }()
+	t.Cleanup(func() {
+		ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+		defer cancel()
+		if err := proxy.Shutdown(ctx); err != nil {
+			t.Errorf("shutdown proxy: %v", err)
+		}
+		if err := <-done; err != nil {
+			t.Errorf("serve proxy: %v", err)
+		}
+	})
+
+	proxyURL, _ := url.Parse("http://" + listener.Addr().String())
+	roots := x509.NewCertPool()
+	roots.AddCert(authority.certificate)
+	client := &http.Client{Transport: &http.Transport{
+		Proxy:             http.ProxyURL(proxyURL),
+		TLSClientConfig:   &tls.Config{RootCAs: roots},
+		ForceAttemptHTTP2: true,
+	}, Timeout: 3 * time.Second}
+	response, err := client.Get(origin.URL + "/h2")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer response.Body.Close()
+	if response.ProtoMajor != 2 {
+		t.Fatalf("response protocol = %s, want HTTP/2", response.Proto)
+	}
+	select {
+	case <-firstChunk:
+	case <-time.After(time.Second):
+		t.Fatal("HTTP/2 stream did not reach target")
 	}
 	buffer := make([]byte, len("data: first\n\n"))
 	if _, err := io.ReadFull(response.Body, buffer); err != nil {
@@ -377,6 +455,121 @@ func TestTLSDestinationIdentity(t *testing.T) {
 	}
 	if _, err := authority.tlsConfig("example.com").GetCertificate(&tls.ClientHelloInfo{ServerName: "other.com"}); err == nil {
 		t.Fatal("certificate was issued for an SNI name different from the CONNECT host")
+	}
+}
+
+func TestProxyRejectsMismatchedMITMRequestHost(t *testing.T) {
+	authority, err := LoadOrCreateAuthority(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	upstream, _ := url.Parse("http://127.0.0.1:1")
+	proxy, err := NewProxy(Options{
+		Routes:    []Route{{Host: "route.test", PathPrefix: "/", Upstream: upstream}},
+		Authority: authority,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	done := make(chan error, 1)
+	go func() { done <- proxy.Serve(listener) }()
+	t.Cleanup(func() {
+		ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+		defer cancel()
+		if err := proxy.Shutdown(ctx); err != nil {
+			t.Errorf("shutdown proxy: %v", err)
+		}
+		if err := <-done; err != nil {
+			t.Errorf("serve proxy: %v", err)
+		}
+	})
+
+	connection, err := net.Dial("tcp", listener.Addr().String())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer connection.Close()
+	_, _ = io.WriteString(connection, "CONNECT route.test:443 HTTP/1.1\r\nHost: route.test:443\r\n\r\n")
+	connectResponse, err := http.ReadResponse(bufio.NewReader(connection), &http.Request{Method: http.MethodConnect})
+	if err != nil {
+		t.Fatal(err)
+	}
+	connectResponse.Body.Close()
+	if connectResponse.StatusCode != http.StatusOK {
+		t.Fatalf("CONNECT status = %d", connectResponse.StatusCode)
+	}
+
+	roots := x509.NewCertPool()
+	roots.AddCert(authority.certificate)
+	tlsConnection := tls.Client(connection, &tls.Config{ServerName: "route.test", RootCAs: roots})
+	if err := tlsConnection.Handshake(); err != nil {
+		t.Fatal(err)
+	}
+	_, _ = io.WriteString(tlsConnection, "GET / HTTP/1.1\r\nHost: other.test\r\nConnection: close\r\n\r\n")
+	response, err := http.ReadResponse(bufio.NewReader(tlsConnection), &http.Request{Method: http.MethodGet})
+	if err != nil {
+		t.Fatal(err)
+	}
+	response.Body.Close()
+	if response.StatusCode != http.StatusMisdirectedRequest {
+		t.Fatalf("mismatched host status = %d, want %d", response.StatusCode, http.StatusMisdirectedRequest)
+	}
+}
+
+func TestProxyDefaultTransportVerifiesUpstreamTLS(t *testing.T) {
+	origin := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = io.WriteString(w, "unexpected")
+	}))
+	defer origin.Close()
+	originURL, _ := url.Parse(origin.URL)
+
+	authority, err := LoadOrCreateAuthority(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	deadUpstream, _ := url.Parse("http://127.0.0.1:1")
+	proxy, err := NewProxy(Options{
+		Routes:    []Route{{Host: originURL.Host, PathPrefix: "/match", Upstream: deadUpstream}},
+		Authority: authority,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	done := make(chan error, 1)
+	go func() { done <- proxy.Serve(listener) }()
+	t.Cleanup(func() {
+		ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+		defer cancel()
+		if err := proxy.Shutdown(ctx); err != nil {
+			t.Errorf("shutdown proxy: %v", err)
+		}
+		if err := <-done; err != nil {
+			t.Errorf("serve proxy: %v", err)
+		}
+	})
+
+	proxyURL, _ := url.Parse("http://" + listener.Addr().String())
+	roots := x509.NewCertPool()
+	roots.AddCert(authority.certificate)
+	client := &http.Client{Transport: &http.Transport{
+		Proxy:           http.ProxyURL(proxyURL),
+		TLSClientConfig: &tls.Config{RootCAs: roots},
+	}, Timeout: 2 * time.Second}
+	response, err := client.Get(origin.URL + "/fallback")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer response.Body.Close()
+	if response.StatusCode != http.StatusBadGateway {
+		t.Fatalf("untrusted upstream status = %d, want %d", response.StatusCode, http.StatusBadGateway)
 	}
 }
 
