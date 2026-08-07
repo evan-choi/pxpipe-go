@@ -48,8 +48,8 @@ func TestExecutesProgramDirectly(t *testing.T) {
 	if err := command.Execute(); err != nil {
 		t.Fatal(err)
 	}
-	if got.command != "other-cli" || !reflect.DeepEqual(got.args, []string{"--child-flag", "value"}) {
-		t.Fatalf("child = %q %#v", got.command, got.args)
+	if got.kind != profileGeneric || got.command != "other-cli" || !reflect.DeepEqual(got.args, []string{"--child-flag", "value"}) {
+		t.Fatalf("child = kind %v %q %#v", got.kind, got.command, got.args)
 	}
 }
 

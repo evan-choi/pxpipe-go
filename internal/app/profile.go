@@ -16,6 +16,7 @@ const (
 	profileClaude profileKind = iota
 	profileOpenCode
 	profileCodex
+	profileGeneric
 )
 
 type profile struct {
@@ -36,6 +37,10 @@ func codexProfile(command string, args []string) profile {
 	return newProfile(profileCodex, command, args)
 }
 
+func genericProfile(command string, args []string) profile {
+	return newProfile(profileGeneric, command, args)
+}
+
 func newProfile(kind profileKind, command string, args []string) profile {
 	return profile{
 		kind:    kind,
@@ -49,7 +54,7 @@ func (p profile) routes(transformUpstream *url.URL) []mitm.Route {
 		return []mitm.Route{{Host: "*", PathSuffix: "/messages", Upstream: transformUpstream}}
 	}
 	routes := []mitm.Route{{Host: "*", PathSuffix: "/responses", Upstream: transformUpstream}}
-	if p.kind == profileOpenCode {
+	if p.kind != profileCodex {
 		routes = append(routes,
 			mitm.Route{Host: "*", PathSuffix: "/messages", Upstream: transformUpstream},
 			mitm.Route{Host: "*", PathSuffix: "/chat/completions", Upstream: transformUpstream},
@@ -121,7 +126,7 @@ func (p profile) protocolOf(path string) pxpipe.Protocol {
 	if strings.HasSuffix(path, "/responses") {
 		return pxpipe.ProtocolOpenAIResponses
 	}
-	if p.kind == profileOpenCode {
+	if p.kind != profileCodex {
 		switch {
 		case strings.HasSuffix(path, "/chat/completions"):
 			return pxpipe.ProtocolOpenAIChat
@@ -143,20 +148,13 @@ func (p profile) environment(proxyURL, certificatePath string) (map[string]strin
 	set := map[string]string{
 		"HTTPS_PROXY":              proxyURL,
 		"https_proxy":              proxyURL,
+		"HTTP_PROXY":               proxyURL,
+		"http_proxy":               proxyURL,
 		p.certificateEnvironment(): certificatePath,
 	}
 	unset := []string{"NO_PROXY", "no_proxy"}
-	switch p.kind {
-	case profileClaude:
-		set["HTTP_PROXY"] = proxyURL
-		set["http_proxy"] = proxyURL
-	case profileOpenCode:
-		set["HTTP_PROXY"] = proxyURL
-		set["http_proxy"] = proxyURL
+	if p.kind == profileOpenCode {
 		set["OPENCODE_EXPERIMENTAL_WEBSOCKETS"] = "false"
-	case profileCodex:
-		set["HTTP_PROXY"] = proxyURL
-		set["http_proxy"] = proxyURL
 	}
 	return set, unset
 }
