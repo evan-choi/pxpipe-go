@@ -9,32 +9,59 @@ git submodule update --init --recursive
 
 ## Revisions
 
-- Last verified Go port baseline: `508fc9dd1c1ee4d75473fcb8e1be885da07b0776`
-  (2026-08-04)
+- Last verified Go port baseline: `a9b975917719cd6436b8e7e952aa32b611ec9d31`
+  (2026-08-06)
 - Current reference submodule: `a9b975917719cd6436b8e7e952aa32b611ec9d31`
   (2026-08-06)
 
-The baseline is derived from source and golden-fixture parity, the initial Go
-port history, and the benchmark reference recorded in `README.md`. Future
-ports should update the baseline only after equivalent behavior and fixtures
-are verified.
+The baseline advances only after equivalent behavior and regenerated fixtures
+are verified against the pinned reference.
 
-## Pending runtime ports
+## Ported after 508fc9d
 
-The following upstream changes after the baseline are not yet represented in
-the Go implementation:
+- `2a071a8`: per-turn Anthropic billing headers are excluded from imaged slab
+  content at any line position.
+- `6654d40`: the shared 100-image wire limit includes caller and nested
+  tool-result images.
+- `6654d40`: history uses adaptive image budgets, sticky freeze grids, cache
+  accounting feedback, and batched oversized user prompts.
+- `6654d40`: history image hashes select the synthetic history message.
+- `6654d40`: component cache-prefix and image-budget diagnostics are exposed.
 
-- `2a071a8`: exclude the per-turn Anthropic billing header from imaged slab
-  content regardless of its line position.
-- `6654d40`: enforce the shared 100-image Anthropic wire limit, including
-  caller-provided and nested tool-result images.
-- `6654d40`: adapt history image budgets and freeze grids, and batch oversized
-  historical user prompts.
-- `6654d40`: feed provider cache accounting into sticky per-session history
-  planning.
-- `6654d40`: hash the synthetic history message rather than assuming it is the
-  first transformed message.
-- `6654d40`: expose component-level cache-prefix and image-budget diagnostics.
+Response accounting intentionally does not mark a cache dead for transient
+5xx or unrelated 4xx responses. It records successful usage only when usage
+was parsed, and treats provider 413 or a size-related 400 as conclusive
+rejection signals.
 
-Security policy, CI, dashboard, Worker, and offline-export changes in the same
-upstream range do not apply to this library port.
+## Verification after 508fc9d
+
+The upstream test changes through `a9b9759` are mapped as follows:
+
+- `tests/render.test.ts`, `tests/history.test.ts`,
+  `tests/history-grid-e2e.test.ts`, and `tests/native-image-cap.test.ts` map to
+  `upstream_history_image_parity_test.go`.
+- `tests/cache-bust-attribution.test.ts`, `tests/cache-liveness.test.ts`, and
+  the transform telemetry behind `tests/context-map.test.ts` map to
+  `upstream_cache_liveness_parity_test.go`.
+- The runtime invariants from `tests/scripts/smoke-collapse.mjs` map to
+  `upstream_smoke_parity_test.go`: 400-to-410-turn growth, the 100-image cap,
+  the serialized-size bound, survival after an upstream 500, and an exactly
+  100-image caller-saturated request.
+- Regenerated Go golden fixtures verify the new telemetry and cache-prefix
+  hashes without changing the fixture inputs or rendered PNG output.
+
+Dashboard HTML, dashboard host labels, and context-map wording do not apply
+because this repository has no dashboard. Cloudflare Worker caller-secret
+authentication does not apply to `NewHandler`; an embedding server is
+responsible for ingress authentication when it injects provider credentials.
+The CLI binds its process-scoped proxy listeners to loopback.
+
+The Node process launcher, `/health` polling, fixed-port orchestration, and log
+assertions in the smoke script are deployment-specific and are not ported. Its
+older assertion that a transient 500 should trigger denser repacking is also
+not ported because the final cache-liveness behavior in `6654d40` keeps 5xx
+responses neutral.
+
+Security policy, CI, Worker, dashboard, and offline-export implementation
+changes in the same upstream range otherwise do not apply to this library
+port.
