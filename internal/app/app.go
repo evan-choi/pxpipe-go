@@ -2,6 +2,8 @@ package app
 
 import (
 	"context"
+	"crypto/rand"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"io"
@@ -9,20 +11,28 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"os/signal"
 	"path/filepath"
 	"time"
 
-	pxpipe "github.com/evan-choi/pxpipe-go"
 	"github.com/evan-choi/pxpipe-go/internal/mitm"
 	"github.com/evan-choi/pxpipe-go/internal/runner"
 )
 
 // Run parses the CLI and returns the process exit status.
 func Run(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
-	command, exitCode := newRootCommand(stdin, stdout, stderr, func(p profile) (int, error) {
-		return runProfile(context.Background(), p, stdin, stdout, stderr)
-	})
-	command.SetArgs(args)
+	command, exitCode := newRootCommand(
+		stdin, stdout, stderr,
+		func(p profile) (int, error) {
+			return runProfile(context.Background(), p, stdin, stdout, stderr)
+		},
+		func(port int) error {
+			ctx, stop := signal.NotifyContext(context.Background(), shutdownSignals()...)
+			defer stop()
+			return runServer(ctx, port, stdout)
+		},
+	)
+	command.SetArgs(normalizeCLIArgs(args))
 	if err := command.Execute(); err != nil {
 		fmt.Fprintln(stderr, err)
 		return 2
@@ -40,7 +50,7 @@ func runProfile(ctx context.Context, p profile, stdin io.Reader, stdout, stderr 
 		return 1, err
 	}
 	certificatePath, removeCertificateBundle, err := certificateBundle(
-		filepath.Join(configDir, "pxpipe"), authority.CertificatePath(), os.Getenv("NODE_EXTRA_CA_CERTS"),
+		filepath.Join(configDir, "pxpipe"), authority.CertificatePath(), os.Getenv(p.certificateEnvironment()),
 	)
 	if err != nil {
 		return 1, err
@@ -49,13 +59,46 @@ func runProfile(ctx context.Context, p profile, stdin io.Reader, stdout, stderr 
 
 	transport := http.DefaultTransport.(*http.Transport).Clone()
 	defer transport.CloseIdleConnections()
+	var unixServer *http.Server
+	var unixTransport *http.Transport
+	var unixSocketPath string
+	var unixErrors <-chan error
+	removeUnixSocket := func() {}
+	defer func() { removeUnixSocket() }()
+	if p.kind == profileClaude && os.Getenv("ANTHROPIC_UNIX_SOCKET") != "" {
+		unixListener, socketPath, removeSocket, listenErr := newUnixSocketListener()
+		if listenErr != nil {
+			return 1, listenErr
+		}
+		unixSocketPath = socketPath
+		removeUnixSocket = removeSocket
+		unixTransport = transport.Clone()
+		unixTransport.Proxy = nil
+		dialer := &net.Dialer{Timeout: 15 * time.Second, KeepAlive: 30 * time.Second}
+		upstreamSocket := os.Getenv("ANTHROPIC_UNIX_SOCKET")
+		unixTransport.DialContext = func(ctx context.Context, _, _ string) (net.Conn, error) {
+			return dialer.DialContext(ctx, "unix", upstreamSocket)
+		}
+		unixServer = &http.Server{
+			Handler:           p.unixHandler(unixTransport),
+			ReadHeaderTimeout: 15 * time.Second,
+		}
+		errorChannel := make(chan error, 1)
+		unixErrors = errorChannel
+		go func() { errorChannel <- serve(unixServer, unixListener) }()
+	}
 	transformListener, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
 		return 1, fmt.Errorf("listen for transform server: %w", err)
 	}
-	transformURL := &url.URL{Scheme: "http", Host: transformListener.Addr().String()}
+	transformPath, err := newTransformPath()
+	if err != nil {
+		transformListener.Close()
+		return 1, err
+	}
+	transformURL := &url.URL{Scheme: "http", Host: transformListener.Addr().String(), Path: transformPath}
 	transformServer := &http.Server{
-		Handler:           pxpipe.NewHandler(p.handlerOptions(transport)),
+		Handler:           p.handler(transport, transformPath),
 		ReadHeaderTimeout: 15 * time.Second,
 	}
 	transformErrors := make(chan error, 1)
@@ -76,6 +119,9 @@ func runProfile(ctx context.Context, p profile, stdin io.Reader, stdout, stderr 
 
 	proxyURL := "http://" + proxyListener.Addr().String()
 	set, unset := p.environment(proxyURL, certificatePath)
+	if unixSocketPath != "" {
+		set["ANTHROPIC_UNIX_SOCKET"] = unixSocketPath
+	}
 	childDone := make(chan struct {
 		code int
 		err  error
@@ -110,16 +156,58 @@ func runProfile(ctx context.Context, p profile, stdin io.Reader, stdout, stderr 
 		result = <-childDone
 		result.code = 1
 		result.err = fmt.Errorf("MITM proxy stopped: %w", err)
+	case err := <-unixErrors:
+		cancelChild()
+		result = <-childDone
+		result.code = 1
+		result.err = fmt.Errorf("Unix socket proxy stopped: %w", err)
 	}
 
 	shutdownContext, cancelShutdown := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancelShutdown()
 	proxyErr := proxy.Shutdown(shutdownContext)
 	transformErr := transformServer.Shutdown(shutdownContext)
+	var unixErr error
+	if unixServer != nil {
+		unixErr = unixServer.Shutdown(shutdownContext)
+		unixTransport.CloseIdleConnections()
+	}
 	if result.err == nil {
-		result.err = errors.Join(proxyErr, transformErr)
+		result.err = errors.Join(proxyErr, transformErr, unixErr)
 	}
 	return result.code, result.err
+}
+
+func newTransformPath() (string, error) {
+	var token [16]byte
+	if _, err := rand.Read(token[:]); err != nil {
+		return "", fmt.Errorf("generate transform route token: %w", err)
+	}
+	return "/" + hex.EncodeToString(token[:]), nil
+}
+
+func newUnixSocketListener() (net.Listener, string, func(), error) {
+	tempDir := os.TempDir()
+	if len(tempDir) > 40 {
+		if info, err := os.Stat("/tmp"); err == nil && info.IsDir() {
+			tempDir = "/tmp"
+		}
+	}
+	dir, err := os.MkdirTemp(tempDir, "pxpipe-")
+	if err != nil {
+		return nil, "", func() {}, fmt.Errorf("create Unix socket directory: %w", err)
+	}
+	path := filepath.Join(dir, "claude.sock")
+	listener, err := net.Listen("unix", path)
+	if err != nil {
+		_ = os.RemoveAll(dir)
+		return nil, "", func() {}, fmt.Errorf("listen for Claude Unix socket: %w", err)
+	}
+	cleanup := func() {
+		_ = listener.Close()
+		_ = os.RemoveAll(dir)
+	}
+	return listener, path, cleanup, nil
 }
 
 func serve(server *http.Server, listener net.Listener) error {
@@ -136,7 +224,7 @@ func certificateBundle(dir, authorityPath, extraPath string) (string, func(), er
 	}
 	extra, err := os.ReadFile(extraPath)
 	if err != nil {
-		return "", func() {}, fmt.Errorf("read existing NODE_EXTRA_CA_CERTS: %w", err)
+		return "", func() {}, fmt.Errorf("read existing CA bundle: %w", err)
 	}
 	authority, err := os.ReadFile(authorityPath)
 	if err != nil {
