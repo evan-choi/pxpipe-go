@@ -796,15 +796,13 @@ func blitGlyphGray(fb []byte, fbW, fbH, x, y int, cp rune, selected *atlas.Set, 
 		switch srcW {
 		case 5:
 			for gy := 0; gy < a.CellH; gy++ {
-				binary.LittleEndian.PutUint32(fb[dstRow:], binary.LittleEndian.Uint32(a.Pixels[srcRow:]))
-				fb[dstRow+4] = a.Pixels[srcRow+4]
+				copy(fb[dstRow:dstRow+5], a.Pixels[srcRow:srcRow+5])
 				dstRow += fbW
 				srcRow += 5
 			}
 		case 10:
 			for gy := 0; gy < a.CellH; gy++ {
-				binary.LittleEndian.PutUint64(fb[dstRow:], binary.LittleEndian.Uint64(a.Pixels[srcRow:]))
-				binary.LittleEndian.PutUint16(fb[dstRow+8:], binary.LittleEndian.Uint16(a.Pixels[srcRow+8:]))
+				copy(fb[dstRow:dstRow+10], a.Pixels[srcRow:srcRow+10])
 				dstRow += fbW
 				srcRow += 10
 			}
