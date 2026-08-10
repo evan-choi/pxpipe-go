@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"math"
 	"os"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -355,47 +356,48 @@ func isFlatFunctionTool(tool any) bool {
 
 func orderedKeys(m map[string]any) []string {
 	ordered := objKeyOrder(m)
-	seen := map[string]struct{}{}
-	var keys []string
+	keys := make([]string, 0, len(m))
 	for _, k := range ordered {
 		if _, ok := m[k]; ok {
-			if _, dup := seen[k]; !dup {
-				seen[k] = struct{}{}
-				keys = append(keys, k)
-			}
+			keys = append(keys, k)
 		}
 	}
-	var extras []string
+	keyCount := len(m)
+	if _, ok := m[orderKey]; ok {
+		keyCount--
+	}
+	if len(keys) == keyCount {
+		return keys
+	}
+	extrasStart := len(keys)
 	for k := range m {
 		if k == orderKey {
 			continue
 		}
-		if _, ok := seen[k]; !ok {
-			extras = append(extras, k)
+		if !slices.Contains(ordered, k) {
+			keys = append(keys, k)
 		}
 	}
-	sort.Strings(extras)
-	return append(keys, extras...)
+	sort.Strings(keys[extrasStart:])
+	return keys
 }
 
-// schemaAnnotationLines renders the schema prose removed from the native tool
-// definition, mirroring schemaAnnotationLines in openai.ts.
-func schemaAnnotationLines(node any, path string, depth int) []string {
+// appendSchemaAnnotationLines renders the schema prose removed from the native
+// tool definition, mirroring schemaAnnotationLines in openai.ts.
+func appendSchemaAnnotationLines(out []string, node any, path string, depth int) []string {
 	if node == nil || depth > 20 {
-		return nil
+		return out
 	}
 	if arr, ok := node.([]any); ok {
-		var out []string
 		for i, value := range arr {
-			out = append(out, schemaAnnotationLines(value, fmt.Sprintf("%s[%d]", path, i), depth+1)...)
+			out = appendSchemaAnnotationLines(out, value, path+"["+strconv.Itoa(i)+"]", depth+1)
 		}
 		return out
 	}
 	obj, ok := node.(map[string]any)
 	if !ok {
-		return nil
+		return out
 	}
-	var out []string
 	for _, key := range []string{"description", "title", "examples", "default", "$comment"} {
 		if v, present := obj[key]; present {
 			out = append(out, path+" "+key+": "+jsStringifyString(v))
@@ -410,7 +412,7 @@ func schemaAnnotationLines(node any, path string, depth int) []string {
 			continue
 		}
 		for _, name := range orderedKeys(children) {
-			out = append(out, schemaAnnotationLines(children[name], path+"."+name, depth+1)...)
+			out = appendSchemaAnnotationLines(out, children[name], path+"."+name, depth+1)
 		}
 	}
 	for _, key := range []string{"oneOf", "anyOf", "allOf"} {
@@ -419,7 +421,7 @@ func schemaAnnotationLines(node any, path string, depth int) []string {
 			continue
 		}
 		for i, child := range children {
-			out = append(out, schemaAnnotationLines(child, fmt.Sprintf("%s.%s[%d]", path, key, i), depth+1)...)
+			out = appendSchemaAnnotationLines(out, child, path+"."+key+"["+strconv.Itoa(i)+"]", depth+1)
 		}
 	}
 	for _, key := range []string{
@@ -427,7 +429,7 @@ func schemaAnnotationLines(node any, path string, depth int) []string {
 		"unevaluatedItems", "unevaluatedProperties", "if", "then", "else",
 	} {
 		if v, present := obj[key]; present {
-			out = append(out, schemaAnnotationLines(v, path+"."+key, depth+1)...)
+			out = appendSchemaAnnotationLines(out, v, path+"."+key, depth+1)
 		}
 	}
 	return out
@@ -436,12 +438,13 @@ func schemaAnnotationLines(node any, path string, depth int) []string {
 func toolDocText(name, description string, parameters any, hasParams bool) string {
 	var annotations []string
 	if hasParams {
-		annotations = schemaAnnotationLines(parameters, "$", 0)
+		annotations = appendSchemaAnnotationLines(nil, parameters, "$", 0)
 	}
 	if description == "" && len(annotations) == 0 {
 		return ""
 	}
-	parts := []string{"## Tool: " + name}
+	parts := make([]string, 1, 2+len(annotations))
+	parts[0] = "## Tool: " + name
 	if description != "" {
 		parts = append(parts, description)
 	}

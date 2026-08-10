@@ -919,14 +919,34 @@ func renderToolDoc(t map[string]any) string {
 	if name == "" {
 		name = "?"
 	}
-	parts := []string{"## Tool: " + name}
-	if desc, ok := getStr(t, "description"); ok && desc != "" {
-		parts = append(parts, desc)
+	desc, _ := getStr(t, "description")
+	schema, hasSchema := t["input_schema"]
+	schemaJSON := ""
+	if hasSchema {
+		schemaJSON = jsStringifyString(schema)
 	}
-	if schema, has := t["input_schema"]; has {
-		parts = append(parts, "```json\n"+jsStringifyString(schema)+"\n```")
+
+	size := len("## Tool: ") + len(name)
+	if desc != "" {
+		size += 1 + len(desc)
 	}
-	return strings.Join(parts, "\n")
+	if hasSchema {
+		size += len("\n```json\n") + len(schemaJSON) + len("\n```")
+	}
+	var out strings.Builder
+	out.Grow(size)
+	out.WriteString("## Tool: ")
+	out.WriteString(name)
+	if desc != "" {
+		out.WriteByte('\n')
+		out.WriteString(desc)
+	}
+	if hasSchema {
+		out.WriteString("\n```json\n")
+		out.WriteString(schemaJSON)
+		out.WriteString("\n```")
+	}
+	return out.String()
 }
 
 func approxBlockBytes(blk map[string]any) int {
