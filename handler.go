@@ -46,8 +46,8 @@ type HandlerOptions struct {
 	// OnResponseComplete observes a response after its body reaches a clean EOF.
 	// Usage is populated for Anthropic JSON and SSE responses when available.
 	OnResponseComplete func(r *http.Request, res ResponseResult)
-	// MaxBodyBytes caps buffered request bodies (0 = 256 MiB default). Bodies
-	// over the cap pass through untransformed.
+	// MaxBodyBytes caps transformable request bodies (0 = 16 MiB default).
+	// Bodies over the cap receive a provider-shaped 413 response.
 	MaxBodyBytes int64
 	// ProtocolOf overrides wire-protocol detection by request path. Nil uses
 	// DefaultProtocolOf. Return ProtocolNone to pass a request through
@@ -82,7 +82,7 @@ type ResponseUsage struct {
 }
 
 const (
-	defaultMaxBodyBytes = 256 << 20
+	defaultMaxBodyBytes = 16 << 20
 	// Bound allocation based on the untrusted Content-Length header.
 	maxBodyPreallocBytes = 1 << 20
 )
@@ -405,8 +405,16 @@ func (h *handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	r.Header.Del("X-Pxpipe-Bypass")
 	bypass := hasBypass && len(bypassValue) > 0 &&
 		!falseyBypassValue(bypassValue[0])
-	if !bypass && r.Method == http.MethodPost && surface != ProtocolNone && r.Body != nil &&
-		(r.ContentLength < 0 || r.ContentLength <= h.opts.MaxBodyBytes) {
+	if !bypass && r.Method == http.MethodPost && surface != ProtocolNone && r.Body != nil {
+		bodyLimitMessage := func(observed int64) string {
+			return "request body exceeds the " + strconv.FormatInt(h.opts.MaxBodyBytes, 10) +
+				"-byte pxpipe limit (read " + strconv.FormatInt(observed, 10) + ")"
+		}
+		if r.ContentLength > h.opts.MaxBodyBytes {
+			r.Body.Close()
+			writeProtocolError(w, surface, http.StatusRequestEntityTooLarge, "request_too_large", bodyLimitMessage(r.ContentLength))
+			return
+		}
 		originalBody := r.Body
 		limitedBody := io.LimitReader(originalBody, h.opts.MaxBodyBytes+1)
 		var body []byte
@@ -425,11 +433,8 @@ func (h *handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		if int64(len(body)) > h.opts.MaxBodyBytes {
-			r.Body = struct {
-				io.Reader
-				io.Closer
-			}{io.MultiReader(bytes.NewReader(body), originalBody), originalBody}
-			h.proxy.ServeHTTP(w, r)
+			originalBody.Close()
+			writeProtocolError(w, surface, http.StatusRequestEntityTooLarge, "request_too_large", bodyLimitMessage(int64(len(body))))
 			return
 		}
 		originalBody.Close()
