@@ -30,8 +30,18 @@ func TestSIMDAdlerPNGMatchesZlib(t *testing.T) {
 			var raw, compressed bytes.Buffer
 			rowLen := tc.width * tc.bytesPerPixel
 			for y := 0; y < tc.height; y++ {
-				raw.WriteByte(0)
-				raw.Write(pixels[y*rowLen : (y+1)*rowLen])
+				raw.WriteByte(3)
+				row := pixels[y*rowLen : (y+1)*rowLen]
+				for x, value := range row {
+					left, above := byte(0), byte(0)
+					if x >= tc.bytesPerPixel {
+						left = row[x-tc.bytesPerPixel]
+					}
+					if y > 0 {
+						above = pixels[(y-1)*rowLen+x]
+					}
+					raw.WriteByte(value - byte((uint16(left)+uint16(above))>>1))
+				}
 			}
 			zw, err := zlib.NewWriterLevel(&compressed, 6)
 			if err != nil {

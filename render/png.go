@@ -13,7 +13,6 @@ import (
 )
 
 var pngSignature = []byte{0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a}
-var pngFilterNone [1]byte
 
 const maxCachedBufferBytes = 8 << 20
 
@@ -97,13 +96,24 @@ func encodePNG(pixels []byte, width, height, bytesPerPixel int, colorType byte) 
 	e.compressed.WriteString("\x78\x9c")
 	e.zw.Reset(&e.compressed)
 	e.checksum.Reset()
+	filtered := getPixelBuffer(rowLen + 1)
+	filtered[0] = 3 // PNG Average filter.
 	for y := 0; y < height; y++ {
 		row := pixels[y*rowLen : (y+1)*rowLen]
-		_, _ = e.zw.Write(pngFilterNone[:])
-		_, _ = e.zw.Write(row)
-		_, _ = e.checksum.Write(pngFilterNone[:])
-		_, _ = e.checksum.Write(row)
+		for x, value := range row {
+			left, above := byte(0), byte(0)
+			if x >= bytesPerPixel {
+				left = row[x-bytesPerPixel]
+			}
+			if y > 0 {
+				above = pixels[(y-1)*rowLen+x]
+			}
+			filtered[x+1] = value - byte((uint16(left)+uint16(above))>>1)
+		}
+		_, _ = e.zw.Write(filtered)
+		_, _ = e.checksum.Write(filtered)
 	}
+	putPixelBuffer(filtered)
 	_ = e.zw.Close()
 	var checksum [4]byte
 	binary.BigEndian.PutUint32(checksum[:], e.checksum.Sum32())
@@ -120,7 +130,7 @@ func encodePNG(pixels []byte, width, height, bytesPerPixel int, colorType byte) 
 }
 
 // EncodeGrayPNG encodes a row-major single-channel buffer (len = w×h) as an
-// 8-bit grayscale PNG (filter None, single IDAT).
+// 8-bit grayscale PNG (filter Average, single IDAT).
 func EncodeGrayPNG(pixels []byte, width, height int) ([]byte, error) {
 	if len(pixels) != width*height {
 		return nil, fmt.Errorf("EncodeGrayPNG: pixels=%d != %d×%d", len(pixels), width, height)
@@ -129,7 +139,7 @@ func EncodeGrayPNG(pixels []byte, width, height int) ([]byte, error) {
 }
 
 // EncodeRGBPNG encodes an interleaved RGB buffer (len = w×h×3) as an 8-bit
-// truecolor PNG (filter None, single IDAT).
+// truecolor PNG (filter Average, single IDAT).
 func EncodeRGBPNG(pixels []byte, width, height int) ([]byte, error) {
 	if len(pixels) != width*height*3 {
 		return nil, fmt.Errorf("EncodeRGBPNG: pixels=%d != %d×%d×3", len(pixels), width, height)
