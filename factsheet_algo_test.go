@@ -5,11 +5,89 @@ import (
 	"reflect"
 	"regexp"
 	"sort"
+	"strconv"
 	"strings"
+	"sync"
 	"testing"
 )
 
 var shapeNumReference = regexp.MustCompile(`^\d[\d,_]*$|^\d+\.\d+$`)
+
+func TestFactSheetTextCacheExactAndConcurrent(t *testing.T) {
+	clearFactSheetTextCache()
+	text := strings.Repeat("CONST_ID=123 https://example.com/path ", 20)
+	want := factSheetText(text, false)
+	if _, ok := loadFactSheetTextCache(text, false); ok {
+		t.Fatal("single-use fact sheet was admitted")
+	}
+	if got := factSheetText(text, false); got != want {
+		t.Fatalf("second fact sheet = %q, want %q", got, want)
+	}
+	if cached, ok := loadFactSheetTextCache(text, false); !ok || cached != want {
+		t.Fatal("full fact sheet was not cached")
+	}
+	compact := factSheetText(text, true)
+	if got := factSheetText(text, true); got != compact {
+		t.Fatalf("second compact fact sheet = %q, want %q", got, compact)
+	}
+	if compact == want {
+		t.Fatal("compact and full fact sheets unexpectedly match")
+	}
+	if cached, ok := loadFactSheetTextCache(text, true); !ok || cached != compact {
+		t.Fatal("compact fact sheet was not cached separately")
+	}
+
+	var wg sync.WaitGroup
+	errs := make(chan string, 32)
+	for range 32 {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for range 100 {
+				if got := factSheetText(text, false); got != want {
+					errs <- got
+					return
+				}
+			}
+		}()
+	}
+	wg.Wait()
+	close(errs)
+	for got := range errs {
+		t.Errorf("cached fact sheet = %q, want %q", got, want)
+	}
+}
+
+func TestFactSheetTextCacheBoundsAndCollision(t *testing.T) {
+	clearFactSheetTextCache()
+	oversized := strings.Repeat("x", fsCacheMaxKeyBytes+1)
+	storeFactSheetTextCache(oversized, false, "value")
+	if _, ok := loadFactSheetTextCache(oversized, false); ok {
+		t.Fatal("oversized key was cached")
+	}
+
+	first := "first"
+	firstHash := factSheetTextCacheHash(first, false)
+	second := ""
+	for i := 0; ; i++ {
+		candidate := "candidate-" + strconv.Itoa(i)
+		hash := factSheetTextCacheHash(candidate, false)
+		if hash != firstHash && hash&(fsCacheSlots-1) == firstHash&(fsCacheSlots-1) {
+			second = candidate
+			break
+		}
+	}
+	storeFactSheetTextCache(first, false, "first-value")
+	storeFactSheetTextCache(first, false, "first-value")
+	storeFactSheetTextCache(second, false, "second-value")
+	storeFactSheetTextCache(second, false, "second-value")
+	if _, ok := loadFactSheetTextCache(first, false); ok {
+		t.Fatal("replaced direct-map entry still hit")
+	}
+	if got, ok := loadFactSheetTextCache(second, false); !ok || got != "second-value" {
+		t.Fatalf("replacement = %q, %v", got, ok)
+	}
+}
 
 func priorityTierReference(tok string) int {
 	switch {
