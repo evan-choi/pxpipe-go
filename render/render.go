@@ -246,16 +246,22 @@ func trimLineEnd(line string) string {
 func MinifyForRender(text string) string {
 	newlineRun := 0
 	needsRewrite := false
-	for i := 0; i < len(text); i++ {
-		if text[i] != '\n' {
-			newlineRun = 0
-			continue
+	for start := 0; start < len(text); {
+		rel := strings.IndexByte(text[start:], '\n')
+		if rel < 0 {
+			break
 		}
-		newlineRun++
+		i := start + rel
+		if rel == 0 {
+			newlineRun++
+		} else {
+			newlineRun = 1
+		}
 		if newlineRun > 3 || i > 0 && (text[i-1] == ' ' || text[i-1] == '\t') {
 			needsRewrite = true
 			break
 		}
+		start = i + 1
 	}
 	if !needsRewrite && len(text) > 0 {
 		last := text[len(text)-1]
