@@ -8,6 +8,28 @@ import (
 	"github.com/klauspost/compress/zlib"
 )
 
+func TestFilterAverage8MatchesScalar(t *testing.T) {
+	state := uint64(1)
+	for range 1 << 16 {
+		state = state*6364136223846793005 + 1
+		value := state
+		state = state*6364136223846793005 + 1
+		left := state
+		state = state*6364136223846793005 + 1
+		above := state
+		got := filterAverage8(value, left, above)
+		for shift := 0; shift < 64; shift += 8 {
+			v := byte(value >> shift)
+			l := byte(left >> shift)
+			a := byte(above >> shift)
+			want := v - byte((uint16(l)+uint16(a))>>1)
+			if lane := byte(got >> shift); lane != want {
+				t.Fatalf("lane %d: got %d, want %d", shift/8, lane, want)
+			}
+		}
+	}
+}
+
 func TestSIMDAdlerPNGMatchesZlib(t *testing.T) {
 	for _, tc := range []struct {
 		name                         string
