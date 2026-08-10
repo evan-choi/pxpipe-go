@@ -10,6 +10,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"unicode/utf8"
 	"unsafe"
 
 	"github.com/evan-choi/pxpipe-go/internal/o200k"
@@ -239,9 +240,54 @@ func gptEmptyInfo(reason string) *TransformInfo {
 	return &TransformInfo{Reason: reason}
 }
 
+func gptReflowWithSentinels(text string) string {
+	const (
+		highBits     = uint64(0x8080808080808080)
+		newlineBytes = uint64(0x0a0a0a0a0a0a0a0a)
+	)
+	var b strings.Builder
+	b.Grow(len(text) + strings.Count(text, "\n")*(len(render.NLSentinel)-1))
+	start := 0
+	for i := 0; i < len(text); {
+		if len(text)-i >= 8 {
+			word := *(*uint64)(unsafe.Pointer(unsafe.StringData(text[i:])))
+			if word&highBits == 0 && !hasZeroByte(word^newlineBytes) {
+				i += 8
+				continue
+			}
+		}
+		switch {
+		case text[i] == '\n':
+			b.WriteString(text[start:i])
+			b.WriteString(render.NLSentinel)
+			i++
+			start = i
+		case text[i] < utf8.RuneSelf:
+			i++
+		case strings.HasPrefix(text[i:], render.NLSentinel):
+			b.WriteString(text[start:i])
+			b.WriteString(render.NLSentinelLiteral)
+			i += len(render.NLSentinel)
+			start = i
+		default:
+			_, size := utf8.DecodeRuneInString(text[i:])
+			i += size
+		}
+	}
+	b.WriteString(text[start:])
+	return b.String()
+}
+
 func gptMaybeReflow(text string, enabled bool) string {
 	if !enabled {
 		return text
+	}
+	if !strings.Contains(text, "\t") {
+		text = render.MinifyForRender(text)
+		if !strings.Contains(text, render.NLSentinel) {
+			return strings.ReplaceAll(text, "\n", render.NLSentinel)
+		}
+		return gptReflowWithSentinels(text)
 	}
 	safe := render.NeutralizeSentinel(text)
 	if packed, ok := render.Reflow(safe); ok {

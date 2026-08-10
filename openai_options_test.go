@@ -39,6 +39,27 @@ func TestOpenAIImageSourceTextUsesKnownUTF16Length(t *testing.T) {
 	}
 }
 
+func TestGptMaybeReflowMatchesReference(t *testing.T) {
+	for _, text := range []string{
+		"a" + render.NLSentinel + "b\nc",
+		"a \n\n\n\nb" + render.NLSentinel,
+		"a\t" + render.NLSentinel + "\nb",
+		"한글" + render.NLSentinel + "\n😀",
+		string([]byte{'a', 0xff, '\n', 'b'}),
+	} {
+		want, ok := render.Reflow(render.NeutralizeSentinel(text))
+		if !ok {
+			t.Fatalf("reference reflow rejected %q", text)
+		}
+		if got := gptMaybeReflow(text, true); got != want {
+			t.Fatalf("gptMaybeReflow(%q) = %q, want %q", text, got, want)
+		}
+	}
+	if text := "a\nb"; gptMaybeReflow(text, false) != text {
+		t.Fatal("disabled reflow changed text")
+	}
+}
+
 func TestGptHistoryOptionsPrecedence(t *testing.T) {
 	intp := func(v int) *int { return &v }
 	boolp := func(v bool) *bool { return &v }
