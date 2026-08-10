@@ -1754,7 +1754,7 @@ func finalizeEarly(req map[string]any, bodyBytes int, info *TransformInfo, o *re
 	info.OutgoingTextChars = countOutgoingTextChars(req)
 	finalizeWireTelemetry(req, info)
 	info.ImageBytesNearLimit = nearImageByteLimit(info, o.MaxImageBytes)
-	return jsStringifyCap(req, openAIJSONCapacity(bodyBytes, info.ImageBytes)), collapsed, nil
+	return jsStringifyCap(req, openAIJSONCapacity(bodyBytes, info.ImageBytes, info.CompressedChars+info.CollapsedChars)), collapsed, nil
 }
 
 const imageInstructionHeaderBase = "=================== SESSION CONFIGURATION PAGES ===================\n" +
@@ -2221,7 +2221,7 @@ func transformParsed(req map[string]any, body []byte, o *resolvedOptions, info *
 	info.OutgoingTextChars = countOutgoingTextChars(req)
 	finalizeWireTelemetry(req, info)
 	info.ImageBytesNearLimit = nearImageByteLimit(info, o.MaxImageBytes)
-	return jsStringifyCap(req, openAIJSONCapacity(len(body), info.ImageBytes)), nil
+	return jsStringifyCap(req, openAIJSONCapacity(len(body), info.ImageBytes, info.CompressedChars+info.CollapsedChars)), nil
 }
 
 func compressToolResults(req map[string]any, o *resolvedOptions, info *TransformInfo, denseGeo gateGeometry, droppedCodepoints map[rune]int) error {
