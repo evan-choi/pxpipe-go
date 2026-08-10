@@ -11,6 +11,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"unsafe"
 
 	"github.com/evan-choi/pxpipe-go/internal/o200k"
 	"github.com/evan-choi/pxpipe-go/render"
@@ -384,7 +385,7 @@ func orderedKeys(m map[string]any) []string {
 
 // appendSchemaAnnotationLines renders the schema prose removed from the native
 // tool definition, mirroring schemaAnnotationLines in openai.ts.
-func appendSchemaAnnotationLines(out []string, node any, path string, depth int) []string {
+func appendSchemaAnnotationLines(out []byte, node any, path string, depth int) []byte {
 	if node == nil || depth > 20 {
 		return out
 	}
@@ -400,11 +401,19 @@ func appendSchemaAnnotationLines(out []string, node any, path string, depth int)
 	}
 	for _, key := range []string{"description", "title", "examples", "default", "$comment"} {
 		if v, present := obj[key]; present {
-			out = append(out, path+" "+key+": "+jsStringifyString(v))
+			out = append(out, '\n')
+			out = append(out, path...)
+			out = append(out, ' ')
+			out = append(out, key...)
+			out = append(out, ':', ' ')
+			out = appendJSValue(out, v)
 		}
 	}
 	if format, ok := obj["format"].(string); ok && u16len(format) > 32 {
-		out = append(out, path+" format: "+jsStringifyString(format))
+		out = append(out, '\n')
+		out = append(out, path...)
+		out = append(out, " format: "...)
+		out = appendJSString(out, format)
 	}
 	for _, key := range []string{"properties", "patternProperties", "definitions", "$defs"} {
 		children, ok := obj[key].(map[string]any)
@@ -436,20 +445,29 @@ func appendSchemaAnnotationLines(out []string, node any, path string, depth int)
 }
 
 func toolDocText(name, description string, parameters any, hasParams bool) string {
-	var annotations []string
-	if hasParams {
-		annotations = appendSchemaAnnotationLines(nil, parameters, "$", 0)
+	capacity := min(len(name)+len(description)+96, maxOpenAIJSONPreallocBytes)
+	if schema, ok := parameters.(map[string]any); ok {
+		for _, key := range []string{"properties", "patternProperties", "definitions", "$defs"} {
+			if children, ok := schema[key].(map[string]any); ok {
+				capacity += min(len(children)*128, maxOpenAIJSONPreallocBytes-capacity)
+			}
+		}
 	}
-	if description == "" && len(annotations) == 0 {
+	out := make([]byte, 0, capacity)
+	out = append(out, "## Tool: "...)
+	out = append(out, name...)
+	if description != "" {
+		out = append(out, '\n')
+		out = append(out, description...)
+	}
+	headerLen := len(out)
+	if hasParams {
+		out = appendSchemaAnnotationLines(out, parameters, "$", 0)
+	}
+	if description == "" && len(out) == headerLen {
 		return ""
 	}
-	parts := make([]string, 1, 2+len(annotations))
-	parts[0] = "## Tool: " + name
-	if description != "" {
-		parts = append(parts, description)
-	}
-	parts = append(parts, annotations...)
-	return strings.Join(parts, "\n")
+	return unsafe.String(unsafe.SliceData(out), len(out))
 }
 
 func toolName(m map[string]any) string {
