@@ -189,7 +189,11 @@ func newServeHandler(logger *requestLog, opts pxpipe.HandlerOptions) http.Handle
 	return newObservedServeHandler(logger, pxpipe.NewHandler(observedHandlerOptions(opts)), "")
 }
 
-func newObservedServeHandler(logger *requestLog, handler http.Handler, transformPath string) http.Handler {
+type requestRowSink interface {
+	add(requestLogRow)
+}
+
+func newObservedServeHandler(logger requestRowSink, handler http.Handler, transformPath string) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		endpoint := r.URL.Path
 		if transformPath != "" {
@@ -257,22 +261,25 @@ func (o *requestObservation) row(status int) requestLogRow {
 	} else if o.applied {
 		row.sentAs = "image"
 	}
-	usage := o.response.Usage
-	if usage == nil {
-		return row
-	}
-	row.cacheHits = int64Pointer(usage.CacheReadInputTokens)
-	actual := int64(math.Round(float64(usage.InputTokens) +
-		1.25*float64(usage.CacheCreationInputTokens) +
-		0.1*float64(usage.CacheReadInputTokens)))
-	row.sent = int64Pointer(actual)
 	saving, known := o.estimatedSaving()
 	if !o.applied {
 		saving, known = 0, true
 	}
 	if known {
-		row.asText = int64Pointer(actual + saving)
 		row.saved = int64Pointer(saving)
+	}
+	usage := o.response.Usage
+	if usage == nil {
+		return row
+	}
+	row.cacheHits = int64Pointer(usage.CacheReadInputTokens)
+	row.output = int64Pointer(usage.OutputTokens)
+	actual := int64(math.Round(float64(usage.InputTokens) +
+		1.25*float64(usage.CacheCreationInputTokens) +
+		0.1*float64(usage.CacheReadInputTokens)))
+	row.sent = int64Pointer(actual)
+	if known {
+		row.asText = int64Pointer(actual + saving)
 	}
 	return row
 }
@@ -300,6 +307,73 @@ type requestLogRow struct {
 	asText    *int64
 	sent      *int64
 	saved     *int64
+	output    *int64
+}
+
+type summaryMetric struct {
+	value   int64
+	samples int
+}
+
+func (m *summaryMetric) add(value *int64) {
+	if value == nil {
+		return
+	}
+	m.value += *value
+	m.samples++
+}
+
+func (m summaryMetric) format(requests int) string {
+	if m.samples == 0 {
+		return "-"
+	}
+	value := formatInteger(m.value)
+	if m.samples != requests {
+		return fmt.Sprintf("%s (%d/%d requests)", value, m.samples, requests)
+	}
+	return value
+}
+
+type runSummary struct {
+	mu          sync.Mutex
+	requests    int
+	transformed int
+	cacheHits   summaryMetric
+	asText      summaryMetric
+	sent        summaryMetric
+	saved       summaryMetric
+	output      summaryMetric
+}
+
+func newRunSummary() *runSummary { return &runSummary{} }
+
+func (s *runSummary) add(row requestLogRow) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.requests++
+	if row.sentAs == "image" {
+		s.transformed++
+	}
+	s.cacheHits.add(row.cacheHits)
+	s.asText.add(row.asText)
+	s.sent.add(row.sent)
+	s.saved.add(row.saved)
+	s.output.add(row.output)
+}
+
+func (s *runSummary) write(w io.Writer) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	saving := s.saved.format(s.requests)
+	if s.saved.samples > 0 && s.saved.samples == s.asText.samples && s.asText.value != 0 {
+		saving += fmt.Sprintf(" (%.1f%%)", 100*float64(s.saved.value)/float64(s.asText.value))
+	}
+	fmt.Fprintln(w, "\npxpipe summary")
+	fmt.Fprintf(w, "  requests %d, transformed %d\n", s.requests, s.transformed)
+	fmt.Fprintf(w, "  effective input: as text %s, sent %s, saved/lost %s\n",
+		s.asText.format(s.requests), s.sent.format(s.requests), saving)
+	fmt.Fprintf(w, "  provider usage: output %s, cache hits %s\n",
+		s.output.format(s.requests), s.cacheHits.format(s.requests))
 }
 
 type requestLog struct {

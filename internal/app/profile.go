@@ -120,11 +120,14 @@ func (p profile) unixHandler(transport http.RoundTripper) http.Handler {
 }
 
 func (p profile) desktopHandler(transport http.RoundTripper, upstream *url.URL) http.Handler {
-	return pxpipe.NewHandler(pxpipe.HandlerOptions{
-		AnthropicUpstream: upstream,
-		Transport:         transport,
-		ProtocolOf:        p.protocolOf,
-	})
+	return p.desktopHandlerWithOptions(transport, upstream, pxpipe.HandlerOptions{})
+}
+
+func (p profile) desktopHandlerWithOptions(transport http.RoundTripper, upstream *url.URL, opts pxpipe.HandlerOptions) http.Handler {
+	opts.AnthropicUpstream = upstream
+	opts.Transport = transport
+	opts.ProtocolOf = p.protocolOf
+	return pxpipe.NewHandler(opts)
 }
 
 func stripTransformPath(path, transformPath string) (string, bool) {
