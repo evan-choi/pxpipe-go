@@ -521,7 +521,7 @@ func stripMarkdownEnvSection(text string) (kept string, body string) {
 
 // --- static/dynamic slab split ----------------------------------------------
 
-var dynamicBlockTags = []string{"env", "context", "git_status", "directoryStructure", "system-reminder"}
+var dynamicBlockTags = []string{"env", "context", "git_status", "directoryStructure", "system-reminder", "total_tokens"}
 
 var knownStaticTags = map[string]struct{}{
 	"types": {}, "skill": {}, "name": {}, "description": {}, "location": {},

@@ -105,6 +105,16 @@ func TestObserveStaticTagChurn(t *testing.T) {
 	})
 }
 
+func TestTotalTokensIsDynamic(t *testing.T) {
+	got := splitStaticDynamic("<rules>stable</rules><total_tokens>123</total_tokens>")
+	if got.staticText != "<rules>stable</rules>" || got.dynamicText != "<total_tokens>123</total_tokens>" {
+		t.Fatalf("splitStaticDynamic() = static %q, dynamic %q", got.staticText, got.dynamicText)
+	}
+	if len(got.unknownTags) != 0 {
+		t.Fatalf("total_tokens reported as unknown static tag: %v", got.unknownTags)
+	}
+}
+
 func BenchmarkObserveStaticTagChurn(b *testing.B) {
 	tags := []string{"skill"}
 	contents := map[string]string{"skill": strings.Repeat("stable static tag content ", 64)}
