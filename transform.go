@@ -1793,6 +1793,10 @@ const imageInstructionHeaderBase = "=================== SESSION CONFIGURATION PA
 
 const reflowNoteImg = " The glyph ↵ (U+21B5) marks an original hard line break in content — treat as a real newline."
 
+const renderedContextStart = "\n====================== BEGIN RENDERED CONTEXT ======================\n"
+const imageInstructionHeader = imageInstructionHeaderBase + renderedContextStart
+const imageInstructionReflowHeader = imageInstructionHeaderBase + reflowNoteImg + renderedContextStart
+
 const toolReferenceIntro = "=== TOOL REFERENCE ===\n" +
 	"pxpipe (this user's local proxy) moved the full tool documentation for this" +
 	" session here to reduce token cost. Each tool in the tools list carries a short" +
@@ -1992,7 +1996,18 @@ func transformParsed(req map[string]any, body []byte, o *resolvedOptions, info *
 		}
 	}
 	combinedRaw := strings.Join(combinedParts, "\n\n")
-	combined := maybeReflow(compactSlabWhitespace(combinedRaw), o.Reflow)
+	compacted := compactSlabWhitespace(combinedRaw)
+	header := imageInstructionHeader
+	combinedWithHeader := ""
+	combined := compacted
+	if o.Reflow {
+		header = imageInstructionReflowHeader
+		if len(compacted) >= o.MinCompressChars {
+			combinedWithHeader, combined = reflowCompactedWithPrefix(compacted, header)
+		} else {
+			combined = maybeReflow(compacted, true)
+		}
+	}
 	combinedRawChars := u16len(combinedRaw)
 	info.OrigChars = combinedRawChars
 	info.CompressedChars = 0
@@ -2021,12 +2036,9 @@ func transformParsed(req map[string]any, body []byte, o *resolvedOptions, info *
 	if o.charsPerTokenSet {
 		slabCpt = o.CharsPerToken
 	}
-	header := imageInstructionHeaderBase
-	if o.Reflow {
-		header += reflowNoteImg
+	if combinedWithHeader == "" {
+		combinedWithHeader = header + combined
 	}
-	header += "\n====================== BEGIN RENDERED CONTEXT ======================\n"
-	combinedWithHeader := header + combined
 	if imageHeadroom(info) <= 0 {
 		info.Reason = "image_budget"
 		recordImageBudgetSkip(info)

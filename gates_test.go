@@ -1,6 +1,10 @@
 package pxpipe
 
-import "testing"
+import (
+	"testing"
+
+	"github.com/evan-choi/pxpipe-go/render"
+)
 
 func TestInvalidCharsPerTokenUsesCalibratedFallback(t *testing.T) {
 	if got := normCpt(0); got != 3 {
@@ -25,6 +29,25 @@ func TestCompactSlabWhitespace(t *testing.T) {
 				t.Fatalf("compactSlabWhitespace(%q) = %q, want %q", tc.input, got, tc.want)
 			}
 		})
+	}
+}
+
+func TestReflowCompactedWithPrefix(t *testing.T) {
+	const prefix = "header\n"
+	for _, input := range []string{
+		"plain",
+		"a\nb",
+		"a\tb",
+		"a \t\n\n\n\tb",
+		"한글\ntext",
+		"a" + render.NLSentinel + "b",
+	} {
+		compacted := compactSlabWhitespace(input)
+		want := maybeReflow(compacted, true)
+		whole, body := reflowCompactedWithPrefix(compacted, prefix)
+		if whole != prefix+want || body != want {
+			t.Fatalf("reflowCompactedWithPrefix(%q) = %q, %q; want %q, %q", input, whole, body, prefix+want, want)
+		}
 	}
 }
 

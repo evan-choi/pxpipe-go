@@ -328,6 +328,35 @@ func maybeReflow(text string, enabled bool) string {
 	return safe
 }
 
+func reflowCompactedWithPrefix(text, prefix string) (whole, body string) {
+	safe := render.NeutralizeSentinel(text)
+	if strings.Contains(safe, "\t") {
+		packed, _ := render.Reflow(safe)
+		whole = prefix + packed
+		return whole, whole[len(prefix):]
+	}
+	newlines := strings.Count(safe, "\n")
+	if newlines == 0 {
+		whole = prefix + safe
+		return whole, whole[len(prefix):]
+	}
+	var builder strings.Builder
+	builder.Grow(len(prefix) + len(safe) + newlines*(len(render.NLSentinel)-1))
+	builder.WriteString(prefix)
+	for {
+		newline := strings.IndexByte(safe, '\n')
+		if newline < 0 {
+			builder.WriteString(safe)
+			break
+		}
+		builder.WriteString(safe[:newline])
+		builder.WriteString(render.NLSentinel)
+		safe = safe[newline+1:]
+	}
+	whole = builder.String()
+	return whole, whole[len(prefix):]
+}
+
 // --- content classification + paging truncation ---------------------------
 
 var (
