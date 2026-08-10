@@ -748,6 +748,31 @@ func accumulateRenderedImages(images []*render.RenderedImage, info *TransformInf
 
 func gptTextTokens(text string) int { return o200k.CountTokens(text) }
 
+func belowMinGptTokens(text string, minimum int) (int, bool) {
+	if minimum <= 0 {
+		return 0, false
+	}
+	// o200k tokens never span ASCII whitespace between non-whitespace fields,
+	// so this cheap field count is a safe lower bound.
+	fields, inField := 0, false
+	for i := 0; i < len(text); i++ {
+		switch text[i] {
+		case ' ', '\t', '\n', '\r', '\v', '\f':
+			inField = false
+			continue
+		}
+		if !inField {
+			fields++
+			if fields >= minimum {
+				return 0, false
+			}
+			inField = true
+		}
+	}
+	n := gptTextTokens(text)
+	return n, n < minimum
+}
+
 func gptImageTokens(model string, images []*render.RenderedImage) int {
 	profile := ResolveGptProfile(model)
 	n := 0
@@ -1133,8 +1158,7 @@ func TransformOpenAIChatCompletions(body []byte, opts *TransformOptions) ([]byte
 
 	combined := strings.TrimRightFunc(compactSlabWhitespace(combinedRaw), isJSSpace)
 	if profile.MinCompressTokens != nil {
-		combinedTokens := gptTextTokens(combined)
-		if combinedTokens < *profile.MinCompressTokens {
+		if combinedTokens, below := belowMinGptTokens(combined, *profile.MinCompressTokens); below {
 			return finishHistoryOnly(fmt.Sprintf("below_min_tokens (%d < %d)", combinedTokens, *profile.MinCompressTokens))
 		}
 	} else if u16len(combined) < o.MinCompressChars {
@@ -1369,8 +1393,7 @@ func TransformOpenAIResponses(body []byte, opts *TransformOptions) ([]byte, *Tra
 
 	combined := strings.TrimRightFunc(compactSlabWhitespace(combinedRaw), isJSSpace)
 	if profile.MinCompressTokens != nil {
-		combinedTokens := gptTextTokens(combined)
-		if combinedTokens < *profile.MinCompressTokens {
+		if combinedTokens, below := belowMinGptTokens(combined, *profile.MinCompressTokens); below {
 			return finishHistoryOnly(fmt.Sprintf("below_min_tokens (%d < %d)", combinedTokens, *profile.MinCompressTokens))
 		}
 	} else if u16len(combined) < o.MinCompressChars {

@@ -2,10 +2,31 @@ package pxpipe
 
 import (
 	"reflect"
+	"strings"
 	"testing"
 
 	"github.com/evan-choi/pxpipe-go/render"
 )
+
+func TestBelowMinGptTokens(t *testing.T) {
+	for _, tc := range []struct {
+		text    string
+		minimum int
+	}{
+		{"hello world", 3},
+		{strings.Repeat("field ", 500), 500},
+		{"한글 prompt\twith\nspaces", 4},
+	} {
+		want := gptTextTokens(tc.text) < tc.minimum
+		gotCount, got := belowMinGptTokens(tc.text, tc.minimum)
+		if got != want {
+			t.Errorf("belowMinGptTokens(%q, %d) = %v, want %v", tc.text, tc.minimum, got, want)
+		}
+		if got && gotCount != gptTextTokens(tc.text) {
+			t.Errorf("belowMinGptTokens(%q, %d) count = %d, want %d", tc.text, tc.minimum, gotCount, gptTextTokens(tc.text))
+		}
+	}
+}
 
 func TestGptHistoryOptionsPrecedence(t *testing.T) {
 	intp := func(v int) *int { return &v }
