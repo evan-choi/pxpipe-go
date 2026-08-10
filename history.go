@@ -711,6 +711,11 @@ func collapseHistory(messages []any, isProfitable profitableFn, o historyCollaps
 			to = len(costs)
 		}
 		var textOut, slotOut strings.Builder
+		capacity := rangeTotal(from, to, false)
+		textOut.Grow(capacity)
+		if withSlots {
+			slotOut.Grow(capacity)
+		}
 		wrote := false
 		for i := from; i < to; i++ {
 			cost := &costs[i]
