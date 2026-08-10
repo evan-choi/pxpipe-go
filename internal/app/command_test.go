@@ -71,21 +71,25 @@ func TestDirectExecutableEscapeAndCaseInsensitiveProfile(t *testing.T) {
 }
 
 func TestReportsBuildVersion(t *testing.T) {
-	var stdout bytes.Buffer
-	command, _ := newRootCommand(nil, &stdout, io.Discard, func(profile) (int, error) {
-		t.Fatal("execute called")
-		return 0, nil
-	}, func(int) error {
-		t.Fatal("serve called")
-		return nil
-	})
-	command.SetArgs(normalizeCLIArgs([]string{"--version"}))
-	if err := command.Execute(); err != nil {
-		t.Fatal(err)
-	}
-	want := "pxpipe version " + command.Version + "\n"
-	if got := stdout.String(); got != want {
-		t.Fatalf("version output = %q, want %q", got, want)
+	for _, flag := range []string{"-v", "--version"} {
+		t.Run(flag, func(t *testing.T) {
+			var stdout bytes.Buffer
+			command, _ := newRootCommand(nil, &stdout, io.Discard, func(profile) (int, error) {
+				t.Fatal("execute called")
+				return 0, nil
+			}, func(int) error {
+				t.Fatal("serve called")
+				return nil
+			})
+			command.SetArgs(normalizeCLIArgs([]string{flag}))
+			if err := command.Execute(); err != nil {
+				t.Fatal(err)
+			}
+			want := "pxpipe version " + command.Version + "\n"
+			if got := stdout.String(); got != want {
+				t.Fatalf("version output = %q, want %q", got, want)
+			}
+		})
 	}
 }
 
