@@ -17,8 +17,25 @@ type executeServer func(port int) error
 func newRootCommand(stdin io.Reader, stdout, stderr io.Writer, execute executeProfile, serve executeServer) (*cobra.Command, *int) {
 	exitCode := new(int)
 	root := &cobra.Command{
-		Use:           "pxpipe <executable> [args...]",
-		Short:         "Run AI CLIs through pxpipe or serve the proxy directly",
+		Use:   "pxpipe <executable> [args...]",
+		Short: "Run AI CLIs through pxpipe or serve the proxy directly",
+		Example: `  # Claude Code
+  pxpipe claude --model opus
+
+  # Claude Desktop (macOS; finds Claude.app automatically)
+  pxpipe Claude.app
+
+  # Codex
+  PXPIPE_MODELS=gpt-5.6-sol pxpipe codex --model gpt-5.6-sol
+
+  # OpenCode
+  PXPIPE_MODELS=gpt-5.6-sol pxpipe opencode --model openai/gpt-5.6-sol
+
+  # Any other executable
+  pxpipe another-cli --its-child-flag
+
+  # Standalone proxy
+  pxpipe serve`,
 		Version:       buildVersion(),
 		SilenceErrors: true,
 		SilenceUsage:  true,
