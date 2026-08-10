@@ -1,11 +1,13 @@
 package pxpipe
 
 import (
+	"hash/maphash"
 	"regexp"
 	"slices"
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 )
 
 // Fact-sheet extraction: precision-critical tokens (paths, URLs, SHAs, version
@@ -383,7 +385,74 @@ const (
 	fsMaxScan          = 262_144
 	fsPageChars        = 28_080
 	fsMaxChunk         = 512
+	fsCacheSlots       = 64
+	fsCacheSeenSlots   = 256
+	fsCacheMaxKeyBytes = 256 << 10
 )
+
+type factSheetTextCacheEntry struct {
+	hash    uint64
+	text    string
+	value   string
+	compact bool
+}
+
+var (
+	factSheetTextCacheSeed = maphash.MakeSeed()
+	factSheetTextCache     [fsCacheSlots]atomic.Pointer[factSheetTextCacheEntry]
+	factSheetTextCacheSeen [fsCacheSeenSlots]atomic.Uint64
+)
+
+func factSheetTextCacheHash(text string, compact bool) uint64 {
+	hash := maphash.String(factSheetTextCacheSeed, text)
+	if compact {
+		hash ^= 0x9e3779b97f4a7c15
+	}
+	return hash
+}
+
+func loadFactSheetTextCache(text string, compact bool) (string, bool) {
+	if len(text) > fsCacheMaxKeyBytes {
+		return "", false
+	}
+	hash := factSheetTextCacheHash(text, compact)
+	entry := factSheetTextCache[hash&(fsCacheSlots-1)].Load()
+	if entry == nil || entry.hash != hash || entry.compact != compact || entry.text != text {
+		return "", false
+	}
+	return entry.value, true
+}
+
+func storeFactSheetTextCache(text string, compact bool, value string) {
+	if len(text) > fsCacheMaxKeyBytes {
+		return
+	}
+	hash := factSheetTextCacheHash(text, compact)
+	seen := hash
+	if seen == 0 {
+		seen = 1
+	}
+	if factSheetTextCacheSeen[hash&(fsCacheSeenSlots-1)].Swap(seen) != seen {
+		return
+	}
+	// ponytail: direct-mapped slots favor a lock-free hit path; move to a
+	// byte-budgeted LRU only if production metrics show collision churn.
+	factSheetTextCache[hash&(fsCacheSlots-1)].Store(&factSheetTextCacheEntry{
+		hash:    hash,
+		text:    strings.Clone(text),
+		value:   value,
+		compact: compact,
+	})
+}
+
+func clearFactSheetTextCache() {
+	for i := range factSheetTextCache {
+		factSheetTextCache[i].Store(nil)
+	}
+	for i := range factSheetTextCacheSeen {
+		factSheetTextCacheSeen[i].Store(0)
+	}
+}
 
 var (
 	shapeUUID       = regexp.MustCompile(`^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$`)
@@ -743,9 +812,16 @@ func factSheetText(text string, compact bool) string {
 	if text == "" {
 		return ""
 	}
-	if u16len(text) <= fsMaxScan {
-		return factSheetTextFromEntries(ExtractFactSheetEntries(text), compact)
+	if cached, ok := loadFactSheetTextCache(text, compact); ok {
+		return cached
 	}
-	kept, _ := extractFactSheetEntriesAllPages(text, fsPageChars)
-	return factSheetTextFromEntries(kept, compact)
+	var result string
+	if u16len(text) <= fsMaxScan {
+		result = factSheetTextFromEntries(ExtractFactSheetEntries(text), compact)
+	} else {
+		kept, _ := extractFactSheetEntriesAllPages(text, fsPageChars)
+		result = factSheetTextFromEntries(kept, compact)
+	}
+	storeFactSheetTextCache(text, compact, result)
+	return result
 }

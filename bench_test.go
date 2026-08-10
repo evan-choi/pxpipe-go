@@ -292,6 +292,30 @@ func BenchmarkExtractFactSheetEntries(b *testing.B) {
 	}
 }
 
+func BenchmarkFactSheetTextCacheHitParallel(b *testing.B) {
+	input, err := os.ReadFile(filepath.Join("testdata", "render", "multi-page", "input.txt"))
+	if err != nil {
+		b.Fatal(err)
+	}
+	text := string(input)
+	clearFactSheetTextCache()
+	want := factSheetText(text, false)
+	if got := factSheetText(text, false); got != want {
+		b.Fatal("factSheetText() differs")
+	}
+	b.SetBytes(int64(len(input)))
+	b.ReportAllocs()
+	b.ResetTimer()
+	b.RunParallel(func(pb *testing.PB) {
+		for pb.Next() {
+			if got := factSheetText(text, false); got != want {
+				b.Errorf("factSheetText() differs")
+				return
+			}
+		}
+	})
+}
+
 func BenchmarkTransformOpenAIChat(b *testing.B) {
 	input, err := os.ReadFile(filepath.Join("testdata", "openai", "chat-big-slab", "input.json"))
 	if err != nil {
