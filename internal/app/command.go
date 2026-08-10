@@ -5,6 +5,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"runtime/debug"
 	"strings"
 
 	"github.com/spf13/cobra"
@@ -18,6 +19,7 @@ func newRootCommand(stdin io.Reader, stdout, stderr io.Writer, execute executePr
 	root := &cobra.Command{
 		Use:           "pxpipe <executable> [args...]",
 		Short:         "Run AI CLIs through pxpipe or serve the proxy directly",
+		Version:       buildVersion(),
 		SilenceErrors: true,
 		SilenceUsage:  true,
 		RunE: func(command *cobra.Command, _ []string) error {
@@ -77,11 +79,18 @@ func normalizeCLIArgs(args []string) []string {
 		return append([]string{"exec"}, args[1:]...)
 	}
 	switch args[0] {
-	case "serve", "help", "-h", "--help":
+	case "serve", "help", "-h", "--help", "--version":
 		return append([]string(nil), args...)
 	default:
 		return append([]string{"exec"}, args...)
 	}
+}
+
+func buildVersion() string {
+	if info, ok := debug.ReadBuildInfo(); ok && info.Main.Version != "" {
+		return info.Main.Version
+	}
+	return "(devel)"
 }
 
 func profileForExecutable(command string, args []string) profile {
