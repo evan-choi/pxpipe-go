@@ -16,14 +16,24 @@ export CLI, and Gemini/Google surface remain out of scope.
 
 ## Install
 
+Install the `pxpipe` CLI globally with the pinned release:
+
 ```bash
-go get github.com/evan-choi/pxpipe-go
+go install github.com/evan-choi/pxpipe-go/cmd/pxpipe@v0.4.0
 ```
 
-Install the CLI from a checkout:
+Use `@latest` to install the newest tagged release:
 
 ```bash
-go install ./cmd/pxpipe
+go install github.com/evan-choi/pxpipe-go/cmd/pxpipe@latest
+```
+
+Go installs the binary into `go env GOBIN` when set, or
+`$(go env GOPATH)/bin` otherwise. Add that directory to `PATH`; for the default
+location:
+
+```bash
+export PATH="$(go env GOPATH)/bin:$PATH"
 ```
 
 ## Use the CLI
@@ -47,6 +57,8 @@ paths ending in `/responses`; Codex must use a provider configured with
 transformed. These routes are independent of the provider domain and preserve
 the original scheme, authority, path, and query after transformation, so custom
 base URLs and localhost intermediaries work without config-file discovery.
+Anthropic base URLs normally omit `/v1`; Claude appends `/v1/messages` to the
+configured base URL.
 
 On macOS, `Claude.app` is matched case-insensitively and located in
 `~/Applications` or `/Applications`. pxpipe starts its bundle executable with a
@@ -76,6 +88,11 @@ destination. When `ANTHROPIC_UNIX_SOCKET` is already set, pxpipe opens a
 process-scoped Unix socket for Claude Code, transforms matching HTTP requests,
 and forwards them over the original socket. The original socket path is never
 exposed to the child.
+
+When the child exits, pxpipe writes a summary to stderr with request and
+transformation counts, effective input tokens, saved or lost tokens, output
+tokens, and cache hits. Metrics unavailable from the provider are shown as
+`-`.
 
 Command startup and process-scoped CA/proxy injection have been smoke-tested
 against the installed Claude Code, OpenCode, and Codex releases. Local Codex
