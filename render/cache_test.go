@@ -84,6 +84,21 @@ func TestPNGBase64SHA256CachesOnlyExactSequence(t *testing.T) {
 	}
 }
 
+func TestAppendPNGBase64DeferredWaitsForReuse(t *testing.T) {
+	cache := newRenderedPageCache(defaultRenderCacheBytes)
+	key := newRenderCacheKey("deferred", 64, 500, DenseRenderStyle, 96, nil, false)
+	images := cache.put(key, "deferred", nil, []*RenderedImage{{PNG: []byte("image")}})
+	images[0].AppendPNGBase64Deferred(nil)
+	images[0].AppendPNGBase64Deferred(nil)
+	if images[0].base64.ready.Load() {
+		t.Fatal("two uses populated the deferred base64 cache")
+	}
+	images[0].AppendPNGBase64Deferred(nil)
+	if !images[0].base64.ready.Load() {
+		t.Fatal("reused image did not populate the deferred base64 cache")
+	}
+}
+
 func TestRenderCacheKeyCoversEveryRenderInput(t *testing.T) {
 	invert, paper := true, 240
 	style := RenderStyle{

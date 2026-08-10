@@ -954,6 +954,9 @@ func approxBlockBytes(blk map[string]any) int {
 	if png, ok := src["data"].(pngBase64); ok {
 		return len(png)
 	}
+	if image, ok := src["data"].(pngBase64Image); ok {
+		return len(image.image.PNG)
+	}
 	b64, _ := getStr(src, "data")
 	pad := 0
 	if strings.HasSuffix(b64, "==") {
@@ -984,7 +987,7 @@ func textToImageBlocks(text string, cols int, shrinkWidth bool, style render.Ren
 	}
 	out := &renderedBlocks{droppedCodepoints: map[rune]int{}}
 	for _, img := range imgs {
-		out.blocks = append(out.blocks, makeImageBlock(img.PNG))
+		out.blocks = append(out.blocks, makeRenderedImageBlock(img))
 		out.pngs = append(out.pngs, img.PNG)
 		out.dims = append(out.dims, imageDim{img.Width, img.Height})
 		out.droppedChars += img.DroppedChars
@@ -1062,6 +1065,11 @@ func historyImageSha8(messages []any) string {
 								_, _ = h.Write(scratch[:encoded])
 								data = data[n:]
 							}
+						}
+					case pngBase64Image:
+						if len(data.image.PNG) > 0 {
+							hasData = true
+							_ = data.image.WritePNGBase64(h)
 						}
 					}
 				}
@@ -2084,7 +2092,7 @@ func transformParsed(req map[string]any, body []byte, o *resolvedOptions, info *
 		for cp, n := range img.DroppedCodepoints {
 			droppedCodepoints[cp] += n
 		}
-		block := makeImageBlock(img.PNG)
+		block := makeRenderedImageBlock(img)
 		if i == len(images)-1 && hasSystemStaticCC {
 			block["cache_control"] = demoteRelocatedCacheControl(systemStaticCC)
 		}
