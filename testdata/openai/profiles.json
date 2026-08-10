@@ -782,6 +782,19 @@
     "markerScale": 1,
     "markerRed": false,
     "inkDilate": 0
+   },
+   "historyStripCols": 172,
+   "historyStyle": {
+    "font": "jetbrains-mono-14",
+    "cellWBonus": 0,
+    "cellHBonus": 0,
+    "aa": true,
+    "grid": false,
+    "gridCols": 0,
+    "colorCycle": false,
+    "markerScale": 1,
+    "markerRed": false,
+    "inkDilate": 0
    }
   },
   "anthropic/claude-opus-5": {
@@ -805,6 +818,19 @@
    },
    "style": {
     "font": "spleen-5x8",
+    "cellWBonus": 0,
+    "cellHBonus": 0,
+    "aa": true,
+    "grid": false,
+    "gridCols": 0,
+    "colorCycle": false,
+    "markerScale": 1,
+    "markerRed": false,
+    "inkDilate": 0
+   },
+   "historyStripCols": 172,
+   "historyStyle": {
+    "font": "jetbrains-mono-14",
     "cellWBonus": 0,
     "cellHBonus": 0,
     "aa": true,
