@@ -325,11 +325,11 @@ Rendered pages are cached by exact render inputs. The cache retains up to
 64 MiB by default. Set `PXPIPE_RENDER_CACHE_BYTES` to another byte limit, or
 set it to `0` to disable the cache.
 
-![pxpipe versus pxpipe-go benchmark: pxpipe-go is 12.8 to 65.5 times faster across four workloads and uses 74.5% less peak RSS](docs/benchmark-improvements.png)
+![pxpipe versus pxpipe-go benchmark: pxpipe-go is 19.8 to 99.6 times faster across four workloads and uses 73.7% less peak RSS](docs/benchmark-improvements.png)
 
 Measured natively on an Apple M1 Pro running macOS 26.5.2, with Bun 1.3.14
 and Go 1.26.5. Go used the machine-default `GOMAXPROCS=10` and no PGO profile.
-The comparison uses `pxpipe@c5fc2a8` and `pxpipe-go@f231487`
+The comparison uses `pxpipe@c5fc2a8` and `pxpipe-go@a126d2c`
 (2026-08-11).
 
 Values are medians of five runs. Each pxpipe run performs two warmups and
@@ -339,27 +339,27 @@ CPU architecture, available cores, and request content.
 
 | benchmark | pxpipe time/op | pxpipe-go time/op | speedup |
 |---|---:|---:|---:|
-| TransformBigClaudeCode | 48.30 ms | 2.47 ms | 19.5× |
-| RenderDensePage | 11.80 ms | 0.92 ms | 12.8× |
-| TransformOpenAIChat | 51.30 ms | 0.78 ms | 65.5× |
-| TransformOpenAIResponses | 113.20 ms | 2.23 ms | 50.7× |
+| TransformBigClaudeCode | 48.40 ms | 2.44 ms | 19.8× |
+| RenderDensePage | 11.90 ms | 0.59 ms | 20.3× |
+| TransformOpenAIChat | 51.00 ms | 0.61 ms | 83.0× |
+| TransformOpenAIResponses | 108.80 ms | 1.09 ms | 99.6× |
 
 Peak RSS was measured over the full four-benchmark suite in a fresh process
 for each run:
 
 | implementation | median peak RSS | relative to pxpipe |
 |---|---:|---:|
-| pxpipe | 411.30 MiB | baseline |
-| pxpipe-go | 104.98 MiB | 74.5% lower |
+| pxpipe | 409.27 MiB | baseline |
+| pxpipe-go | 107.70 MiB | 73.7% lower |
 
 Go's `-benchmem` output reports the following allocation volume per operation:
 
 | benchmark | B/op | allocs/op |
 |---|---:|---:|
-| TransformBigClaudeCode | 1,656,388 | 2,497 |
-| RenderDensePage | 2,448 | 25 |
-| TransformOpenAIChat | 716,944 | 1,076 |
-| TransformOpenAIResponses | 1,192,000 | 1,339 |
+| TransformBigClaudeCode | 1,656,626 | 2,497 |
+| RenderDensePage | 2,592 | 25 |
+| TransformOpenAIChat | 716,912 | 1,073 |
+| TransformOpenAIResponses | 1,188,472 | 1,329 |
 
 Raw GC counts are not compared because V8 and Go use different collectors and
 event semantics. Peak RSS is the cross-runtime memory metric; `B/op` and
@@ -398,10 +398,9 @@ for benchmark_run in 1 2 3 4 5; do
 done
 ```
 
-Linux ARM64 hot-cache profiles show JSON output serialization, render
-measurement, base64 encoding, and SHA-256 as the largest remaining CPU costs;
-mutex contention is negligible. The renderer uses zlib level 6; framebuffers
-and encoders are pooled.
+Current macOS hot-cache profiles show SHA-256 and UTF-16 measurement as the
+largest remaining application CPU costs; mutex contention is negligible. The
+renderer uses zlib level 6; framebuffers and encoders are pooled.
 
 A Docker Desktop Alpine ARM64 A/B run found `GOGC=400` with
 `GOMEMLIMIT=192MiB` 5.6% faster by parallel geomean than the default GC
