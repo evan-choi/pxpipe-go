@@ -206,13 +206,11 @@ func RenderCellHeight(style RenderStyle) int {
 // cellsFor mirrors TS cellsFor: visual width of a codepoint in cells
 // (missing codepoints advance 1 so wrap math stays stable).
 func cellsFor(cp rune, markerScale int, selected *atlas.Set) int {
-	if cp == nlSentinelCp && markerScale > 1 {
-		return markerScale
+	if cp == nlSentinelCp {
+		return max(1, markerScale)
 	}
 	if cp >= 0 && cp < 128 {
-		if rank := selected.Bit.Rank(cp); rank >= 0 {
-			return 1 + int(selected.Bit.Wide[rank])
-		}
+		return 1
 	}
 	return cellsForSlow(cp, selected)
 }

@@ -58,6 +58,20 @@ func TestEscapeMissingGlyphs(t *testing.T) {
 	}
 }
 
+func TestFastCellWidthInvariants(t *testing.T) {
+	for _, font := range []string{"spleen-5x8", "jetbrains-mono-10", "jetbrains-mono-12", "jetbrains-mono-14"} {
+		selected := atlasSet(font)
+		for cp := rune(0); cp < 128; cp++ {
+			if rank := selected.Bit.Rank(cp); rank >= 0 && selected.Bit.Wide[rank] != 0 {
+				t.Fatalf("%s ASCII U+%04X is wide", font, cp)
+			}
+		}
+		if glyph, ok := bitGlyph(nlSentinelCp, selected); ok && glyph.atlas.Wide[glyph.rank] != 0 {
+			t.Fatalf("%s newline sentinel is wide", font)
+		}
+	}
+}
+
 func TestReflowFastPath(t *testing.T) {
 	got, ok := Reflow("a\nb")
 	if !ok || got != "a"+NLSentinel+"b" {
