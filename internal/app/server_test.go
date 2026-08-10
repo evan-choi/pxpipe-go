@@ -230,7 +230,16 @@ func TestServeProxyPreservesCustomCodexProviderAndAuthentication(t *testing.T) {
 	if !bytes.Contains(got.body, []byte("data:image/")) {
 		t.Fatal("custom-provider request reached upstream without transformation")
 	}
-	if logOutput := output.String(); !strings.Contains(logOutput, "/tenant/v1/responses") {
+	logOutput := ""
+	deadline := time.Now().Add(time.Second)
+	for time.Now().Before(deadline) {
+		logOutput = output.String()
+		if strings.Contains(logOutput, "/tenant/v1/responses") {
+			break
+		}
+		time.Sleep(time.Millisecond)
+	}
+	if !strings.Contains(logOutput, "/tenant/v1/responses") {
 		t.Fatalf("request telemetry did not use the original endpoint: %s", logOutput)
 	}
 }
