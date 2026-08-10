@@ -8,6 +8,7 @@ package o200k
 import (
 	"crypto/sha256"
 	"encoding/binary"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"unicode"
@@ -23,7 +24,17 @@ var (
 	err  error
 )
 
-const tokenCountCacheSlots = 1 << 12
+const (
+	tokenCountCacheSlots         = 1 << 12
+	exactTokenCountCacheSlots    = 1 << 7
+	exactTokenCountCacheMaxBytes = 128 << 10
+)
+
+type exactTokenCountCacheEntry struct {
+	fingerprint uint64
+	text        string
+	count       int
+}
 
 type tokenCountCacheEntry struct {
 	key   [sha256.Size]byte
@@ -43,11 +54,39 @@ type digitTokenCountCacheEntry struct {
 // instructions and tool schemas shared by requests in one pod.
 var tokenCountCache [tokenCountCacheSlots]atomic.Pointer[tokenCountCacheEntry]
 
+// Repeated bounded inputs skip the cryptographic digest after a verified
+// digest-cache hit. Exact string comparison makes sampled collisions misses;
+// non-replacing slots cap retained text at 16 MiB and avoid churn.
+var exactTokenCountCache [exactTokenCountCacheSlots]atomic.Pointer[exactTokenCountCacheEntry]
+
 // o200k splits ASCII digit runs into 1-3 digit pieces, and every such piece is
 // one token. A sampled fingerprint only admits entries; the full normalized
 // digest still verifies every hit, so fingerprint collisions cannot alter counts.
 var digitTokenCountCache [tokenCountCacheSlots]atomic.Pointer[digitTokenCountCacheEntry]
 var digitTokenCountCandidates [tokenCountCacheSlots]atomic.Uint64
+
+func tokenCountFingerprint(text string) uint64 {
+	const (
+		offset = uint64(14695981039346656037)
+		prime  = uint64(1099511628211)
+		sample = 128
+	)
+	h := offset ^ uint64(len(text))
+	hash := func(s string) {
+		for i := 0; i < len(s); i++ {
+			h = (h ^ uint64(s[i])) * prime
+		}
+	}
+	if len(text) <= 3*sample {
+		hash(text)
+		return h
+	}
+	hash(text[:sample])
+	mid := len(text)/2 - sample/2
+	hash(text[mid : mid+sample])
+	hash(text[len(text)-sample:])
+	return h
+}
 
 func canNormalizeDigits(text string) bool {
 	hasDigits := false
@@ -120,9 +159,25 @@ func CountTokens(text string) int {
 	if text == "" {
 		return 0
 	}
+	var exactFingerprint uint64
+	var exactSlot *atomic.Pointer[exactTokenCountCacheEntry]
+	if len(text) <= exactTokenCountCacheMaxBytes {
+		exactFingerprint = tokenCountFingerprint(text)
+		exactSlot = &exactTokenCountCache[exactFingerprint&(exactTokenCountCacheSlots-1)]
+		if cached := exactSlot.Load(); cached != nil && cached.fingerprint == exactFingerprint && cached.text == text {
+			return cached.count
+		}
+	}
 	key := sha256.Sum256(unsafe.Slice(unsafe.StringData(text), len(text)))
 	slot := &tokenCountCache[binary.LittleEndian.Uint64(key[:])&(tokenCountCacheSlots-1)]
 	if cached := slot.Load(); cached != nil && cached.key == key {
+		if exactSlot != nil && exactSlot.Load() == nil {
+			exactSlot.CompareAndSwap(nil, &exactTokenCountCacheEntry{
+				fingerprint: exactFingerprint,
+				text:        strings.Clone(text),
+				count:       cached.count,
+			})
+		}
 		return cached.count
 	}
 	var digitKey [sha256.Size]byte

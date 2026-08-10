@@ -1,6 +1,8 @@
 package o200k
 
 import (
+	"crypto/sha256"
+	"encoding/binary"
 	"fmt"
 	"strings"
 	"sync"
@@ -91,6 +93,40 @@ func TestCountTokensCacheHitAllocatesNothing(t *testing.T) {
 	}
 	if got != want {
 		t.Fatalf("warm CountTokens = %d, want %d", got, want)
+	}
+}
+
+func TestExactTokenCountCacheAdmitsVerifiedRepeat(t *testing.T) {
+	text := strings.Repeat("verified repeated prompt payload ", 512)
+	fingerprint := tokenCountFingerprint(text)
+	exactSlot := &exactTokenCountCache[fingerprint&(exactTokenCountCacheSlots-1)]
+	key := sha256.Sum256([]byte(text))
+	digestSlot := &tokenCountCache[binary.LittleEndian.Uint64(key[:])&(tokenCountCacheSlots-1)]
+	previousExact := exactSlot.Swap(nil)
+	previousDigest := digestSlot.Swap(nil)
+	defer exactSlot.Store(previousExact)
+	defer digestSlot.Store(previousDigest)
+
+	want := CountTokens(text)
+	if cached := exactSlot.Load(); cached != nil {
+		t.Fatal("first observation entered exact cache")
+	}
+	if got := CountTokens(text); got != want {
+		t.Fatalf("repeated CountTokens = %d, want %d", got, want)
+	}
+	if cached := exactSlot.Load(); cached == nil || cached.text != text || cached.count != want {
+		t.Fatalf("exact cache entry = %#v, want count %d", cached, want)
+	}
+}
+
+func TestExactTokenCountCacheRejectsSampleCollision(t *testing.T) {
+	text := "exact collision candidate"
+	fingerprint := tokenCountFingerprint(text)
+	slot := &exactTokenCountCache[fingerprint&(exactTokenCountCacheSlots-1)]
+	previous := slot.Swap(&exactTokenCountCacheEntry{fingerprint: fingerprint, text: text + "!", count: -1})
+	defer slot.Store(previous)
+	if got := CountTokens(text); got < 0 {
+		t.Fatalf("sample collision returned cached count %d", got)
 	}
 }
 
