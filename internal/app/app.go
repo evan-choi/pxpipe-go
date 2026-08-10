@@ -71,6 +71,9 @@ func notifyServeSignals() (context.Context, <-chan struct{}, func()) {
 }
 
 func runProfile(ctx context.Context, p profile, stdin io.Reader, stdout, stderr io.Writer) (int, error) {
+	if p.claudeDesktop {
+		return runClaudeDesktopProfile(ctx, p, stdin, stdout, stderr)
+	}
 	configDir, err := os.UserConfigDir()
 	if err != nil {
 		return 1, fmt.Errorf("locate user config directory: %w", err)
@@ -110,7 +113,7 @@ func runProfile(ctx context.Context, p profile, stdin io.Reader, stdout, stderr 
 			return dialer.DialContext(ctx, "unix", upstreamSocket)
 		}
 		unixServer = &http.Server{
-			Handler:           p.unixHandler(unixTransport),
+			Handler:           p.unixHandler(unixTransport, "http"),
 			ReadHeaderTimeout: 15 * time.Second,
 		}
 		errorChannel := make(chan error, 1)
@@ -204,6 +207,63 @@ func runProfile(ctx context.Context, p profile, stdin io.Reader, stdout, stderr 
 	}
 	if result.err == nil {
 		result.err = errors.Join(proxyErr, transformErr, unixErr)
+	}
+	return result.code, result.err
+}
+
+func runClaudeDesktopProfile(ctx context.Context, p profile, stdin io.Reader, stdout, stderr io.Writer) (int, error) {
+	listener, socketPath, removeSocket, err := newUnixSocketListener()
+	if err != nil {
+		return 1, err
+	}
+	defer removeSocket()
+
+	transport := http.DefaultTransport.(*http.Transport).Clone()
+	defer transport.CloseIdleConnections()
+	server := &http.Server{
+		Handler:           p.unixHandler(transport, "https"),
+		ReadHeaderTimeout: 15 * time.Second,
+	}
+	serverErrors := make(chan error, 1)
+	go func() { serverErrors <- serve(server, listener) }()
+
+	childDone := make(chan struct {
+		code int
+		err  error
+	}, 1)
+	childContext, cancelChild := context.WithCancel(ctx)
+	defer cancelChild()
+	go func() {
+		code, runErr := runner.Run(childContext, runner.Options{
+			Command: p.command, Args: p.args,
+			Env: runner.Environment(os.Environ(), map[string]string{
+				"ANTHROPIC_UNIX_SOCKET": socketPath,
+			}, nil),
+			Stdin: stdin, Stdout: stdout, Stderr: stderr,
+		})
+		childDone <- struct {
+			code int
+			err  error
+		}{code: code, err: runErr}
+	}()
+
+	var result struct {
+		code int
+		err  error
+	}
+	select {
+	case result = <-childDone:
+	case err := <-serverErrors:
+		cancelChild()
+		result = <-childDone
+		result.code = 1
+		result.err = fmt.Errorf("Unix socket proxy stopped: %w", err)
+	}
+
+	shutdownContext, cancelShutdown := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancelShutdown()
+	if err := server.Shutdown(shutdownContext); result.err == nil {
+		result.err = err
 	}
 	return result.code, result.err
 }

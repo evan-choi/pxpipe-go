@@ -154,3 +154,29 @@ func TestGenericProfileRecognizesEverySupportedProtocol(t *testing.T) {
 		}
 	}
 }
+
+func TestClaudeUnixHandlerUsesRequestedUpstreamScheme(t *testing.T) {
+	var scheme, host string
+	transport := profileRoundTripperFunc(func(r *http.Request) (*http.Response, error) {
+		scheme, host = r.URL.Scheme, r.URL.Host
+		return &http.Response{
+			StatusCode: http.StatusNoContent,
+			Header:     make(http.Header),
+			Body:       io.NopCloser(strings.NewReader("")),
+			Request:    r,
+		}, nil
+	})
+	request := httptest.NewRequest(http.MethodGet, "http://unix.local/health", nil)
+	request.Host = "api.anthropic.com"
+	response := httptest.NewRecorder()
+	claudeProfile("claude", nil).unixHandler(transport, "https").ServeHTTP(response, request)
+	if response.Code != http.StatusNoContent || scheme != "https" || host != "api.anthropic.com" {
+		t.Fatalf("response = %d, upstream = %s://%s", response.Code, scheme, host)
+	}
+}
+
+type profileRoundTripperFunc func(*http.Request) (*http.Response, error)
+
+func (f profileRoundTripperFunc) RoundTrip(r *http.Request) (*http.Response, error) {
+	return f(r)
+}

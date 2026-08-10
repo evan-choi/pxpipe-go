@@ -33,6 +33,7 @@ the child unchanged:
 
 ```bash
 pxpipe claude --model opus
+pxpipe Claude.app
 PXPIPE_MODELS=gpt-5.6-sol pxpipe opencode --model openai/gpt-5.6-sol
 PXPIPE_MODELS=gpt-5.6-sol pxpipe codex --model gpt-5.6-sol
 ```
@@ -46,6 +47,12 @@ paths ending in `/responses`; Codex must use a provider configured with
 transformed. These routes are independent of the provider domain and preserve
 the original scheme, authority, path, and query after transformation, so custom
 base URLs and localhost intermediaries work without config-file discovery.
+
+On macOS, `Claude.app` is matched case-insensitively and located in
+`~/Applications` or `/Applications`. pxpipe starts its bundle executable with a
+process-scoped `ANTHROPIC_UNIX_SOCKET`, avoiding CA injection into Claude
+Desktop. Fully quit an existing Claude process before launching it so the new
+process inherits the socket environment.
 
 Any other executable uses a protocol-neutral profile that transforms paths
 ending in `/messages`, `/chat/completions`, or `/responses`:

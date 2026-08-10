@@ -20,13 +20,20 @@ const (
 )
 
 type profile struct {
-	kind    profileKind
-	command string
-	args    []string
+	kind          profileKind
+	command       string
+	args          []string
+	claudeDesktop bool
 }
 
 func claudeProfile(command string, args []string) profile {
 	return newProfile(profileClaude, command, args)
+}
+
+func claudeDesktopProfile(command string, args []string) profile {
+	p := claudeProfile(command, args)
+	p.claudeDesktop = true
+	return p
 }
 
 func openCodeProfile(command string, args []string) profile {
@@ -97,9 +104,9 @@ func (p profile) handlerWithOptions(transport http.RoundTripper, transformPath s
 	})
 }
 
-func (p profile) unixHandler(transport http.RoundTripper) http.Handler {
+func (p profile) unixHandler(transport http.RoundTripper, upstreamScheme string) http.Handler {
 	return pxpipe.NewHandler(pxpipe.HandlerOptions{
-		AnthropicUpstream: &url.URL{Scheme: "http", Host: "api.anthropic.com"},
+		AnthropicUpstream: &url.URL{Scheme: upstreamScheme, Host: "api.anthropic.com"},
 		Transport:         transport,
 		ProtocolOf:        p.protocolOf,
 		UpstreamFor: func(r *http.Request, _ pxpipe.Protocol) *url.URL {
@@ -107,7 +114,7 @@ func (p profile) unixHandler(transport http.RoundTripper) http.Handler {
 			if host == "" {
 				host = "api.anthropic.com"
 			}
-			return &url.URL{Scheme: "http", Host: host}
+			return &url.URL{Scheme: upstreamScheme, Host: host}
 		},
 	})
 }

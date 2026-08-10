@@ -3,6 +3,8 @@ package app
 import (
 	"bytes"
 	"io"
+	"os"
+	"path/filepath"
 	"reflect"
 	"testing"
 )
@@ -65,6 +67,43 @@ func TestDirectExecutableEscapeAndCaseInsensitiveProfile(t *testing.T) {
 	}
 	if got.kind != profileCodex || got.command != "CODEX.EXE" || !reflect.DeepEqual(got.args, []string{"--flag"}) {
 		t.Fatalf("child = kind %v %q %#v", got.kind, got.command, got.args)
+	}
+}
+
+func TestClaudeDesktopNamesResolveCaseInsensitively(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	executable := filepath.Join(home, "Applications", "Claude.app", "Contents", "MacOS", "Claude")
+	if err := os.MkdirAll(filepath.Dir(executable), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(executable, nil, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	for _, name := range []string{"claude.app", "Claude.app", "CLAUDE.APP"} {
+		t.Run(name, func(t *testing.T) {
+			got := profileForExecutable(name, []string{"--flag"})
+			if !got.claudeDesktop || got.kind != profileClaude || got.command != executable || !reflect.DeepEqual(got.args, []string{"--flag"}) {
+				t.Fatalf("profile = desktop %t kind %v command %q args %#v", got.claudeDesktop, got.kind, got.command, got.args)
+			}
+		})
+	}
+}
+
+func TestClaudeDesktopBundleAndExecutablePaths(t *testing.T) {
+	application := filepath.Join(string(filepath.Separator), "Applications", "cLaUdE.ApP")
+	executable := filepath.Join(application, "Contents", "MacOS", "Claude")
+	for _, tt := range []struct {
+		command string
+		want    string
+	}{
+		{command: application, want: executable},
+		{command: executable, want: executable},
+	} {
+		got := profileForExecutable(tt.command, nil)
+		if !got.claudeDesktop || got.command != tt.want {
+			t.Errorf("profileForExecutable(%q) = desktop %t command %q", tt.command, got.claudeDesktop, got.command)
+		}
 	}
 }
 

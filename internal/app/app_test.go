@@ -184,6 +184,31 @@ func TestClaudeProfileRoutesUnixSocketOverride(t *testing.T) {
 	}
 }
 
+func TestClaudeDesktopProfileInjectsOnlyUnixSocket(t *testing.T) {
+	t.Setenv("PXPIPE_DESKTOP_APP_HELPER", "1")
+	t.Setenv("ANTHROPIC_UNIX_SOCKET", "/tmp/original-anthropic.sock")
+	t.Setenv("HTTPS_PROXY", "http://existing-proxy.example:8443")
+	t.Setenv("NODE_EXTRA_CA_CERTS", "/tmp/existing-ca.pem")
+	t.Setenv("NO_PROXY", "localhost")
+	var stdout bytes.Buffer
+	code, err := runProfile(
+		context.Background(),
+		claudeDesktopProfile(os.Args[0], []string{"-test.run=^TestClaudeDesktopAppHelper$"}),
+		nil, &stdout, io.Discard,
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if code != 17 {
+		t.Fatalf("helper exit code = %d", code)
+	}
+	if socketPath := strings.TrimSpace(stdout.String()); socketPath == "" {
+		t.Fatal("helper did not report Unix socket")
+	} else if _, err := os.Stat(socketPath); !os.IsNotExist(err) {
+		t.Fatalf("Unix socket was not removed: %v", err)
+	}
+}
+
 func TestProxyRequestHelper(t *testing.T) {
 	if os.Getenv("PXPIPE_PROXY_REQUEST_HELPER") != "1" {
 		return
@@ -263,5 +288,27 @@ func TestAppHelper(t *testing.T) {
 		os.Exit(94)
 	}
 	fmt.Println(proxyURL)
+	os.Exit(17)
+}
+
+func TestClaudeDesktopAppHelper(t *testing.T) {
+	if os.Getenv("PXPIPE_DESKTOP_APP_HELPER") != "1" {
+		return
+	}
+	socketPath := os.Getenv("ANTHROPIC_UNIX_SOCKET")
+	if socketPath == "" || socketPath == "/tmp/original-anthropic.sock" {
+		fmt.Fprintln(os.Stderr, "missing Claude Desktop Unix socket")
+		os.Exit(97)
+	}
+	if _, err := os.Stat(socketPath); err != nil {
+		fmt.Fprintln(os.Stderr, "Claude Desktop Unix socket is not listening")
+		os.Exit(98)
+	}
+	if os.Getenv("HTTPS_PROXY") != "http://existing-proxy.example:8443" ||
+		os.Getenv("NODE_EXTRA_CA_CERTS") != "/tmp/existing-ca.pem" || os.Getenv("NO_PROXY") != "localhost" {
+		fmt.Fprintln(os.Stderr, "Claude Desktop inherited environment changed")
+		os.Exit(99)
+	}
+	fmt.Println(socketPath)
 	os.Exit(17)
 }
