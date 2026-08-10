@@ -7,6 +7,7 @@ import (
 	"slices"
 	"strings"
 	"testing"
+	"unicode/utf16"
 
 	"github.com/evan-choi/pxpipe-go/render"
 )
@@ -23,6 +24,22 @@ func TestIsASCIIWordScan(t *testing.T) {
 			if isASCII(string(text)) {
 				t.Fatalf("isASCII accepted high byte at %d/%d", i, length)
 			}
+		}
+	}
+}
+
+func TestU16LenWordScan(t *testing.T) {
+	texts := []string{
+		"", strings.Repeat("a", 7), strings.Repeat("a", 8), strings.Repeat("a", 9),
+		strings.Repeat("a", 7) + "↵" + strings.Repeat("b", 9),
+		strings.Repeat("한글😀", 16), string([]byte{'a', 0xff, 'b'}),
+	}
+	for offset := range 17 {
+		texts = append(texts, strings.Repeat("a", offset)+"😀"+strings.Repeat("b", 16-offset))
+	}
+	for _, text := range texts {
+		if got, want := u16len(text), len(utf16.Encode([]rune(text))); got != want {
+			t.Fatalf("u16len(%q) = %d, want %d", text, got, want)
 		}
 	}
 }
