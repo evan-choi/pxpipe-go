@@ -13,6 +13,7 @@ import (
 )
 
 var pngSignature = []byte{0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a}
+var pngFilterNone [1]byte
 
 const maxCachedBufferBytes = 8 << 20
 
@@ -91,18 +92,24 @@ func (e *pngEncoder) compress(pixels []byte, width, height, bytesPerPixel int, f
 	e.compressed.WriteString("\x78\x9c")
 	e.zw.Reset(&e.compressed)
 	e.checksum.Reset()
-	if cap(e.filtered) < rowLen+1 {
-		e.filtered = make([]byte, rowLen+1)
+	if filter == 0 {
+		for y := 0; y < height; y++ {
+			row := pixels[y*rowLen : (y+1)*rowLen]
+			_, _ = e.zw.Write(pngFilterNone[:])
+			_, _ = e.zw.Write(row)
+			_, _ = e.checksum.Write(pngFilterNone[:])
+			_, _ = e.checksum.Write(row)
+		}
 	} else {
-		e.filtered = e.filtered[:rowLen+1]
-	}
-	filtered := e.filtered
-	for y := 0; y < height; y++ {
-		row := pixels[y*rowLen : (y+1)*rowLen]
-		filtered[0] = filter
-		if filter == 0 {
-			copy(filtered[1:], row)
+		if cap(e.filtered) < rowLen+1 {
+			e.filtered = make([]byte, rowLen+1)
 		} else {
+			e.filtered = e.filtered[:rowLen+1]
+		}
+		filtered := e.filtered
+		for y := 0; y < height; y++ {
+			row := pixels[y*rowLen : (y+1)*rowLen]
+			filtered[0] = filter
 			first := min(bytesPerPixel, rowLen)
 			if y == 0 {
 				copy(filtered[1:first+1], row[:first])
@@ -118,9 +125,9 @@ func (e *pngEncoder) compress(pixels []byte, width, height, bytesPerPixel int, f
 					filtered[x+1] = row[x] - byte((uint16(row[x-bytesPerPixel])+uint16(above[x]))>>1)
 				}
 			}
+			_, _ = e.zw.Write(filtered)
+			_, _ = e.checksum.Write(filtered)
 		}
-		_, _ = e.zw.Write(filtered)
-		_, _ = e.checksum.Write(filtered)
 	}
 	_ = e.zw.Close()
 	var checksum [4]byte
