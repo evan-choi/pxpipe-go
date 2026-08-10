@@ -180,6 +180,56 @@ func TestHandlerAppliesProviderCredentials(t *testing.T) {
 	}
 }
 
+func TestOpenAIRouteCredentialPolicy(t *testing.T) {
+	const jwt = "eyJhbGciOiJub25lIn0.eyJzdWIiOiJ0ZXN0In0.c2ln"
+	classifications := []struct {
+		headers http.Header
+		want    inboundCredential
+	}{
+		{http.Header{}, inboundCredentialNone},
+		{http.Header{"X-Api-Key": {"sk-ant-api03-example"}}, inboundCredentialAnthropicKey},
+		{http.Header{"Authorization": {"Bearer sk-ant-oat01-example"}}, inboundCredentialAnthropicBearer},
+		{http.Header{"Authorization": {"Bearer " + jwt}}, inboundCredentialOAuthJWT},
+		{http.Header{"Authorization": {"Bearer sk-proj-example"}}, inboundCredentialAPIKeyBearer},
+		{http.Header{"Authorization": {"Bearer opaque-token"}}, inboundCredentialOpaqueBearer},
+	}
+	for _, tc := range classifications {
+		if got := classifyInboundCredential(tc.headers); got != tc.want {
+			t.Errorf("classifyInboundCredential(%v) = %v, want %v", tc.headers, got, tc.want)
+		}
+	}
+
+	seen := make(chan routeObservation, 1)
+	openAI, openAIURL := routeUpstream(t, "openai", seen)
+	defer openAI.Close()
+	tests := []struct {
+		name, key, authorization, apiKey, wantAuthorization string
+	}{
+		{name: "preserve OAuth", key: "host-key", authorization: "Bearer " + jwt, wantAuthorization: "Bearer " + jwt},
+		{name: "drop Anthropic bearer", authorization: "Bearer sk-ant-oat01-example"},
+		{name: "replace Anthropic bearer", key: "host-key", authorization: "Bearer sk-ant-oat01-example", wantAuthorization: "Bearer host-key"},
+		{name: "forward OpenAI key", authorization: "Bearer sk-proj-example", wantAuthorization: "Bearer sk-proj-example"},
+		{name: "drop Anthropic x-api-key", apiKey: "sk-ant-api03-example"},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			proxy := httptest.NewServer(NewHandler(HandlerOptions{OpenAIUpstream: openAIURL, OpenAIAPIKey: tc.key}))
+			defer proxy.Close()
+			headers := make(http.Header)
+			if tc.authorization != "" {
+				headers.Set("Authorization", tc.authorization)
+			}
+			if tc.apiKey != "" {
+				headers.Set("X-Api-Key", tc.apiKey)
+			}
+			got := requestRoute(t, proxy.Client(), proxy.URL+"/v1/responses", headers, seen)
+			if got.header.Get("Authorization") != tc.wantAuthorization || got.header.Get("X-Api-Key") != "" {
+				t.Fatalf("outbound credentials = authorization %q, x-api-key %q", got.header.Get("Authorization"), got.header.Get("X-Api-Key"))
+			}
+		})
+	}
+}
+
 func TestHandlerRewritesCustomProtocolPath(t *testing.T) {
 	seen := make(chan routeObservation, 1)
 	anthropic, anthropicURL := routeUpstream(t, "anthropic", seen)
