@@ -224,10 +224,11 @@ func runClaudeDesktopProfile(ctx context.Context, p profile, stdin io.Reader, st
 		upstream = parsed
 	}
 
-	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	listener, socketPath, removeSocket, err := newUnixSocketListener()
 	if err != nil {
-		return 1, fmt.Errorf("listen for Claude Desktop proxy: %w", err)
+		return 1, err
 	}
+	defer removeSocket()
 
 	transport := http.DefaultTransport.(*http.Transport).Clone()
 	defer transport.CloseIdleConnections()
@@ -237,7 +238,6 @@ func runClaudeDesktopProfile(ctx context.Context, p profile, stdin io.Reader, st
 	}
 	serverErrors := make(chan error, 1)
 	go func() { serverErrors <- serve(server, listener) }()
-	baseURL := "http://" + listener.Addr().String()
 
 	childDone := make(chan struct {
 		code int
@@ -249,8 +249,8 @@ func runClaudeDesktopProfile(ctx context.Context, p profile, stdin io.Reader, st
 		code, runErr := runner.Run(childContext, runner.Options{
 			Command: p.command, Args: p.args,
 			Env: runner.Environment(os.Environ(), map[string]string{
-				"ANTHROPIC_BASE_URL": baseURL,
-			}, []string{"ANTHROPIC_UNIX_SOCKET"}),
+				"ANTHROPIC_UNIX_SOCKET": socketPath,
+			}, nil),
 			Stdin: stdin, Stdout: stdout, Stderr: stderr,
 		})
 		childDone <- struct {
