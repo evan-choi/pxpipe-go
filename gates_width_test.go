@@ -15,3 +15,9 @@ func TestDenseGateGeometryPricesCapacityAtRenderedWidth(t *testing.T) {
 		}
 	}
 }
+
+func TestEstimateImageCountFromMetrics(t *testing.T) {
+	if got := estimateImageCountFromMetrics(201, 9, 10, 100, 4); got != 3 {
+		t.Fatalf("estimateImageCountFromMetrics() = %d, want 3", got)
+	}
+}

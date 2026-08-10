@@ -702,8 +702,9 @@ func evalOpenAIGate(model, renderedText string, cols int, charsPerToken float64,
 	maxLines := canvasRows
 	maxCharsPerImage := minInt(render.ReadableCharsPerImage, maxInt(1, cols)*maxLines)
 	linesPerImage := minInt(maxLines, maxInt(1, maxCharsPerImage/maxInt(1, cols)))
-	estImages := estimateImageCount(renderedText, cols, maxCharsPerImage, maxLines)
 	visualRows := countVisualRows(renderedText, cols)
+	renderedChars := u16len(renderedText)
+	estImages := estimateImageCountFromMetrics(renderedChars, visualRows, cols, maxCharsPerImage, maxLines)
 	var lastPageLines int
 	if estImages <= 1 {
 		lastPageLines = minInt(linesPerImage, maxInt(1, visualRows))
@@ -724,11 +725,11 @@ func evalOpenAIGate(model, renderedText string, cols int, charsPerToken float64,
 	case profile.MinCompressTokens != nil || charsPerToken == 4:
 		tok := gptTextTokens(renderedText)
 		if tok == 0 {
-			tok = int(math.Ceil(float64(u16len(renderedText)) / charsPerToken))
+			tok = int(math.Ceil(float64(renderedChars) / charsPerToken))
 		}
 		textTokens = float64(maxInt(1, tok))
 	default:
-		textTokens = float64(u16len(renderedText)) / math.Max(1e-6, charsPerToken)
+		textTokens = float64(renderedChars) / math.Max(1e-6, charsPerToken)
 	}
 	return openAIGateResult{ImageTokens: imageTokens, TextTokens: textTokens, Profitable: imageTokens < textTokens}
 }
