@@ -115,6 +115,14 @@ func TestTotalTokensIsDynamic(t *testing.T) {
 	}
 }
 
+func TestSplitStaticDynamicStaticOnly(t *testing.T) {
+	const text = "<rules>stable</rules>\nplain text"
+	got := splitStaticDynamic(text)
+	if got.staticText != text || got.dynamicText != "" || got.blockCount != 0 {
+		t.Fatalf("splitStaticDynamic() = static %q, dynamic %q, blocks %d", got.staticText, got.dynamicText, got.blockCount)
+	}
+}
+
 func TestHasStaticSystemTextMatchesSplit(t *testing.T) {
 	for _, text := range []string{
 		"",

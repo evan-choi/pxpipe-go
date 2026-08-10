@@ -620,19 +620,21 @@ func splitStaticDynamic(text string) staticDynamicSplit {
 		return out
 	}
 	var dynamicParts []string
-	var staticBuf strings.Builder
-	cursor := 0
-	for {
-		s, e := findDynamicBlock(text, cursor)
-		if s < 0 {
-			break
+	sb := text
+	start, end := findDynamicBlock(text, 0)
+	if start >= 0 {
+		var staticBuf strings.Builder
+		staticBuf.Grow(len(text) - (end - start))
+		cursor := 0
+		for start >= 0 {
+			staticBuf.WriteString(text[cursor:start])
+			dynamicParts = append(dynamicParts, text[start:end])
+			cursor = end
+			start, end = findDynamicBlock(text, cursor)
 		}
-		staticBuf.WriteString(text[cursor:s])
-		dynamicParts = append(dynamicParts, text[s:e])
-		cursor = e
+		staticBuf.WriteString(text[cursor:])
+		sb = staticBuf.String()
 	}
-	staticBuf.WriteString(text[cursor:])
-	sb := staticBuf.String()
 
 	known := map[string]struct{}{}
 	for _, t := range dynamicBlockTags {
