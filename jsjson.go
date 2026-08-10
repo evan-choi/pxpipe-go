@@ -24,9 +24,43 @@ const orderKey = "\x00keys"
 type pngDataURL []byte
 type pngBase64 []byte
 
+type objectKeyOrder struct {
+	small [4]string
+	extra []string
+	n     int
+}
+
+func (o *objectKeyOrder) append(key string) {
+	if o.extra != nil {
+		o.extra = append(o.extra, key)
+		return
+	}
+	if o.n < len(o.small) {
+		o.small[o.n] = key
+		o.n++
+		return
+	}
+	o.extra = make([]string, len(o.small), 8)
+	copy(o.extra, o.small[:])
+	o.extra = append(o.extra, key)
+}
+
+func (o *objectKeyOrder) slice() []string {
+	if o == nil {
+		return nil
+	}
+	if o.extra != nil {
+		return o.extra
+	}
+	return o.small[:o.n]
+}
+
 func objKeyOrder(m map[string]any) []string {
-	if ks, ok := m[orderKey].([]string); ok {
+	switch ks := m[orderKey].(type) {
+	case []string:
 		return ks
+	case *objectKeyOrder:
+		return ks.slice()
 	}
 	return nil
 }
@@ -58,7 +92,7 @@ var orderedJSONVisitorOptions = ast.VisitorOptions{OnlyNumber: true}
 type orderedJSONFrame struct {
 	object map[string]any
 	array  []any
-	keys   []string
+	order  *objectKeyOrder
 	key    string
 	isObj  bool
 }
@@ -82,7 +116,10 @@ func (d *orderedJSONDecoder) accept(v any) error {
 		f.object = make(map[string]any, 8)
 	}
 	if _, duplicate := f.object[f.key]; !duplicate {
-		f.keys = append(f.keys, f.key)
+		if f.order == nil {
+			f.order = &objectKeyOrder{}
+		}
+		f.order.append(f.key)
 	}
 	f.object[f.key] = v
 	f.key = ""
@@ -104,9 +141,6 @@ func (d *orderedJSONDecoder) OnObjectBegin(_ int) error {
 }
 func (d *orderedJSONDecoder) OnObjectKey(key string) error {
 	f := &d.stack[len(d.stack)-1]
-	if f.keys == nil {
-		f.keys = make([]string, 0, 4)
-	}
 	f.key = key
 	return nil
 }
@@ -117,7 +151,7 @@ func (d *orderedJSONDecoder) OnObjectEnd() error {
 	if f.object == nil {
 		f.object = make(map[string]any, 1)
 	}
-	setObjKeyOrder(f.object, f.keys)
+	f.object[orderKey] = f.order
 	return d.accept(f.object)
 }
 func (d *orderedJSONDecoder) OnArrayBegin(capacity int) error {

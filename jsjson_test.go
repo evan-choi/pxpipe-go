@@ -31,6 +31,15 @@ func TestParseOrderedJSONByteView(t *testing.T) {
 	if got, want := jsStringifyString(duplicate), `{"first":2,"nested":{"items":[true,null,"line\n"]}}`; got != want {
 		t.Fatalf("duplicate key parse = %s, want %s", got, want)
 	}
+
+	const fiveKeys = `{"a":1,"b":2,"c":3,"d":4,"e":5}`
+	large, err := parseOrderedJSON([]byte(fiveKeys))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := jsStringifyString(large); got != fiveKeys {
+		t.Fatalf("five-key parse = %s, want %s", got, fiveKeys)
+	}
 }
 
 func TestJSStringifyObjectOrderAndExtras(t *testing.T) {
