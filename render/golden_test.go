@@ -68,6 +68,35 @@ func TestReflowFastPath(t *testing.T) {
 	}
 }
 
+func TestRenderConcurrentBatches(t *testing.T) {
+	text := strings.Repeat("server load page ", 2_500)
+	want, err := RenderTextToImages(text, RenderOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(want.Pages) < 2 {
+		t.Fatalf("test input rendered %d pages, want multiple", len(want.Pages))
+	}
+	for range 16 {
+		t.Run("batch", func(t *testing.T) {
+			t.Parallel()
+			got, err := RenderTextToImages(text, RenderOptions{})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if len(got.Pages) != len(want.Pages) {
+				t.Fatalf("rendered %d pages, want %d", len(got.Pages), len(want.Pages))
+			}
+			for i := range want.Pages {
+				if got.Pages[i].Width != want.Pages[i].Width || got.Pages[i].Height != want.Pages[i].Height ||
+					!bytes.Equal(got.Pages[i].PNG, want.Pages[i].PNG) {
+					t.Fatalf("page %d differs", i)
+				}
+			}
+		})
+	}
+}
+
 func TestReflowForRender(t *testing.T) {
 	got, buf, ok := reflowForRender("a\nb")
 	if !ok || got != "a"+NLSentinel+"b" || buf == nil {
