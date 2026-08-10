@@ -954,6 +954,9 @@ func approxBlockBytes(blk map[string]any) int {
 	if png, ok := src["data"].(pngBase64); ok {
 		return len(png)
 	}
+	if image, ok := src["data"].(pngBase64Image); ok {
+		return len(image.image.PNG)
+	}
 	b64, _ := getStr(src, "data")
 	pad := 0
 	if strings.HasSuffix(b64, "==") {
@@ -984,7 +987,7 @@ func textToImageBlocks(text string, cols int, shrinkWidth bool, style render.Ren
 	}
 	out := &renderedBlocks{droppedCodepoints: map[rune]int{}}
 	for _, img := range imgs {
-		out.blocks = append(out.blocks, makeImageBlock(img.PNG))
+		out.blocks = append(out.blocks, makeRenderedImageBlock(img))
 		out.pngs = append(out.pngs, img.PNG)
 		out.dims = append(out.dims, imageDim{img.Width, img.Height})
 		out.droppedChars += img.DroppedChars
@@ -1062,6 +1065,11 @@ func historyImageSha8(messages []any) string {
 								_, _ = h.Write(scratch[:encoded])
 								data = data[n:]
 							}
+						}
+					case pngBase64Image:
+						if len(data.image.PNG) > 0 {
+							hasData = true
+							_ = data.image.WritePNGBase64(h)
 						}
 					}
 				}
@@ -1701,7 +1709,9 @@ func runHistoryCollapse(req map[string]any, info *TransformInfo, o *resolvedOpti
 		info.ImageCount += histInfo.collapsedImages
 		info.ImageBytes += histInfo.collapsedImageBytes
 		info.ImagePixels += histInfo.collapsedImagePixels
-		info.ImagePNGs = append(info.ImagePNGs, histInfo.collapsedPngs...)
+		for _, image := range histInfo.collapsedRendered {
+			info.ImagePNGs = append(info.ImagePNGs, image.PNG)
+		}
 		info.ImageDims = append(info.ImageDims, histInfo.collapsedImageDims...)
 		info.DroppedChars += histInfo.droppedChars
 		for cp, n := range histInfo.droppedCodepoints {
@@ -1709,7 +1719,7 @@ func runHistoryCollapse(req map[string]any, info *TransformInfo, o *resolvedOpti
 		}
 		info.HistoryReason = "collapsed"
 		info.HistoryTextChars = histInfo.collapsedChars
-		info.HistoryImageSha = historyImageSha8(newMessages)
+		info.HistoryImageSha = historyImageShaOf(histInfo.collapsedRendered)
 		bumpBucket(info, "history", histInfo.collapsedChars)
 		if relocate && histInfo.hasCarryOver {
 			relocateAnchorToHistoryImage(newMessages, histInfo.carryOverImageOrdinal, true)
@@ -1754,7 +1764,7 @@ func finalizeEarly(req map[string]any, bodyBytes int, info *TransformInfo, o *re
 	info.OutgoingTextChars = countOutgoingTextChars(req)
 	finalizeWireTelemetry(req, info)
 	info.ImageBytesNearLimit = nearImageByteLimit(info, o.MaxImageBytes)
-	return jsStringifyCap(req, openAIJSONCapacity(bodyBytes, info.ImageBytes)), collapsed, nil
+	return jsStringifyCap(req, openAIJSONCapacity(bodyBytes, info.ImageBytes, info.CompressedChars+info.CollapsedChars)), collapsed, nil
 }
 
 const imageInstructionHeaderBase = "=================== SESSION CONFIGURATION PAGES ===================\n" +
@@ -1967,7 +1977,8 @@ func transformParsed(req map[string]any, body []byte, o *resolvedOptions, info *
 	}
 	combinedRaw := strings.Join(combinedParts, "\n\n")
 	combined := maybeReflow(compactSlabWhitespace(combinedRaw), o.Reflow)
-	info.OrigChars = u16len(combinedRaw)
+	combinedRawChars := u16len(combinedRaw)
+	info.OrigChars = combinedRawChars
 	info.CompressedChars = 0
 	if combined != "" {
 		info.SystemSha8 = sha8(combined)
@@ -2023,10 +2034,7 @@ func transformParsed(req map[string]any, body []byte, o *resolvedOptions, info *
 	if slabGate != nil {
 		info.GateEval = &slabGateEval{Site: "slab", gateEval: *slabGate}
 	}
-	if !isCompressionProfitable(
-		combinedWithHeader, slabCols, 0, slabCpt, o.PriorWarmTokens, o.PriorWarmImageTokens,
-		false, render.ReadableCharsPerImage, denseGeo,
-	) {
+	if slabGate == nil || !slabGate.Profitable {
 		info.Reason = "not_profitable (slab=" + strconv.Itoa(u16len(combined)) + " chars)"
 		bumpPassthrough(info, "not_profitable")
 		finalBody, collapsed, err := finalizeEarly(req, len(body), info, o, droppedCodepoints, pins)
@@ -2082,15 +2090,15 @@ func transformParsed(req map[string]any, body []byte, o *resolvedOptions, info *
 		for cp, n := range img.DroppedCodepoints {
 			droppedCodepoints[cp] += n
 		}
-		block := makeImageBlock(img.PNG)
+		block := makeRenderedImageBlock(img)
 		if i == len(images)-1 && hasSystemStaticCC {
 			block["cache_control"] = demoteRelocatedCacheControl(systemStaticCC)
 		}
 		imageBlocks = append(imageBlocks, block)
 	}
 	info.ImageCount = len(imageBlocks)
-	info.CompressedChars += u16len(combinedRaw)
-	bumpBucket(info, "static_slab", u16len(combinedRaw))
+	info.CompressedChars += combinedRawChars
+	bumpBucket(info, "static_slab", combinedRawChars)
 	if len(images) > 0 {
 		info.FirstImagePNG = images[0].PNG
 		info.FirstImageWidth = images[0].Width
@@ -2221,7 +2229,7 @@ func transformParsed(req map[string]any, body []byte, o *resolvedOptions, info *
 	info.OutgoingTextChars = countOutgoingTextChars(req)
 	finalizeWireTelemetry(req, info)
 	info.ImageBytesNearLimit = nearImageByteLimit(info, o.MaxImageBytes)
-	return jsStringifyCap(req, openAIJSONCapacity(len(body), info.ImageBytes)), nil
+	return jsStringifyCap(req, openAIJSONCapacity(len(body), info.ImageBytes, info.CompressedChars+info.CollapsedChars)), nil
 }
 
 func compressToolResults(req map[string]any, o *resolvedOptions, info *TransformInfo, denseGeo gateGeometry, droppedCodepoints map[rune]int) error {

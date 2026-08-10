@@ -24,6 +24,7 @@ const orderKey = "\x00keys"
 
 type pngDataURL struct{ image *render.RenderedImage }
 type pngBase64 []byte
+type pngBase64Image struct{ image *render.RenderedImage }
 
 type objectKeyOrder struct {
 	small [4]string
@@ -206,6 +207,10 @@ func appendJSValue(b []byte, v any) []byte {
 	case pngBase64:
 		b = append(b, '"')
 		b = base64.StdEncoding.AppendEncode(b, tv)
+		return append(b, '"')
+	case pngBase64Image:
+		b = append(b, '"')
+		b = tv.image.AppendPNGBase64Deferred(b)
 		return append(b, '"')
 	case json.Number:
 		if tv == "" {

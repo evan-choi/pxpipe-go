@@ -27,4 +27,9 @@ func TestMeasureVisualRows(t *testing.T) {
 	if rows != 4 || chars != 7 {
 		t.Fatalf("measureVisualRows() = (%d, %d), want (4, 7)", rows, chars)
 	}
+	for _, text := range []string{"", "ascii\ntext", "한글\n😀", string([]byte{'a', 0xff, 'b'})} {
+		if _, chars := measureVisualRows(text, 80); chars != u16len(text) {
+			t.Fatalf("measureVisualRows(%q) chars = %d, want %d", text, chars, u16len(text))
+		}
+	}
 }
