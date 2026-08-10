@@ -81,8 +81,51 @@ type RenderStyle struct {
 
 var DenseRenderStyle = RenderStyle{AA: true}
 
-// Keep concurrent pages within the retained encoder and pixel-buffer budget.
-var pageRenderSlots = make(chan struct{}, runtime.GOMAXPROCS(0))
+var (
+	pageRenderOnce sync.Once
+	pageRenderJobs chan pageRenderJob
+)
+
+type pageRenderJob struct {
+	batch *pageRenderBatch
+	index int
+}
+
+type pageRenderBatch struct {
+	pages         [][]string
+	pageSlotLines [][]string
+	images        []*RenderedImage
+	errs          []error
+	cols          int
+	style         RenderStyle
+	wg            sync.WaitGroup
+}
+
+func pageRenderQueue() chan pageRenderJob {
+	pageRenderOnce.Do(func() {
+		workers := runtime.GOMAXPROCS(0)
+		pageRenderJobs = make(chan pageRenderJob, workers)
+		for range workers {
+			go func() {
+				for job := range pageRenderJobs {
+					job.batch.render(job.index)
+				}
+			}()
+		}
+	})
+	return pageRenderJobs
+}
+
+func (b *pageRenderBatch) render(i int) {
+	var slots []string
+	if b.pageSlotLines != nil {
+		slots = b.pageSlotLines[i]
+	}
+	b.images[i], b.errs[i] = renderWrappedLinesToPNG(
+		b.pages[i], slots, wrappedLinesRuneCount(b.pages[i]), b.cols, b.style,
+	)
+	b.wg.Done()
+}
 
 type RenderedImage struct {
 	PNG               []byte
@@ -1280,11 +1323,9 @@ func renderTextToPngsWithCharLimit(text string, cols, maxCharsPerImage int, styl
 		if pageSlotLines != nil {
 			slots = pageSlotLines[i]
 		}
-		pageRenderSlots <- struct{}{}
-		defer func() { <-pageRenderSlots }()
 		return renderWrappedLinesToPNG(pages[i], slots, wrappedLinesRuneCount(pages[i]), cols, style)
 	}
-	workers := min(len(pages), runtime.GOMAXPROCS(0), cap(pageRenderSlots))
+	workers := min(len(pages), runtime.GOMAXPROCS(0))
 	if workers == 1 {
 		for i := range pages {
 			var err error
@@ -1296,19 +1337,21 @@ func renderTextToPngsWithCharLimit(text string, cols, maxCharsPerImage int, styl
 		return images, nil
 	}
 
-	errs := make([]error, len(pages))
-	var wg sync.WaitGroup
-	wg.Add(workers)
-	for worker := 0; worker < workers; worker++ {
-		go func(start int) {
-			defer wg.Done()
-			for i := start; i < len(pages); i += workers {
-				images[i], errs[i] = renderPage(i)
-			}
-		}(worker)
+	batch := pageRenderBatch{
+		pages:         pages,
+		pageSlotLines: pageSlotLines,
+		images:        images,
+		errs:          make([]error, len(pages)),
+		cols:          cols,
+		style:         style,
 	}
-	wg.Wait()
-	for _, err := range errs {
+	batch.wg.Add(len(pages))
+	jobs := pageRenderQueue()
+	for i := range pages {
+		jobs <- pageRenderJob{&batch, i}
+	}
+	batch.wg.Wait()
+	for _, err := range batch.errs {
 		if err != nil {
 			return nil, err
 		}
