@@ -34,73 +34,131 @@ var schemaVerbatimKeys = map[string]struct{}{
 const schemaFormatMaxLen = 32
 
 func stripSchemaDescriptions(node any, depth int) any {
+	stripped, _ := stripSchemaDescriptionsChanged(node, depth)
+	return stripped
+}
+
+func stripSchemaArray(values []any, depth int) ([]any, bool) {
+	out := values
+	changed := false
+	for i, value := range values {
+		stripped, childChanged := stripSchemaDescriptionsChanged(value, depth)
+		if !childChanged {
+			continue
+		}
+		if !changed {
+			out = append([]any(nil), values...)
+			changed = true
+		}
+		out[i] = stripped
+	}
+	return out, changed
+}
+
+func stripSchemaMapValues(values map[string]any, depth int) (map[string]any, bool) {
+	out := values
+	changed := false
+	for key, value := range values {
+		stripped, childChanged := stripSchemaDescriptionsChanged(value, depth)
+		if !childChanged {
+			continue
+		}
+		if !changed {
+			out = cloneMap(values)
+			changed = true
+		}
+		out[key] = stripped
+	}
+	return out, changed
+}
+
+func stripSchemaDescriptionsChanged(node any, depth int) (any, bool) {
 	if depth > schemaStripMaxDepth {
-		return node
+		return node, false
 	}
 	if _, isArr := node.([]any); isArr {
-		return node
+		return node, false
 	}
 	obj, ok := asMap(node)
 	if !ok {
-		return node
+		return node, false
 	}
-	out := make(map[string]any, len(obj))
+	var out map[string]any
 	for k, v := range obj {
 		if _, strip := schemaStripKeys[k]; strip {
+			if out == nil {
+				out = cloneMap(obj)
+			}
+			delete(out, k)
 			continue
 		}
 		if k == "format" {
 			if s, isStr := v.(string); isStr && u16len(s) > schemaFormatMaxLen {
+				if out == nil {
+					out = cloneMap(obj)
+				}
+				delete(out, k)
 				continue
 			}
 		}
 		if _, verbatim := schemaVerbatimKeys[k]; verbatim {
-			out[k] = v
 			continue
 		}
 		if _, named := schemaNamedSubschemaKeys[k]; named {
 			if vm, isMap := asMap(v); isMap {
-				nested := make(map[string]any, len(vm))
-				for pk, pv := range vm {
-					nested[pk] = stripSchemaDescriptions(pv, depth+1)
+				if nested, childChanged := stripSchemaMapValues(vm, depth+1); childChanged {
+					if out == nil {
+						out = cloneMap(obj)
+					}
+					out[k] = nested
 				}
-				out[k] = nested
 				continue
 			}
 		}
 		if _, comp := schemaCompositionKeys[k]; comp {
 			if va, isArr := asArr(v); isArr {
-				mapped := make([]any, len(va))
-				for i, sub := range va {
-					mapped[i] = stripSchemaDescriptions(sub, depth+1)
+				if mapped, childChanged := stripSchemaArray(va, depth+1); childChanged {
+					if out == nil {
+						out = cloneMap(obj)
+					}
+					out[k] = mapped
 				}
-				out[k] = mapped
 				continue
 			}
 		}
 		if _, single := schemaSingleSubschemaKeys[k]; single {
 			switch tv := v.(type) {
 			case bool:
-				out[k] = tv
 			case []any:
-				mapped := make([]any, len(tv))
-				for i, sub := range tv {
-					mapped[i] = stripSchemaDescriptions(sub, depth+1)
+				if mapped, childChanged := stripSchemaArray(tv, depth+1); childChanged {
+					if out == nil {
+						out = cloneMap(obj)
+					}
+					out[k] = mapped
 				}
-				out[k] = mapped
 			default:
-				out[k] = stripSchemaDescriptions(v, depth+1)
+				if stripped, childChanged := stripSchemaDescriptionsChanged(v, depth+1); childChanged {
+					if out == nil {
+						out = cloneMap(obj)
+					}
+					out[k] = stripped
+				}
 			}
 			continue
 		}
-		switch v.(type) {
-		case map[string]any, []any:
-			out[k] = stripSchemaDescriptions(v, depth+1)
-		default:
-			out[k] = v
+		if _, isMap := v.(map[string]any); isMap {
+			if stripped, childChanged := stripSchemaDescriptionsChanged(v, depth+1); childChanged {
+				if out == nil {
+					out = cloneMap(obj)
+				}
+				out[k] = stripped
+			}
 		}
 	}
-	return out
+	if out == nil {
+		return obj, false
+	}
+	return out, true
 }
 
 var schemaStructuralKeys = []string{
