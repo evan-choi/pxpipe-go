@@ -99,7 +99,7 @@ from `pxpipe@c5fc2a8` with Bun:
 
 ```bash
 cd pxpipe
-bun install --frozen-lockfile --no-save
+pnpm install --frozen-lockfile
 bun run ../tools/gen-fixtures.ts
 bun run ../tools/gen-fixtures-openai.ts
 bun run ../tools/dump-gpt-profiles.ts > ../testdata/openai/profiles.json
