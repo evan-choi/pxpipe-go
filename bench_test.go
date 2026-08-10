@@ -24,6 +24,7 @@ var benchmarkTransformResult *TransformResult
 var benchmarkResponsesRounds []responsesCompletedRound
 var benchmarkResponsesText string
 var benchmarkResponsesState responsesPairState
+var benchmarkOrderedRequest map[string]any
 
 func BenchmarkGptEnvProfilesStableHit(b *testing.B) {
 	b.Setenv("PXPIPE_GPT_PROFILES", `{"gpt-5.4":{"stripCols":120}}`)
@@ -329,6 +330,22 @@ func BenchmarkTransformOpenAIResponses(b *testing.B) {
 	}
 	b.ReportMetric(float64(len(out)), "output-B")
 	b.ReportMetric(float64(info.ImageBytes), "image-B")
+}
+
+func BenchmarkParseOrderedResponses(b *testing.B) {
+	input, err := os.ReadFile(filepath.Join("testdata", "openai", "responses-codex-pairs", "input.json"))
+	if err != nil {
+		b.Fatal(err)
+	}
+	b.SetBytes(int64(len(input)))
+	b.ReportAllocs()
+	b.ResetTimer()
+	for range b.N {
+		benchmarkOrderedRequest, err = parseOrderedJSON(input)
+		if err != nil {
+			b.Fatal(err)
+		}
+	}
 }
 
 func BenchmarkClassifyResponsesPairs(b *testing.B) {

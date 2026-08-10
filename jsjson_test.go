@@ -23,6 +23,14 @@ func TestParseOrderedJSONByteView(t *testing.T) {
 	if _, err := parseOrderedJSON(nil); err == nil {
 		t.Fatal("empty body parsed successfully")
 	}
+
+	duplicate, err := parseOrderedJSON([]byte(`{"first":1,"nested":{"items":[true,null,"line\n"]},"first":2}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got, want := jsStringifyString(duplicate), `{"first":2,"nested":{"items":[true,null,"line\n"]}}`; got != want {
+		t.Fatalf("duplicate key parse = %s, want %s", got, want)
+	}
 }
 
 func TestJSStringifyObjectOrderAndExtras(t *testing.T) {
