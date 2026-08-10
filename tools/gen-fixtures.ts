@@ -5,7 +5,7 @@
  * inputs/outputs under testdata so the Go tests can diff against them.
  *
  * Run from the pxpipe submodule root:
- *   pnpm exec tsx ../tools/gen-fixtures.ts
+ *   bun run ../tools/gen-fixtures.ts
  *
  * PNG bytes are NOT expected to match byte-for-byte (different deflate
  * implementations); the Go tests decode both sides and compare pixels.

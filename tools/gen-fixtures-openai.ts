@@ -3,7 +3,7 @@
  * Responses paths.
  *
  * Run from the pxpipe submodule root:
- *   pnpm exec tsx ../tools/gen-fixtures-openai.ts
+ *   bun run ../tools/gen-fixtures-openai.ts
  *
  * PNG bytes are NOT expected to match byte-for-byte (different deflate
  * implementations); the Go tests decode both sides and compare pixels.

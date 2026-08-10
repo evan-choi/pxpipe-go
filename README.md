@@ -365,7 +365,7 @@ from the repository root on Apple Silicon macOS:
 
 ```bash
 for benchmark_run in 1 2 3 4 5; do
-  (cd pxpipe && pnpm exec tsx ../tools/bench-ts.ts)
+  (cd pxpipe && bun run ../tools/bench-ts.ts)
 done
 
 GOTOOLCHAIN=go1.26.5 go test -pgo=off -run '^$' \
@@ -381,7 +381,7 @@ measurement excludes the compiler and `go` command:
 ```bash
 for benchmark_run in 1 2 3 4 5; do
   (cd pxpipe &&
-    /usr/bin/time -l pnpm exec tsx ../tools/bench-ts.ts >/dev/null)
+    /usr/bin/time -l bun run ../tools/bench-ts.ts >/dev/null)
 done
 
 GOTOOLCHAIN=go1.26.5 go test -pgo=off \
@@ -419,10 +419,10 @@ Initialize the pinned TS reference implementation first:
 git submodule update --init --recursive
 cd pxpipe
 pnpm install --frozen-lockfile
-pnpm exec tsx ../tools/dump-atlas.ts
-pnpm exec tsx ../tools/gen-fixtures.ts
-pnpm exec tsx ../tools/gen-fixtures-openai.ts
-pnpm exec tsx ../tools/dump-gpt-profiles.ts > ../testdata/openai/profiles.json
+bun run ../tools/dump-atlas.ts
+bun run ../tools/gen-fixtures.ts
+bun run ../tools/gen-fixtures-openai.ts
+bun run ../tools/dump-gpt-profiles.ts > ../testdata/openai/profiles.json
 ```
 
 See [UPSTREAM.md](UPSTREAM.md) for the pinned reference revision and current
