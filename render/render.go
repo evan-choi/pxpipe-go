@@ -9,6 +9,7 @@ import (
 	"runtime"
 	"strings"
 	"sync"
+	"unicode/utf8"
 
 	"github.com/evan-choi/pxpipe-go/internal/atlas"
 )
@@ -673,6 +674,7 @@ func countTextPages(text string, cols, maxCharsPerImage int, style RenderStyle, 
 		stopAfter: stopAfter,
 	}
 	selected := atlasSet(style.Font)
+	defaultAtlas := atlas.Default().Bit
 	countLine := func(raw string) bool {
 		if len(raw) == 0 {
 			return counter.addLine(0)
@@ -680,6 +682,21 @@ func countTextPages(text string, cols, maxCharsPerImage int, style RenderStyle, 
 		lineCols := 0
 		lineChars := 0
 		for _, r := range raw {
+			if r >= utf8.RuneSelf && r != nlSentinelCp && defaultAtlas.Rank(r) < 0 && !isEscapeExempt(r) {
+				for range len(GlyphEscapeOpen) + len(strconvHex(r)) + len(GlyphEscapeClose) {
+					if lineCols+1 > cols {
+						if !counter.addLine(lineChars) {
+							return false
+						}
+						lineCols = 1
+						lineChars = 0
+					} else {
+						lineCols++
+					}
+					lineChars++
+				}
+				continue
+			}
 			w := cellsFor(r, markerScale, selected)
 			if lineCols+w > cols {
 				if !counter.addLine(lineChars) {
@@ -698,12 +715,12 @@ func countTextPages(text string, cols, maxCharsPerImage int, style RenderStyle, 
 		return counter.addLine(lineChars)
 	}
 	if reflowed {
-		if !countLine(EscapeMissingGlyphs(text)) {
+		if !countLine(text) {
 			return stopAfter + 1
 		}
 	} else {
 		for rawWithTabs := range strings.SplitSeq(MinifyForRender(text), "\n") {
-			if !countLine(EscapeMissingGlyphs(ExpandTabsInLine(rawWithTabs))) {
+			if !countLine(ExpandTabsInLine(rawWithTabs)) {
 				return stopAfter + 1
 			}
 		}
