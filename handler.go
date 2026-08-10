@@ -454,6 +454,12 @@ func (h *handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			r = r.WithContext(context.WithValue(r.Context(), sessionContextKey{}, res.Info.FirstUserSha8))
 		}
 		limitMessage, overLimit := applySerializedRequestLimit(res, model)
+		if res.Info != nil && res.Info.BillingLine != "" {
+			name, value, ok := strings.Cut(res.Info.BillingLine, ":")
+			if ok && strings.EqualFold(strings.TrimSpace(name), "x-anthropic-billing-header") {
+				r.Header.Set("X-Anthropic-Billing-Header", strings.TrimSpace(value))
+			}
+		}
 		if h.opts.OnResult != nil {
 			h.opts.OnResult(r, res)
 		}

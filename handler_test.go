@@ -3,6 +3,7 @@ package pxpipe
 import (
 	"bufio"
 	"bytes"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -70,6 +71,38 @@ func TestHandlerTransformsMessagesRoute(t *testing.T) {
 	}
 	if bytes.Equal(upstreamBody, input) {
 		t.Error("upstream body was not transformed")
+	}
+}
+
+func TestHandlerForwardsBillingLineAsHeader(t *testing.T) {
+	const line = "x-anthropic-billing-header: cc_version=2.1.222; cc_prev_req=req_123"
+	var gotHeader string
+	var gotBody []byte
+	up := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotHeader = r.Header.Get("X-Anthropic-Billing-Header")
+		gotBody, _ = io.ReadAll(r.Body)
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"ok":true}`))
+	}))
+	defer up.Close()
+	srv := httptest.NewServer(newTestHandler(t, up.URL, nil))
+	defer srv.Close()
+
+	body, _ := json.Marshal(map[string]any{
+		"model":    "claude-fable-5",
+		"system":   line + "\n" + strings.Repeat("stable system text ", 2_000),
+		"messages": []any{map[string]any{"role": "user", "content": "hi"}},
+	})
+	resp, err := http.Post(srv.URL+"/v1/messages", "application/json", bytes.NewReader(body))
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp.Body.Close()
+	if gotHeader != "cc_version=2.1.222; cc_prev_req=req_123" {
+		t.Fatalf("billing header = %q", gotHeader)
+	}
+	if bytes.Contains(gotBody, []byte(line)) {
+		t.Fatal("billing line remained in the upstream body")
 	}
 }
 

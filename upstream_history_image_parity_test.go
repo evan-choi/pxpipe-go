@@ -394,12 +394,12 @@ func TestUpstreamHistoryImageParity(t *testing.T) {
 		}
 	})
 
-	t.Run("billing header is relocated without changing slab bytes", func(t *testing.T) {
+	t.Run("billing line becomes a header without changing slab bytes", func(t *testing.T) {
 		const header = "x-anthropic-billing-header: cc_version=2.1.222; cc_prev_req=req_011Cdk3"
 		head := strings.Repeat("real prompt text. ", 1250)
 		tail := strings.Repeat("more ground truth. ", 1250)
 		clean := head + "\n" + tail
-		transformSystem := func(system string) ([]byte, *TransformInfo) {
+		transformSystem := func(system any) ([]byte, *TransformInfo) {
 			return parityTransform(t, map[string]any{
 				"model":    "claude-3-5-sonnet",
 				"messages": []any{map[string]any{"role": "user", "content": "hi"}},
@@ -410,10 +410,14 @@ func TestUpstreamHistoryImageParity(t *testing.T) {
 		if !baseline.Compressed || len(baseline.ImagePNGs) == 0 {
 			t.Fatalf("clean positive control did not render a slab: %+v", baseline)
 		}
-		for name, system := range map[string]string{
+		for name, system := range map[string]any{
 			"leading":  header + "\n" + clean,
 			"middle":   head + "\n" + header + "\n" + tail,
 			"trailing": clean + "\n" + header,
+			"remainder_block": []any{
+				map[string]any{"type": "text", "text": header},
+				map[string]any{"type": "text", "text": clean, "cache_control": map[string]any{"type": "ephemeral"}},
+			},
 		} {
 			t.Run(name, func(t *testing.T) {
 				out, info := transformSystem(system)
@@ -425,18 +429,8 @@ func TestUpstreamHistoryImageParity(t *testing.T) {
 						t.Fatalf("slab PNG page %d changed when billing header was %s", i, name)
 					}
 				}
-				decoded := parityDecode(t, out)
-				systemBlocks, _ := asArr(decoded["system"])
-				found := false
-				for _, block := range systemBlocks {
-					m, _ := asMap(block)
-					text, _ := getStr(m, "text")
-					if strings.Contains(text, header) {
-						found = true
-					}
-				}
-				if !found {
-					t.Fatal("billing header was not preserved in the system tail")
+				if info.BillingLine != header || bytes.Contains(out, []byte(header)) {
+					t.Fatalf("billing line = %q, still in body=%v", info.BillingLine, bytes.Contains(out, []byte(header)))
 				}
 			})
 		}
