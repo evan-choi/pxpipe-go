@@ -16,6 +16,7 @@ import (
 	"sync"
 	"time"
 
+	pxpipe "github.com/evan-choi/pxpipe-go"
 	"github.com/evan-choi/pxpipe-go/internal/mitm"
 	"github.com/evan-choi/pxpipe-go/internal/runner"
 )
@@ -130,8 +131,13 @@ func runProfile(ctx context.Context, p profile, stdin io.Reader, stdout, stderr 
 		return 1, err
 	}
 	transformURL := &url.URL{Scheme: "http", Host: transformListener.Addr().String(), Path: transformPath}
+	summary := newRunSummary()
 	transformServer := &http.Server{
-		Handler:           p.handler(transport, transformPath),
+		Handler: newObservedServeHandler(
+			summary,
+			p.handlerWithOptions(transport, transformPath, observedHandlerOptions(pxpipe.HandlerOptions{})),
+			transformPath,
+		),
 		ReadHeaderTimeout: 15 * time.Second,
 	}
 	transformErrors := make(chan error, 1)
@@ -161,6 +167,7 @@ func runProfile(ctx context.Context, p profile, stdin io.Reader, stdout, stderr 
 	}, 1)
 	childContext, cancelChild := context.WithCancel(ctx)
 	defer cancelChild()
+	defer summary.write(stderr)
 	go func() {
 		code, runErr := runner.Run(childContext, runner.Options{
 			Command: p.command, Args: p.args,
@@ -232,8 +239,13 @@ func runClaudeDesktopProfile(ctx context.Context, p profile, stdin io.Reader, st
 
 	transport := http.DefaultTransport.(*http.Transport).Clone()
 	defer transport.CloseIdleConnections()
+	summary := newRunSummary()
 	server := &http.Server{
-		Handler:           p.desktopHandler(transport, upstream),
+		Handler: newObservedServeHandler(
+			summary,
+			p.desktopHandlerWithOptions(transport, upstream, observedHandlerOptions(pxpipe.HandlerOptions{})),
+			"",
+		),
 		ReadHeaderTimeout: 15 * time.Second,
 	}
 	serverErrors := make(chan error, 1)
@@ -245,6 +257,7 @@ func runClaudeDesktopProfile(ctx context.Context, p profile, stdin io.Reader, st
 	}, 1)
 	childContext, cancelChild := context.WithCancel(ctx)
 	defer cancelChild()
+	defer summary.write(stderr)
 	go func() {
 		code, runErr := runner.Run(childContext, runner.Options{
 			Command: p.command, Args: p.args,

@@ -321,6 +321,32 @@ func TestRequestLogSanitizesCells(t *testing.T) {
 	}
 }
 
+func TestRunSummaryAggregatesAndMarksPartialMetrics(t *testing.T) {
+	cacheHits, asText, sent, saved, output := int64(30), int64(200), int64(120), int64(80), int64(5)
+	summary := newRunSummary()
+	summary.add(requestLogRow{
+		status: http.StatusOK, sentAs: "image",
+		cacheHits: &cacheHits, asText: &asText, sent: &sent, saved: &saved, output: &output,
+	})
+	summary.add(requestLogRow{status: http.StatusBadGateway, sentAs: "text"})
+	var outputBuffer bytes.Buffer
+	summary.write(&outputBuffer)
+	got := outputBuffer.String()
+	for _, want := range []string{
+		"pxpipe summary",
+		"requests 2, transformed 1",
+		"as text 200 (1/2 requests)",
+		"sent 120 (1/2 requests)",
+		"saved/lost 80 (1/2 requests) (40.0%)",
+		"output 5 (1/2 requests)",
+		"cache hits 30 (1/2 requests)",
+	} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("summary missing %q: %s", want, got)
+		}
+	}
+}
+
 func TestRequestTUIViewIncludesGuideAndMetrics(t *testing.T) {
 	cacheHits, asText, sent, saved := int64(1200), int64(4200), int64(2800), int64(1400)
 	model, _ := newRequestTUIModel(47821, testCertificatePath).Update(requestLogRowsMsg{sequence: 1, rows: []requestLogRow{{

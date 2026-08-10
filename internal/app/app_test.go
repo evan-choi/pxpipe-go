@@ -96,16 +96,22 @@ func TestProfilesRouteLocalOverridesByPath(t *testing.T) {
 			t.Setenv("PXPIPE_PROXY_REQUEST_PATH", tt.requestPath)
 			t.Setenv("PXPIPE_PROXY_REQUEST_FIXTURE", tt.fixturePath)
 
+			var stderr bytes.Buffer
 			code, err := runProfile(
 				context.Background(),
 				tt.profile(os.Args[0], []string{"-test.run=^TestProxyRequestHelper$"}),
-				nil, io.Discard, io.Discard,
+				nil, io.Discard, &stderr,
 			)
 			if err != nil {
 				t.Fatal(err)
 			}
 			if code != 0 {
 				t.Fatalf("helper exit code = %d", code)
+			}
+			for _, want := range []string{"pxpipe summary", "requests 1, transformed 1"} {
+				if !strings.Contains(stderr.String(), want) {
+					t.Fatalf("wrapper summary missing %q: %s", want, stderr.String())
+				}
 			}
 			select {
 			case body := <-upstreamBodies:
@@ -201,22 +207,29 @@ func TestClaudeDesktopProfileInjectsUnixSocket(t *testing.T) {
 		body, _ := io.ReadAll(r.Body)
 		upstreamRequests <- observation{body: body, path: r.URL.Path}
 		w.Header().Set("Content-Type", "application/json")
-		_, _ = w.Write([]byte(`{"ok":true}`))
+		_, _ = w.Write([]byte(`{"usage":{"input_tokens":100,"output_tokens":5,"cache_creation_input_tokens":20,"cache_read_input_tokens":30}}`))
 	}))
 	defer upstream.Close()
 	t.Setenv("ANTHROPIC_BASE_URL", upstream.URL)
 	t.Setenv("PXPIPE_DESKTOP_UPSTREAM", upstream.URL)
-	var stdout bytes.Buffer
+	var stdout, stderr bytes.Buffer
 	code, err := runProfile(
 		context.Background(),
 		claudeDesktopProfile(os.Args[0], []string{"-test.run=^TestClaudeDesktopAppHelper$"}),
-		nil, &stdout, io.Discard,
+		nil, &stdout, &stderr,
 	)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if code != 17 {
 		t.Fatalf("helper exit code = %d", code)
+	}
+	for _, want := range []string{
+		"pxpipe summary", "requests 1, transformed 1", "sent 128", "output 5", "cache hits 30",
+	} {
+		if !strings.Contains(stderr.String(), want) {
+			t.Fatalf("Claude Desktop summary missing %q: %s", want, stderr.String())
+		}
 	}
 	socketPath := strings.TrimSpace(stdout.String())
 	if socketPath == "" || socketPath == "/tmp/original-anthropic.sock" {
