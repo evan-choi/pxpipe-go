@@ -681,7 +681,43 @@ func countTextPages(text string, cols, maxCharsPerImage int, style RenderStyle, 
 		}
 		lineCols := 0
 		lineChars := 0
-		for _, r := range raw {
+		for i := 0; i < len(raw); {
+			if raw[i] < utf8.RuneSelf {
+				start := i
+				for i < len(raw) && raw[i] < utf8.RuneSelf {
+					i++
+				}
+				n := i - start
+				if lineCols >= cols {
+					if !counter.addLine(lineChars) {
+						return false
+					}
+					lineCols = 0
+					lineChars = 0
+				}
+				room := cols - lineCols
+				if n <= room {
+					lineCols += n
+					lineChars += n
+					continue
+				}
+				lineChars += room
+				n -= room
+				if !counter.addLine(lineChars) {
+					return false
+				}
+				for n > cols {
+					if !counter.addLine(cols) {
+						return false
+					}
+					n -= cols
+				}
+				lineCols = n
+				lineChars = n
+				continue
+			}
+			r, size := utf8.DecodeRuneInString(raw[i:])
+			i += size
 			if r >= utf8.RuneSelf && r != nlSentinelCp && defaultAtlas.Rank(r) < 0 && !isEscapeExempt(r) {
 				for range len(GlyphEscapeOpen) + len(strconvHex(r)) + len(GlyphEscapeClose) {
 					if lineCols+1 > cols {
