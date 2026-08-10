@@ -23,10 +23,9 @@ func benchmarkVariantScratch(b *testing.B, input []byte, anchor string) ([]byte,
 }
 
 func putBenchmarkSerial(dst []byte, n uint64) {
-	n %= 100_000_000
 	for i := len(dst) - 1; i >= 0; i-- {
-		dst[i] = byte('0' + n%10)
-		n /= 10
+		dst[i] = byte('a' + n%26)
+		n /= 26
 	}
 }
 
