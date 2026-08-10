@@ -9,6 +9,8 @@ import (
 	"testing"
 )
 
+var highCardinalityBenchmarkSerial atomic.Uint64
+
 func benchmarkVariantScratch(b *testing.B, input []byte, anchor string) ([]byte, int) {
 	b.Helper()
 	const replacement = "PVAR=00000000"
@@ -95,14 +97,13 @@ func BenchmarkTransformBigClaudeCodeHighCardinalityParallel(b *testing.B) {
 		b.Fatal(err)
 	}
 	opts := &TransformOptions{Model: "claude-fable-5"}
-	var serial atomic.Uint64
 	b.SetBytes(int64(len(input)))
 	b.ReportAllocs()
 	b.ResetTimer()
 	b.RunParallel(func(pb *testing.PB) {
 		scratch, marker := benchmarkVariantScratch(b, input, "You are Claude Code")
 		for pb.Next() {
-			putBenchmarkSerial(scratch[marker:marker+8], serial.Add(1))
+			putBenchmarkSerial(scratch[marker:marker+8], highCardinalityBenchmarkSerial.Add(1))
 			out, info := TransformRequest(scratch, opts)
 			if !info.Compressed {
 				b.Error("expected compression")
@@ -118,14 +119,13 @@ func BenchmarkTransformOpenAIChatHighCardinalityParallel(b *testing.B) {
 	if err != nil {
 		b.Fatal(err)
 	}
-	var serial atomic.Uint64
 	b.SetBytes(int64(len(input)))
 	b.ReportAllocs()
 	b.ResetTimer()
 	b.RunParallel(func(pb *testing.PB) {
 		scratch, marker := benchmarkVariantScratch(b, input, "Agent Operating Manual")
 		for pb.Next() {
-			putBenchmarkSerial(scratch[marker:marker+8], serial.Add(1))
+			putBenchmarkSerial(scratch[marker:marker+8], highCardinalityBenchmarkSerial.Add(1))
 			out, info := TransformOpenAIChatCompletions(scratch, nil)
 			if !info.Compressed {
 				b.Error("expected compression")
@@ -141,14 +141,13 @@ func BenchmarkTransformOpenAIResponsesHighCardinalityParallel(b *testing.B) {
 	if err != nil {
 		b.Fatal(err)
 	}
-	var serial atomic.Uint64
 	b.SetBytes(int64(len(input)))
 	b.ReportAllocs()
 	b.ResetTimer()
 	b.RunParallel(func(pb *testing.PB) {
 		scratch, marker := benchmarkVariantScratch(b, input, "Agent Operating Manual")
 		for pb.Next() {
-			putBenchmarkSerial(scratch[marker:marker+8], serial.Add(1))
+			putBenchmarkSerial(scratch[marker:marker+8], highCardinalityBenchmarkSerial.Add(1))
 			out, info := TransformOpenAIResponses(scratch, nil)
 			if !info.Compressed {
 				b.Error("expected compression")
