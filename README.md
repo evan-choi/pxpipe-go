@@ -325,12 +325,12 @@ Rendered pages are cached by exact render inputs. The cache retains up to
 64 MiB by default. Set `PXPIPE_RENDER_CACHE_BYTES` to another byte limit, or
 set it to `0` to disable the cache.
 
-![pxpipe versus pxpipe-go benchmark: pxpipe-go is 13.4 to 63.8 times faster across four workloads and uses 74.9% less peak RSS](docs/benchmark-improvements.png)
+![pxpipe versus pxpipe-go benchmark: pxpipe-go is 12.8 to 65.5 times faster across four workloads and uses 74.5% less peak RSS](docs/benchmark-improvements.png)
 
 Measured natively on an Apple M1 Pro running macOS 26.5.2, with Bun 1.3.14
 and Go 1.26.5. Go used the machine-default `GOMAXPROCS=10` and no PGO profile.
-The comparison uses `pxpipe@c5fc2a8` and `pxpipe-go@v0.4.7` (`446e2a4`,
-2026-08-11).
+The comparison uses `pxpipe@c5fc2a8` and `pxpipe-go@f231487`
+(2026-08-11).
 
 Values are medians of five runs. Each pxpipe run performs two warmups and
 three timed iterations; its table value is the median per-run mean. Each
@@ -339,18 +339,18 @@ CPU architecture, available cores, and request content.
 
 | benchmark | pxpipe time/op | pxpipe-go time/op | speedup |
 |---|---:|---:|---:|
-| TransformBigClaudeCode | 49.40 ms | 2.49 ms | 19.9× |
-| RenderDensePage | 12.40 ms | 0.93 ms | 13.4× |
-| TransformOpenAIChat | 51.10 ms | 0.80 ms | 63.8× |
-| TransformOpenAIResponses | 112.80 ms | 2.24 ms | 50.4× |
+| TransformBigClaudeCode | 48.30 ms | 2.47 ms | 19.5× |
+| RenderDensePage | 11.80 ms | 0.92 ms | 12.8× |
+| TransformOpenAIChat | 51.30 ms | 0.78 ms | 65.5× |
+| TransformOpenAIResponses | 113.20 ms | 2.23 ms | 50.7× |
 
 Peak RSS was measured over the full four-benchmark suite in a fresh process
 for each run:
 
 | implementation | median peak RSS | relative to pxpipe |
 |---|---:|---:|
-| pxpipe | 410.44 MiB | baseline |
-| pxpipe-go | 103.08 MiB | 74.9% lower |
+| pxpipe | 411.30 MiB | baseline |
+| pxpipe-go | 104.98 MiB | 74.5% lower |
 
 Go's `-benchmem` output reports the following allocation volume per operation:
 
