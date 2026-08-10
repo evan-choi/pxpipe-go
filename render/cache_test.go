@@ -2,6 +2,7 @@ package render
 
 import (
 	"bytes"
+	"crypto/sha256"
 	"encoding/base64"
 	"fmt"
 	"os"
@@ -61,6 +62,25 @@ func TestRenderedPageCacheReturnsIndependentMetadata(t *testing.T) {
 	}
 	if third[0].Width == 0 || third[0].DroppedCodepoints['A'] == 999 {
 		t.Fatal("caller mutation leaked into cache")
+	}
+}
+
+func TestPNGBase64SHA256CachesOnlyExactSequence(t *testing.T) {
+	cache := newRenderedPageCache(defaultRenderCacheBytes)
+	images := []*RenderedImage{{PNG: []byte("first")}, {PNG: []byte("second")}}
+	key := newRenderCacheKey("text", 64, 500, DenseRenderStyle, 96, nil, false)
+	first := cache.put(key, "text", nil, images)
+	second, ok := cache.get(key, "text", nil)
+	if !ok || first[0].sequence == nil || first[0].sequence != second[0].sequence {
+		t.Fatal("cached render clones do not share sequence state")
+	}
+	want := sha256.Sum256([]byte(base64.StdEncoding.EncodeToString(images[0].PNG) + base64.StdEncoding.EncodeToString(images[1].PNG)))
+	if got := PNGBase64SHA256(first); got != want || PNGBase64SHA256(second) != want {
+		t.Fatalf("sequence digest = %x, want %x", got, want)
+	}
+	reversedWant := sha256.Sum256([]byte(base64.StdEncoding.EncodeToString(images[1].PNG) + base64.StdEncoding.EncodeToString(images[0].PNG)))
+	if got := PNGBase64SHA256([]*RenderedImage{second[1], second[0]}); got != reversedWant {
+		t.Fatalf("reversed digest = %x, want %x", got, reversedWant)
 	}
 }
 

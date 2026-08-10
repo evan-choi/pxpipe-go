@@ -1,6 +1,7 @@
 package render
 
 import (
+	"crypto/sha256"
 	"encoding/base64"
 	"hash/maphash"
 	"io"
@@ -151,6 +152,12 @@ type renderedImageBase64 struct {
 	encoded []byte
 }
 
+type renderedImageSequence struct {
+	images int
+	once   sync.Once
+	sum    [sha256.Size]byte
+}
+
 // AppendPNGBase64 appends the image's base64 payload to dst. Cached render
 // clones share the encoding; uncached images encode directly into dst.
 func (image *RenderedImage) AppendPNGBase64(dst []byte) []byte {
@@ -181,6 +188,37 @@ func (image *RenderedImage) WritePNGBase64(dst io.Writer) error {
 		return err
 	}
 	return encoder.Close()
+}
+
+func pngBase64SHA256(images []*RenderedImage) (sum [sha256.Size]byte) {
+	h := sha256.New()
+	for _, image := range images {
+		_ = image.WritePNGBase64(h)
+	}
+	_ = h.Sum(sum[:0])
+	return sum
+}
+
+// PNGBase64SHA256 hashes the concatenated base64 payloads. Complete image
+// sequences returned by the render cache share the exact digest.
+func PNGBase64SHA256(images []*RenderedImage) [sha256.Size]byte {
+	if len(images) > 0 {
+		sequence := images[0].sequence
+		if sequence != nil && sequence.images == len(images) {
+			exact := true
+			for i, image := range images {
+				if image.sequence != sequence || image.sequenceIndex != i {
+					exact = false
+					break
+				}
+			}
+			if exact {
+				sequence.once.Do(func() { sequence.sum = pngBase64SHA256(images) })
+				return sequence.sum
+			}
+		}
+	}
+	return pngBase64SHA256(images)
 }
 
 func cloneRenderedImages(images []*RenderedImage) []*RenderedImage {
@@ -270,10 +308,13 @@ func (c *renderedPageCache) put(key renderCacheKey, text string, slotText *strin
 	storedKey := key
 	storedKey.style.font = strings.Clone(key.style.font)
 	storedKey.style.inkDilateAxis = strings.Clone(key.style.inkDilateAxis)
-	for _, image := range images {
+	sequence := &renderedImageSequence{images: len(images)}
+	for i, image := range images {
 		if image.base64 == nil {
 			image.base64 = &renderedImageBase64{}
 		}
+		image.sequence = sequence
+		image.sequenceIndex = i
 	}
 	entry := &renderedPageCacheEntry{
 		text:        strings.Clone(text),
