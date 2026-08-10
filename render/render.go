@@ -136,6 +136,8 @@ type RenderedImage struct {
 	DroppedChars      int
 	DroppedCodepoints map[rune]int
 	base64            *renderedImageBase64
+	sequence          *renderedImageSequence
+	sequenceIndex     int
 }
 
 var glyphPalette = [...][3]int{

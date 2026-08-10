@@ -1,7 +1,6 @@
 package pxpipe
 
 import (
-	"crypto/sha256"
 	"encoding/base64"
 	"encoding/hex"
 	"fmt"
@@ -840,11 +839,8 @@ func foldGptHistory(info *TransformInfo, model string, plan *gptCollapsePlan, to
 }
 
 func historyImageShaOf(images []*render.RenderedImage) string {
-	h := sha256.New()
-	for _, img := range images {
-		_ = img.WritePNGBase64(h)
-	}
-	return hex.EncodeToString(h.Sum(nil)[:4])
+	sum := render.PNGBase64SHA256(images)
+	return hex.EncodeToString(sum[:4])
 }
 
 func applyChatHistoryCollapse(req map[string]any, info *TransformInfo, o openaiResolvedOptions, profile *GptModelProfile, protectedPrefix int) (bool, error) {
