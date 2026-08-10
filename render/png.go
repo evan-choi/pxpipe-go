@@ -103,16 +103,20 @@ func (e *pngEncoder) compress(pixels []byte, width, height, bytesPerPixel int, f
 		if filter == 0 {
 			copy(filtered[1:], row)
 		} else {
-			for x, value := range row {
-				left, above := byte(0), byte(0)
-				if x >= bytesPerPixel {
-					left = row[x-bytesPerPixel]
+			first := min(bytesPerPixel, rowLen)
+			if y == 0 {
+				copy(filtered[1:first+1], row[:first])
+				for x := first; x < rowLen; x++ {
+					filtered[x+1] = row[x] - row[x-bytesPerPixel]/2
 				}
-				if y > 0 {
-					above = pixels[(y-1)*rowLen+x]
+			} else {
+				above := pixels[(y-1)*rowLen : y*rowLen]
+				for x := range first {
+					filtered[x+1] = row[x] - above[x]/2
 				}
-				residual := value - byte((uint16(left)+uint16(above))>>1)
-				filtered[x+1] = residual
+				for x := first; x < rowLen; x++ {
+					filtered[x+1] = row[x] - byte((uint16(row[x-bytesPerPixel])+uint16(above[x]))>>1)
+				}
 			}
 		}
 		_, _ = e.zw.Write(filtered)
