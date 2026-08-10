@@ -208,6 +208,7 @@ type TransformInfo struct {
 
 	PinChars               int                `json:"pinChars,omitempty"`
 	PinError               string             `json:"pinError,omitempty"`
+	BillingLine            string             `json:"billingLine,omitempty"`
 	StaticChars            int                `json:"staticChars"`
 	DynamicChars           int                `json:"dynamicChars"`
 	DynamicBlockCount      int                `json:"dynamicBlockCount"`
@@ -1813,6 +1814,31 @@ func transformParsed(req map[string]any, body []byte, o *resolvedOptions, info *
 	rawSysText, rawSysRemainder := extractSystemText(req["system"])
 	keptIdentity, sysRemainder := liftIdentityBlock(rawSysRemainder)
 	billingLine, sysBody := stripBillingLine(rawSysText)
+	if remainder, ok := asArr(sysRemainder); ok {
+		clean := make([]any, 0, len(remainder))
+		for _, bv := range remainder {
+			block, isMap := asMap(bv)
+			if !isMap || blockType(bv) != "text" {
+				clean = append(clean, bv)
+				continue
+			}
+			text, _ := getStr(block, "text")
+			kept, body := stripBillingLine(text)
+			if kept == "" {
+				clean = append(clean, bv)
+				continue
+			}
+			if billingLine == "" {
+				billingLine = kept
+			}
+			if strings.TrimSpace(body) != "" {
+				copy := cloneMap(block)
+				copy["text"] = body
+				clean = append(clean, copy)
+			}
+		}
+		sysRemainder = clean
+	}
 	envMarkdown, sysBodyNoEnv := stripMarkdownEnvSection(sysBody)
 	splitSystem := splitStaticDynamic(sysBodyNoEnv)
 	staticText := splitSystem.staticText
@@ -2061,9 +2087,6 @@ func transformParsed(req map[string]any, body []byte, o *resolvedOptions, info *
 	if preservedIdentity != "" {
 		sysTail = append(sysTail, textBlock(preservedIdentity))
 	}
-	if billingLine != "" {
-		sysTail = append(sysTail, textBlock(billingLine))
-	}
 	if dynamicText != "" {
 		sysTail = append(sysTail, textBlock(dynamicText))
 	}
@@ -2137,6 +2160,7 @@ func transformParsed(req map[string]any, body []byte, o *resolvedOptions, info *
 			return nil, err
 		}
 	}
+	info.BillingLine = billingLine
 
 	info.Compressed = true
 	if pfx, ok := cachePrefixDiagnostics(req); ok {
