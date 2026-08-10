@@ -334,8 +334,8 @@ func TestRunSummaryAggregatesAndMarksPartialMetrics(t *testing.T) {
 	got := outputBuffer.String()
 	for _, want := range []string{
 		"pxpipe summary",
-		"estimated without pxpipe 200 tokens",
-		"actual with pxpipe 120 tokens (-40.0%, 1/2 requests)",
+		"estimated : 200 tokens",
+		"actual    : 120 tokens (-40.0%)",
 	} {
 		if !strings.Contains(got, want) {
 			t.Fatalf("summary missing %q: %s", want, got)

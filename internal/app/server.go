@@ -322,10 +322,9 @@ func (m *summaryMetric) add(value *int64) {
 }
 
 type runSummary struct {
-	mu       sync.Mutex
-	requests int
-	asText   summaryMetric
-	sent     summaryMetric
+	mu     sync.Mutex
+	asText summaryMetric
+	sent   summaryMetric
 }
 
 func newRunSummary() *runSummary { return &runSummary{} }
@@ -333,7 +332,6 @@ func newRunSummary() *runSummary { return &runSummary{} }
 func (s *runSummary) add(row requestLogRow) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	s.requests++
 	if row.asText == nil || row.sent == nil {
 		return
 	}
@@ -349,14 +347,9 @@ func (s *runSummary) write(w io.Writer) {
 		fmt.Fprintln(w, "  token usage unavailable")
 		return
 	}
-	fmt.Fprintf(w, "  estimated without pxpipe %s tokens\n", formatInteger(s.asText.value))
+	fmt.Fprintf(w, "  estimated : %s tokens\n", formatInteger(s.asText.value))
 	change := 100 * float64(s.sent.value-s.asText.value) / float64(s.asText.value)
-	if s.asText.samples == s.requests {
-		fmt.Fprintf(w, "  actual with pxpipe %s tokens (%.1f%%)\n", formatInteger(s.sent.value), change)
-		return
-	}
-	fmt.Fprintf(w, "  actual with pxpipe %s tokens (%.1f%%, %d/%d requests)\n",
-		formatInteger(s.sent.value), change, s.asText.samples, s.requests)
+	fmt.Fprintf(w, "  actual    : %s tokens (%.1f%%)\n", formatInteger(s.sent.value), change)
 }
 
 type requestLog struct {
