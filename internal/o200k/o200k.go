@@ -9,19 +9,10 @@ import (
 	"crypto/sha256"
 	"encoding/binary"
 	"strings"
-	"sync"
 	"sync/atomic"
 	"unicode"
 	"unicode/utf8"
 	"unsafe"
-
-	"github.com/tiktoken-go/tokenizer"
-)
-
-var (
-	once sync.Once
-	enc  tokenizer.Codec
-	err  error
 )
 
 const (
@@ -145,13 +136,6 @@ func digitNormalizedKey(text string) [sha256.Size]byte {
 	return sha256.Sum256(normalized)
 }
 
-func encoding() (tokenizer.Codec, error) {
-	once.Do(func() {
-		enc, err = tokenizer.Get(tokenizer.O200kBase)
-	})
-	return enc, err
-}
-
 // CountTokens returns the o200k_base token count of text, treating special
 // tokens as plain text (mirrors gpt-tokenizer's countTokens). Returns 0 for
 // empty input or on encoder failure (mirrors the TS try/catch → 0).
@@ -198,11 +182,7 @@ func CountTokens(text string) int {
 			admitDigitKey = candidate.Swap(digitFingerprint) == digitFingerprint
 		}
 	}
-	e, err := encoding()
-	if err != nil {
-		return 0
-	}
-	n, err := e.Count(text)
+	n, err := countTokensUncached(text)
 	if err != nil {
 		return 0
 	}
