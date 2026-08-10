@@ -2033,10 +2033,7 @@ func transformParsed(req map[string]any, body []byte, o *resolvedOptions, info *
 	if slabGate != nil {
 		info.GateEval = &slabGateEval{Site: "slab", gateEval: *slabGate}
 	}
-	if !isCompressionProfitable(
-		combinedWithHeader, slabCols, 0, slabCpt, o.PriorWarmTokens, o.PriorWarmImageTokens,
-		false, render.ReadableCharsPerImage, denseGeo,
-	) {
+	if slabGate == nil || !slabGate.Profitable {
 		info.Reason = "not_profitable (slab=" + strconv.Itoa(u16len(combined)) + " chars)"
 		bumpPassthrough(info, "not_profitable")
 		finalBody, collapsed, err := finalizeEarly(req, len(body), info, o, droppedCodepoints, pins)
