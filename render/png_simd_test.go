@@ -27,40 +27,54 @@ func TestSIMDAdlerPNGMatchesZlib(t *testing.T) {
 			}
 			got := encodePNG(pixels, tc.width, tc.height, tc.bytesPerPixel, tc.colorType)
 
-			var raw, compressed bytes.Buffer
 			rowLen := tc.width * tc.bytesPerPixel
-			for y := 0; y < tc.height; y++ {
-				raw.WriteByte(3)
-				row := pixels[y*rowLen : (y+1)*rowLen]
-				for x, value := range row {
-					left, above := byte(0), byte(0)
-					if x >= tc.bytesPerPixel {
-						left = row[x-tc.bytesPerPixel]
+			compress := func(filter byte) []byte {
+				var raw, compressed bytes.Buffer
+				for y := 0; y < tc.height; y++ {
+					row := pixels[y*rowLen : (y+1)*rowLen]
+					raw.WriteByte(filter)
+					if filter == 0 {
+						raw.Write(row)
+						continue
 					}
-					if y > 0 {
-						above = pixels[(y-1)*rowLen+x]
+					for x, value := range row {
+						left, above := byte(0), byte(0)
+						if x >= tc.bytesPerPixel {
+							left = row[x-tc.bytesPerPixel]
+						}
+						if y > 0 {
+							above = pixels[(y-1)*rowLen+x]
+						}
+						raw.WriteByte(value - byte((uint16(left)+uint16(above))>>1))
 					}
-					raw.WriteByte(value - byte((uint16(left)+uint16(above))>>1))
+				}
+				zw, err := zlib.NewWriterLevel(&compressed, 6)
+				if err != nil {
+					t.Fatal(err)
+				}
+				if _, err := zw.Write(raw.Bytes()); err != nil {
+					t.Fatal(err)
+				}
+				if err := zw.Close(); err != nil {
+					t.Fatal(err)
+				}
+				return compressed.Bytes()
+			}
+			compressed := compress(3)
+			if tc.bytesPerPixel == 1 {
+				unfiltered := compress(0)
+				if tc.width > 1024 || len(unfiltered) < len(compressed) {
+					compressed = unfiltered
 				}
 			}
-			zw, err := zlib.NewWriterLevel(&compressed, 6)
-			if err != nil {
-				t.Fatal(err)
-			}
-			if _, err := zw.Write(raw.Bytes()); err != nil {
-				t.Fatal(err)
-			}
-			if err := zw.Close(); err != nil {
-				t.Fatal(err)
-			}
-			want := make([]byte, len(compressed.Bytes())+57)
+			want := make([]byte, len(compressed)+57)
 			offset := copy(want, pngSignature)
 			var ihdr [13]byte
 			binary.BigEndian.PutUint32(ihdr[0:], uint32(tc.width))
 			binary.BigEndian.PutUint32(ihdr[4:], uint32(tc.height))
 			ihdr[8], ihdr[9] = 8, tc.colorType
 			offset = writeChunk(want, offset, "IHDR", ihdr[:])
-			offset = writeChunk(want, offset, "IDAT", compressed.Bytes())
+			offset = writeChunk(want, offset, "IDAT", compressed)
 			writeChunk(want, offset, "IEND", nil)
 
 			if !bytes.Equal(got, want) {

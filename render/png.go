@@ -18,6 +18,7 @@ const maxCachedBufferBytes = 8 << 20
 
 type pngEncoder struct {
 	compressed bytes.Buffer
+	alternate  bytes.Buffer
 	zw         *flate.Writer
 	checksum   hash.Hash32
 }
@@ -41,7 +42,7 @@ func getPNGEncoder() *pngEncoder {
 }
 
 func putPNGEncoder(e *pngEncoder) {
-	if e.compressed.Cap() > maxCachedBufferBytes {
+	if e.compressed.Cap() > maxCachedBufferBytes || e.alternate.Cap() > maxCachedBufferBytes {
 		return
 	}
 	select {
@@ -83,32 +84,30 @@ func writeChunk(out []byte, offset int, typ string, data []byte) int {
 	return offset + 4
 }
 
-func encodePNG(pixels []byte, width, height, bytesPerPixel int, colorType byte) []byte {
-	var ihdr [13]byte
-	binary.BigEndian.PutUint32(ihdr[0:], uint32(width))
-	binary.BigEndian.PutUint32(ihdr[4:], uint32(height))
-	ihdr[8] = 8
-	ihdr[9] = colorType
-
-	e := getPNGEncoder()
+func (e *pngEncoder) compress(pixels []byte, width, height, bytesPerPixel int, filter byte) []byte {
 	rowLen := width * bytesPerPixel
 	e.compressed.Reset()
 	e.compressed.WriteString("\x78\x9c")
 	e.zw.Reset(&e.compressed)
 	e.checksum.Reset()
 	filtered := getPixelBuffer(rowLen + 1)
-	filtered[0] = 3 // PNG Average filter.
 	for y := 0; y < height; y++ {
 		row := pixels[y*rowLen : (y+1)*rowLen]
-		for x, value := range row {
-			left, above := byte(0), byte(0)
-			if x >= bytesPerPixel {
-				left = row[x-bytesPerPixel]
+		filtered[0] = filter
+		if filter == 0 {
+			copy(filtered[1:], row)
+		} else {
+			for x, value := range row {
+				left, above := byte(0), byte(0)
+				if x >= bytesPerPixel {
+					left = row[x-bytesPerPixel]
+				}
+				if y > 0 {
+					above = pixels[(y-1)*rowLen+x]
+				}
+				residual := value - byte((uint16(left)+uint16(above))>>1)
+				filtered[x+1] = residual
 			}
-			if y > 0 {
-				above = pixels[(y-1)*rowLen+x]
-			}
-			filtered[x+1] = value - byte((uint16(left)+uint16(above))>>1)
 		}
 		_, _ = e.zw.Write(filtered)
 		_, _ = e.checksum.Write(filtered)
@@ -118,8 +117,33 @@ func encodePNG(pixels []byte, width, height, bytesPerPixel int, colorType byte) 
 	var checksum [4]byte
 	binary.BigEndian.PutUint32(checksum[:], e.checksum.Sum32())
 	e.compressed.Write(checksum[:])
+	return e.compressed.Bytes()
+}
 
-	compressed := e.compressed.Bytes()
+func encodePNG(pixels []byte, width, height, bytesPerPixel int, colorType byte) []byte {
+	var ihdr [13]byte
+	binary.BigEndian.PutUint32(ihdr[0:], uint32(width))
+	binary.BigEndian.PutUint32(ihdr[4:], uint32(height))
+	ihdr[8] = 8
+	ihdr[9] = colorType
+
+	e := getPNGEncoder()
+	var compressed []byte
+	if bytesPerPixel == 1 && width > 1024 {
+		// ponytail: wide grayscale pages use the measured winner; compare both if a future profile regresses.
+		compressed = e.compress(pixels, width, height, bytesPerPixel, 0)
+	} else {
+		compressed = e.compress(pixels, width, height, bytesPerPixel, 3)
+		if bytesPerPixel == 1 {
+			e.alternate.Reset()
+			e.alternate.Write(compressed)
+			if unfiltered := e.compress(pixels, width, height, bytesPerPixel, 0); len(unfiltered) < e.alternate.Len() {
+				compressed = unfiltered
+			} else {
+				compressed = e.alternate.Bytes()
+			}
+		}
+	}
 	out := make([]byte, len(compressed)+57)
 	offset := copy(out, pngSignature)
 	offset = writeChunk(out, offset, "IHDR", ihdr[:])
@@ -130,7 +154,7 @@ func encodePNG(pixels []byte, width, height, bytesPerPixel int, colorType byte) 
 }
 
 // EncodeGrayPNG encodes a row-major single-channel buffer (len = w×h) as an
-// 8-bit grayscale PNG (filter Average, single IDAT).
+// 8-bit grayscale PNG (smallest of None/Average, single IDAT).
 func EncodeGrayPNG(pixels []byte, width, height int) ([]byte, error) {
 	if len(pixels) != width*height {
 		return nil, fmt.Errorf("EncodeGrayPNG: pixels=%d != %d×%d", len(pixels), width, height)
