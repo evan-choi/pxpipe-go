@@ -115,6 +115,24 @@ func TestTotalTokensIsDynamic(t *testing.T) {
 	}
 }
 
+func TestHasStaticSystemTextMatchesSplit(t *testing.T) {
+	for _, text := range []string{
+		"",
+		" \n\t",
+		"<env>dynamic</env>",
+		" \n<total_tokens>123</total_tokens>\n ",
+		"stable",
+		"<rules>stable</rules><env>dynamic</env>",
+		"<env>dynamic</env>tail",
+		"<env>missing closer",
+	} {
+		want := splitStaticDynamic(text).staticText != ""
+		if got := hasStaticSystemText(text); got != want {
+			t.Fatalf("hasStaticSystemText(%q) = %v, want %v", text, got, want)
+		}
+	}
+}
+
 func BenchmarkObserveStaticTagChurn(b *testing.B) {
 	tags := []string{"skill"}
 	contents := map[string]string{"skill": strings.Repeat("stable static tag content ", 64)}

@@ -431,8 +431,7 @@ func lastStaticSystemCacheControl(sys any) (any, bool) {
 		}
 		t, _ := getStr(bm, "text")
 		_, body := stripBillingLine(t)
-		sd := splitStaticDynamic(body)
-		if len(sd.staticText) > 0 {
+		if hasStaticSystemText(body) {
 			cc = blockCC
 			has = true
 		}
@@ -708,6 +707,20 @@ func splitStaticDynamic(text string) staticDynamicSplit {
 	out.blockCount = len(dynamicParts)
 	out.unknownTags = unknownOrder
 	return out
+}
+
+func hasStaticSystemText(text string) bool {
+	cursor := 0
+	for {
+		start, end := findDynamicBlock(text, cursor)
+		if start < 0 {
+			return strings.TrimSpace(text[cursor:]) != ""
+		}
+		if strings.TrimSpace(text[cursor:start]) != "" {
+			return true
+		}
+		cursor = end
+	}
 }
 
 // --- static tag churn (session-scoped LRU) ----------------------------------
