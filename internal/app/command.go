@@ -79,7 +79,7 @@ func normalizeCLIArgs(args []string) []string {
 		return append([]string{"exec"}, args[1:]...)
 	}
 	switch args[0] {
-	case "serve", "help", "-h", "--help", "--version":
+	case "serve", "help", "-h", "--help", "-v", "--version":
 		return append([]string(nil), args...)
 	default:
 		return append([]string{"exec"}, args...)
