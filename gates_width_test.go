@@ -21,3 +21,10 @@ func TestEstimateImageCountFromMetrics(t *testing.T) {
 		t.Fatalf("estimateImageCountFromMetrics() = %d, want 3", got)
 	}
 }
+
+func TestMeasureVisualRows(t *testing.T) {
+	rows, chars := measureVisualRows("ab\n\n😀c", 2)
+	if rows != 4 || chars != 7 {
+		t.Fatalf("measureVisualRows() = (%d, %d), want (4, 7)", rows, chars)
+	}
+}
