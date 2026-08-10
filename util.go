@@ -27,6 +27,13 @@ func u16len(s string) int {
 }
 
 func isASCII(s string) bool {
+	const highBits = uint64(0x8080808080808080)
+	for len(s) >= 8 {
+		if *(*uint64)(unsafe.Pointer(unsafe.StringData(s)))&highBits != 0 {
+			return false
+		}
+		s = s[8:]
+	}
 	for i := 0; i < len(s); i++ {
 		if s[i] >= utf8.RuneSelf {
 			return false

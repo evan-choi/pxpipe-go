@@ -5,10 +5,27 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"slices"
+	"strings"
 	"testing"
 
 	"github.com/evan-choi/pxpipe-go/render"
 )
+
+func TestIsASCIIWordScan(t *testing.T) {
+	for length := range 18 {
+		ascii := strings.Repeat("a", length)
+		if !isASCII(ascii) {
+			t.Fatalf("isASCII(%q) = false", ascii)
+		}
+		for i := range length {
+			text := []byte(ascii)
+			text[i] = 0x80
+			if isASCII(string(text)) {
+				t.Fatalf("isASCII accepted high byte at %d/%d", i, length)
+			}
+		}
+	}
+}
 
 func TestU16Slice(t *testing.T) {
 	input := "a😀b"
