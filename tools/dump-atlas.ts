@@ -3,7 +3,7 @@
  * meta.json for embedding in the Go port via go:embed.
  *
  * Run from the pxpipe submodule root:
- *   pnpm exec tsx ../tools/dump-atlas.ts
+ *   bun run ../tools/dump-atlas.ts
  */
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { join, dirname } from 'node:path';

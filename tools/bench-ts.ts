@@ -1,7 +1,7 @@
 /**
  * TS-side counterpart of the Go benchmarks: same fixtures, same operations.
  * Run from the pxpipe submodule root:
- *   pnpm exec tsx ../tools/bench-ts.ts
+ *   bun run ../tools/bench-ts.ts
  */
 import { readFileSync } from 'node:fs';
 import { join, dirname } from 'node:path';
