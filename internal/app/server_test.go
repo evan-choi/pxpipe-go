@@ -322,11 +322,11 @@ func TestRequestLogSanitizesCells(t *testing.T) {
 }
 
 func TestRunSummaryAggregatesAndMarksPartialMetrics(t *testing.T) {
-	cacheHits, asText, sent, saved, output := int64(30), int64(200), int64(120), int64(80), int64(5)
+	asText, sent := int64(200), int64(120)
 	summary := newRunSummary()
 	summary.add(requestLogRow{
 		status: http.StatusOK, sentAs: "image",
-		cacheHits: &cacheHits, asText: &asText, sent: &sent, saved: &saved, output: &output,
+		asText: &asText, sent: &sent,
 	})
 	summary.add(requestLogRow{status: http.StatusBadGateway, sentAs: "text"})
 	var outputBuffer bytes.Buffer
@@ -334,12 +334,8 @@ func TestRunSummaryAggregatesAndMarksPartialMetrics(t *testing.T) {
 	got := outputBuffer.String()
 	for _, want := range []string{
 		"pxpipe summary",
-		"requests 2, transformed 1",
-		"as text 200 (1/2 requests)",
-		"sent 120 (1/2 requests)",
-		"saved/lost 80 (1/2 requests) (40.0%)",
-		"output 5 (1/2 requests)",
-		"cache hits 30 (1/2 requests)",
+		"estimated without pxpipe 200 tokens",
+		"actual with pxpipe 120 tokens (-40.0%, 1/2 requests)",
 	} {
 		if !strings.Contains(got, want) {
 			t.Fatalf("summary missing %q: %s", want, got)
