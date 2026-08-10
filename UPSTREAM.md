@@ -38,6 +38,8 @@ rejection signals.
 - `3556db5`: PNG scanline filtering is applied without changing decoded
   pixels. The Go encoder selects the smaller filter result for narrow
   grayscale pages and keeps the measured fast path for wide pages.
+- `3556db5` and `2053cc2`: rendered pages are cached by exact render inputs,
+  with the retained bytes bounded by `PXPIPE_RENDER_CACHE_BYTES`.
 - `c3f553c`: history collapses before tool-result imaging, preserving original
   tool-result text in the history image.
 - `2cad7bf`: `total_tokens` blocks are classified as dynamic.
@@ -110,6 +112,8 @@ The new behavior maps to these Go checks:
 
 - PNG filtering and lossless output: `render/png_simd_test.go` and
   `render/golden_test.go`.
+- Render-cache keys, isolation, eviction, and concurrent hits:
+  `render/cache_test.go`.
 - Transform order, dynamic tags, billing headers, and history geometry:
   `transform_upstream_test.go`, `handler_test.go`, and
   `upstream_history_image_parity_test.go`.
@@ -121,9 +125,6 @@ The new behavior maps to these Go checks:
 
 ## Not ported after a9b9759
 
-- The render-result cache and `PXPIPE_RENDER_CACHE_BYTES` from `3556db5` and
-  `2053cc2` are performance features with no output change. The Go renderer
-  retains its existing buffer and encoder pools.
 - Node request-timing telemetry and Node response scanning from `3556db5` and
   `67b2866` do not apply to the Go library API.
 - The Node restart scripts, process launcher changes, and Node version target

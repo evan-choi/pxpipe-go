@@ -68,7 +68,7 @@ func TestColorRenderParity(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			var first []byte
 			for range 3 {
-				pages, err := RenderTextToPngs("abcdef", 8, tc.style, 80, tc.slots)
+				pages, err := renderTextToPngsWithCharLimitUncached("abcdef", 8, ReadableCharsPerImage, tc.style, 80, tc.slots, false)
 				if err != nil {
 					t.Fatal(err)
 				}
