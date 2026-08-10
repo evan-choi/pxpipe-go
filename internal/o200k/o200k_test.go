@@ -4,13 +4,18 @@ import (
 	"crypto/sha256"
 	"encoding/binary"
 	"fmt"
+	"math/rand"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
+
+	"github.com/dlclark/regexp2/v2"
+	"github.com/tiktoken-go/tokenizer"
 )
 
 func TestCountTokensDigitNormalizationPreservesExactCount(t *testing.T) {
-	e, err := encoding()
+	e, err := tokenizer.Get(tokenizer.O200kBase)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -52,6 +57,72 @@ func TestCountTokensDigitNormalizationPreservesExactCount(t *testing.T) {
 			}
 		}
 	}
+}
+
+func TestCounterMatchesTokenizerAndSplitPattern(t *testing.T) {
+	const pattern = `[^\r\n\p{L}\p{N}]?[\p{Lu}\p{Lt}\p{Lm}\p{Lo}\p{M}]*[\p{Ll}\p{Lm}\p{Lo}\p{M}]+(?i:'s|'t|'re|'ve|'m|'ll|'d)?|[^\r\n\p{L}\p{N}]?[\p{Lu}\p{Lt}\p{Lm}\p{Lo}\p{M}]+[\p{Ll}\p{Lm}\p{Lo}\p{M}]*(?i:'s|'t|'re|'ve|'m|'ll|'d)?|\p{N}{1,3}| ?[^\s\p{L}\p{N}]+[\r\n/]*|\s*[\r\n]+|\s+(?!\S)|\s+`
+	reference, err := tokenizer.Get(tokenizer.O200kBase)
+	if err != nil {
+		t.Fatal(err)
+	}
+	splitter := regexp2.MustCompile(pattern, regexp2.None)
+	alphabet := []rune("aAzZ09 '\t\r\n/!éÉǅʰ中\u0301ा⃝²Ⅳ٣\u0085\u00a0\u2028🙂ſ")
+	inputs := []string{
+		"hello world",
+		"ABCDef AbC ABC 中日語 don't WE'LL",
+		"  words  1234 /\r\n/ symbols",
+		"\u0301 \u0301A A\u0301 a\u0301 École",
+		string([]byte{0xff, 'a', 0xfe}),
+	}
+	rng := rand.New(rand.NewSource(1))
+	for range 2_000 {
+		var b strings.Builder
+		for range 1 + rng.Intn(48) {
+			b.WriteRune(alphabet[rng.Intn(len(alphabet))])
+		}
+		inputs = append(inputs, b.String())
+	}
+	for _, text := range inputs {
+		wantPieces, err := regexpPieces(splitter, text)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got := scannerPieces(text); !slices.Equal(got, wantPieces) {
+			t.Fatalf("split %q = %#v, want %#v", text, got, wantPieces)
+		}
+		want, err := reference.Count(text)
+		if err != nil {
+			t.Fatal(err)
+		}
+		got, err := countTokensUncached(text)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got != want {
+			t.Fatalf("count %q = %d, want %d", text, got, want)
+		}
+	}
+}
+
+func regexpPieces(splitter *regexp2.Regexp, text string) ([]string, error) {
+	var pieces []string
+	match, err := splitter.FindStringMatch(text)
+	for match != nil && err == nil {
+		pieces = append(pieces, match.String())
+		match, err = splitter.FindNextMatch(match)
+	}
+	return pieces, err
+}
+
+func scannerPieces(text string) []string {
+	text = normalizeText(text)
+	var pieces []string
+	for start := 0; start < len(text); {
+		end := nextPieceEnd(text, start)
+		pieces = append(pieces, text[start:end])
+		start = end
+	}
+	return pieces
 }
 
 func TestDigitNormalizationRejectsMixedUnicodeNumbers(t *testing.T) {
