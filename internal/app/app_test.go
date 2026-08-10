@@ -243,7 +243,7 @@ func TestClaudeDesktopProfileInjectsUnixSocket(t *testing.T) {
 		t.Fatalf("helper exit code = %d", code)
 	}
 	for _, want := range []string{
-		"pxpipe summary", "estimated without pxpipe ", "actual with pxpipe 128 tokens (-",
+		"pxpipe summary", "estimated : ", "actual    : 128 tokens (-",
 	} {
 		if !strings.Contains(stderr.String(), want) {
 			t.Fatalf("Claude Desktop summary missing %q: %s", want, stderr.String())
