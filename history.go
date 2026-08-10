@@ -70,7 +70,7 @@ type historyCollapseInfo struct {
 	collapsedImages       int
 	collapsedImageBytes   int
 	collapsedImagePixels  int
-	collapsedPngs         [][]byte
+	collapsedRendered     []*render.RenderedImage
 	collapsedImageDims    []imageDim
 	carryOverImageOrdinal int
 	hasCarryOver          bool
@@ -862,7 +862,7 @@ func collapseHistory(messages []any, isProfitable profitableFn, o historyCollaps
 		imageCount++
 		info.collapsedImageBytes += len(img.PNG)
 		info.collapsedImagePixels += img.Width * img.Height
-		info.collapsedPngs = append(info.collapsedPngs, img.PNG)
+		info.collapsedRendered = append(info.collapsedRendered, img)
 		info.collapsedImageDims = append(info.collapsedImageDims, imageDim{img.Width, img.Height})
 		info.droppedChars += img.DroppedChars
 		for cp, n := range img.DroppedCodepoints {

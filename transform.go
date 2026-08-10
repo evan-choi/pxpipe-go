@@ -1701,7 +1701,9 @@ func runHistoryCollapse(req map[string]any, info *TransformInfo, o *resolvedOpti
 		info.ImageCount += histInfo.collapsedImages
 		info.ImageBytes += histInfo.collapsedImageBytes
 		info.ImagePixels += histInfo.collapsedImagePixels
-		info.ImagePNGs = append(info.ImagePNGs, histInfo.collapsedPngs...)
+		for _, image := range histInfo.collapsedRendered {
+			info.ImagePNGs = append(info.ImagePNGs, image.PNG)
+		}
 		info.ImageDims = append(info.ImageDims, histInfo.collapsedImageDims...)
 		info.DroppedChars += histInfo.droppedChars
 		for cp, n := range histInfo.droppedCodepoints {
@@ -1709,7 +1711,7 @@ func runHistoryCollapse(req map[string]any, info *TransformInfo, o *resolvedOpti
 		}
 		info.HistoryReason = "collapsed"
 		info.HistoryTextChars = histInfo.collapsedChars
-		info.HistoryImageSha = historyImageSha8(newMessages)
+		info.HistoryImageSha = historyImageShaOf(histInfo.collapsedRendered)
 		bumpBucket(info, "history", histInfo.collapsedChars)
 		if relocate && histInfo.hasCarryOver {
 			relocateAnchorToHistoryImage(newMessages, histInfo.carryOverImageOrdinal, true)
