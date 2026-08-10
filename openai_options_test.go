@@ -130,3 +130,21 @@ func TestGptHistoryPlanReusesExactSectionSources(t *testing.T) {
 		t.Fatalf("pin text = %v", plan.PinText)
 	}
 }
+
+func TestHistoryImageShaMatchesCachedBase64(t *testing.T) {
+	images, err := render.RenderTextToPngs("history image sha cache", 64, render.DenseRenderStyle, 96, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := historyImageShaOf(images)
+	for range 2 {
+		images[0].AppendPNGBase64(nil)
+	}
+	var encoded strings.Builder
+	if err := images[0].WritePNGBase64(&encoded); err != nil || encoded.Len() == 0 {
+		t.Fatalf("write cached base64: len=%d err=%v", encoded.Len(), err)
+	}
+	if got := historyImageShaOf(images); got != want {
+		t.Fatalf("cached history image sha = %q, want %q", got, want)
+	}
+}

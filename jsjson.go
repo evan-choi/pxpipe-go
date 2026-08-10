@@ -10,6 +10,7 @@ import (
 	"unsafe"
 
 	"github.com/bytedance/sonic/ast"
+	"github.com/evan-choi/pxpipe-go/render"
 )
 
 // Order-preserving JSON layer. The TS reference relies on JS object key
@@ -21,7 +22,7 @@ import (
 
 const orderKey = "\x00keys"
 
-type pngDataURL []byte
+type pngDataURL struct{ image *render.RenderedImage }
 type pngBase64 []byte
 
 type objectKeyOrder struct {
@@ -200,7 +201,7 @@ func appendJSValue(b []byte, v any) []byte {
 		return appendJSString(b, tv)
 	case pngDataURL:
 		b = append(b, `"data:image/png;base64,`...)
-		b = base64.StdEncoding.AppendEncode(b, tv)
+		b = tv.image.AppendPNGBase64(b)
 		return append(b, '"')
 	case pngBase64:
 		b = append(b, '"')
