@@ -710,8 +710,7 @@ func evalOpenAIGate(model, renderedText string, cols int, charsPerToken float64,
 	maxLines := canvasRows
 	maxCharsPerImage := minInt(render.ReadableCharsPerImage, maxInt(1, cols)*maxLines)
 	linesPerImage := minInt(maxLines, maxInt(1, maxCharsPerImage/maxInt(1, cols)))
-	visualRows := countVisualRows(renderedText, cols)
-	renderedChars := u16len(renderedText)
+	visualRows, renderedChars := measureVisualRows(renderedText, cols)
 	estImages := estimateImageCountFromMetrics(renderedChars, visualRows, cols, maxCharsPerImage, maxLines)
 	var lastPageLines int
 	if estImages <= 1 {

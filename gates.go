@@ -126,17 +126,24 @@ func imageTokensCost(text string, cols, imageCountCap int, shrinkWidth bool, max
 // countVisualRows counts soft-wrapped rows: only hard \n breaks; the ↵
 // sentinel is inline. Lengths are UTF-16 units, matching TS.
 func countVisualRows(text string, cols int) int {
-	rows := 0
+	rows, _ := measureVisualRows(text, cols)
+	return rows
+}
+
+func measureVisualRows(text string, cols int) (rows, chars int) {
+	lines := strings.Split(text, "\n")
+	chars = len(lines) - 1
 	c := maxInt(1, cols)
-	for _, line := range strings.Split(text, "\n") {
+	for _, line := range lines {
 		l := u16len(line)
+		chars += l
 		if l == 0 {
 			rows++
 		} else {
 			rows += ceilDiv(l, c)
 		}
 	}
-	return rows
+	return rows, chars
 }
 
 func lineRows(line string, cols int) int {
