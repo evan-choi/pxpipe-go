@@ -1280,7 +1280,7 @@ func RenderTextToPngsReflow(text string, cols int, style RenderStyle) ([]*Render
 
 // RenderTextToPngsWithCharLimit splits text into pages each ≤ maxHeightPx
 // tall, respecting the per-image char budget.
-func renderTextToPngsWithCharLimit(text string, cols, maxCharsPerImage int, style RenderStyle, maxHeightPx int, slotText *string, reflowed bool) ([]*RenderedImage, error) {
+func renderTextToPngsWithCharLimitUncached(text string, cols, maxCharsPerImage int, style RenderStyle, maxHeightPx int, slotText *string, reflowed bool) ([]*RenderedImage, error) {
 	markerScale := style.MarkerScale
 	if markerScale < 1 {
 		markerScale = 1
@@ -1358,12 +1358,12 @@ func renderTextToPngsWithCharLimit(text string, cols, maxCharsPerImage int, styl
 }
 
 func RenderTextToPngsWithCharLimit(text string, cols, maxCharsPerImage int, style RenderStyle, maxHeightPx int, slotText *string) ([]*RenderedImage, error) {
-	return renderTextToPngsWithCharLimit(text, cols, maxCharsPerImage, style, maxHeightPx, slotText, false)
+	return renderTextToPngsCached(renderResultCache, text, cols, maxCharsPerImage, style, maxHeightPx, slotText, false)
 }
 
 // RenderReflowedTextToPngs renders output already produced by Reflow.
 func RenderReflowedTextToPngs(text string, cols int, style RenderStyle, maxHeightPx int) ([]*RenderedImage, error) {
-	return renderTextToPngsWithCharLimit(text, cols, ReadableCharsPerImage, style, maxHeightPx, nil, true)
+	return renderTextToPngsCached(renderResultCache, text, cols, ReadableCharsPerImage, style, maxHeightPx, nil, true)
 }
 
 func RenderTextToPngs(text string, cols int, style RenderStyle, maxHeightPx int, slotText *string) ([]*RenderedImage, error) {

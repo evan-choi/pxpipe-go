@@ -70,26 +70,34 @@ func TestReflowFastPath(t *testing.T) {
 
 func TestRenderConcurrentBatches(t *testing.T) {
 	text := strings.Repeat("server load page ", 2_500)
-	want, err := RenderTextToImages(text, RenderOptions{})
+	source, ok := Reflow(text)
+	if !ok {
+		t.Fatal("expected reflow")
+	}
+	cols := MeasureContentCols(source, DenseContentCols, 1, DefaultRenderFont)
+	render := func() ([]*RenderedImage, error) {
+		return renderTextToPngsWithCharLimitUncached(source, cols, DenseContentCharsPerImage, DenseRenderStyle, MaxHeightPx, nil, false)
+	}
+	want, err := render()
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(want.Pages) < 2 {
-		t.Fatalf("test input rendered %d pages, want multiple", len(want.Pages))
+	if len(want) < 2 {
+		t.Fatalf("test input rendered %d pages, want multiple", len(want))
 	}
 	for range 16 {
 		t.Run("batch", func(t *testing.T) {
 			t.Parallel()
-			got, err := RenderTextToImages(text, RenderOptions{})
+			got, err := render()
 			if err != nil {
 				t.Fatal(err)
 			}
-			if len(got.Pages) != len(want.Pages) {
-				t.Fatalf("rendered %d pages, want %d", len(got.Pages), len(want.Pages))
+			if len(got) != len(want) {
+				t.Fatalf("rendered %d pages, want %d", len(got), len(want))
 			}
-			for i := range want.Pages {
-				if got.Pages[i].Width != want.Pages[i].Width || got.Pages[i].Height != want.Pages[i].Height ||
-					!bytes.Equal(got.Pages[i].PNG, want.Pages[i].PNG) {
+			for i := range want {
+				if got[i].Width != want[i].Width || got[i].Height != want[i].Height ||
+					!bytes.Equal(got[i].PNG, want[i].PNG) {
 					t.Fatalf("page %d differs", i)
 				}
 			}

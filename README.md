@@ -320,6 +320,10 @@ Known deviations:
 
 ## Performance
 
+Rendered pages are cached by exact render inputs. The cache retains up to
+64 MiB by default. Set `PXPIPE_RENDER_CACHE_BYTES` to another byte limit, or
+set it to `0` to disable the cache.
+
 ![pxpipe versus pxpipe-go benchmark: pxpipe-go is 10.1 to 45.1 times faster across four workloads and uses 65.3% less peak RSS](docs/benchmark-improvements.png)
 
 Measured natively on an Apple M1 Pro running macOS 26.5.2, with Node 26.5.0
