@@ -42,85 +42,93 @@ func parseOrderedJSON(body []byte) (map[string]any, error) {
 	if len(body) != 0 {
 		src = unsafe.String(unsafe.SliceData(body), len(body))
 	}
-	p := ast.NewParser(src)
-	node, err := p.Parse()
-	if err != 0 {
+	d := orderedJSONDecoder{stack: make([]orderedJSONFrame, 0, 16)}
+	if err := ast.Preorder(src, &d, &orderedJSONVisitorOptions); err != nil {
 		return nil, fmt.Errorf("json parse error: %v", err)
 	}
-	if loadErr := node.LoadAll(); loadErr != nil {
-		return nil, loadErr
-	}
-	v, convErr := nodeToValue(&node)
-	if convErr != nil {
-		return nil, convErr
-	}
-	m, ok := v.(map[string]any)
+	m, ok := d.root.(map[string]any)
 	if !ok {
 		return nil, fmt.Errorf("json body is not an object")
 	}
 	return m, nil
 }
 
-func nodeToValue(n *ast.Node) (any, error) {
-	switch n.TypeSafe() {
-	case ast.V_OBJECT:
-		length, err := n.Len()
-		if err != nil {
-			return nil, err
-		}
-		m := make(map[string]any, length+1)
-		keys := make([]string, 0, length)
-		for i := 0; i < length; i++ {
-			pair := n.IndexPair(i)
-			if pair == nil {
-				break
-			}
-			child, err := nodeToValue(&pair.Value)
-			if err != nil {
-				return nil, err
-			}
-			// Duplicate keys: last one wins (JS), order keeps first sighting.
-			if _, dup := m[pair.Key]; !dup {
-				keys = append(keys, pair.Key)
-			}
-			m[pair.Key] = child
-		}
-		setObjKeyOrder(m, keys)
-		return m, nil
-	case ast.V_ARRAY:
-		length, err := n.Len()
-		if err != nil {
-			return nil, err
-		}
-		arr := make([]any, 0, length)
-		for i := 0; i < length; i++ {
-			child := n.Index(i)
-			if child == nil {
-				break
-			}
-			cv, err := nodeToValue(child)
-			if err != nil {
-				return nil, err
-			}
-			arr = append(arr, cv)
-		}
-		return arr, nil
-	case ast.V_STRING:
-		return n.StrictString()
-	case ast.V_NUMBER:
-		num, err := n.Number()
-		if err != nil {
-			return nil, err
-		}
-		return num, nil
-	case ast.V_TRUE:
-		return true, nil
-	case ast.V_FALSE:
-		return false, nil
-	case ast.V_NULL:
-		return nil, nil
+var orderedJSONVisitorOptions = ast.VisitorOptions{OnlyNumber: true}
+
+type orderedJSONFrame struct {
+	object map[string]any
+	array  []any
+	keys   []string
+	key    string
+	isObj  bool
+}
+
+type orderedJSONDecoder struct {
+	stack []orderedJSONFrame
+	root  any
+}
+
+func (d *orderedJSONDecoder) accept(v any) error {
+	if len(d.stack) == 0 {
+		d.root = v
+		return nil
 	}
-	return nil, fmt.Errorf("unsupported json node type %d", n.TypeSafe())
+	f := &d.stack[len(d.stack)-1]
+	if !f.isObj {
+		f.array = append(f.array, v)
+		return nil
+	}
+	if f.object == nil {
+		f.object = make(map[string]any, 8)
+	}
+	if _, duplicate := f.object[f.key]; !duplicate {
+		f.keys = append(f.keys, f.key)
+	}
+	f.object[f.key] = v
+	f.key = ""
+	return nil
+}
+
+func (d *orderedJSONDecoder) OnNull() error           { return d.accept(nil) }
+func (d *orderedJSONDecoder) OnBool(v bool) error     { return d.accept(v) }
+func (d *orderedJSONDecoder) OnString(v string) error { return d.accept(v) }
+func (d *orderedJSONDecoder) OnInt64(_ int64, n json.Number) error {
+	return d.accept(n)
+}
+func (d *orderedJSONDecoder) OnFloat64(_ float64, n json.Number) error {
+	return d.accept(n)
+}
+func (d *orderedJSONDecoder) OnObjectBegin(_ int) error {
+	d.stack = append(d.stack, orderedJSONFrame{isObj: true})
+	return nil
+}
+func (d *orderedJSONDecoder) OnObjectKey(key string) error {
+	f := &d.stack[len(d.stack)-1]
+	if f.keys == nil {
+		f.keys = make([]string, 0, 4)
+	}
+	f.key = key
+	return nil
+}
+func (d *orderedJSONDecoder) OnObjectEnd() error {
+	n := len(d.stack) - 1
+	f := d.stack[n]
+	d.stack = d.stack[:n]
+	if f.object == nil {
+		f.object = make(map[string]any, 1)
+	}
+	setObjKeyOrder(f.object, f.keys)
+	return d.accept(f.object)
+}
+func (d *orderedJSONDecoder) OnArrayBegin(capacity int) error {
+	d.stack = append(d.stack, orderedJSONFrame{array: make([]any, 0, capacity)})
+	return nil
+}
+func (d *orderedJSONDecoder) OnArrayEnd() error {
+	n := len(d.stack) - 1
+	f := d.stack[n]
+	d.stack = d.stack[:n]
+	return d.accept(f.array)
 }
 
 // jsStringify mirrors JSON.stringify: insertion-ordered object keys, JS string
