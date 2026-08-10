@@ -19,6 +19,7 @@ const maxCachedBufferBytes = 8 << 20
 type pngEncoder struct {
 	compressed bytes.Buffer
 	alternate  bytes.Buffer
+	filtered   []byte
 	zw         *flate.Writer
 	checksum   hash.Hash32
 }
@@ -42,7 +43,7 @@ func getPNGEncoder() *pngEncoder {
 }
 
 func putPNGEncoder(e *pngEncoder) {
-	if e.compressed.Cap() > maxCachedBufferBytes || e.alternate.Cap() > maxCachedBufferBytes {
+	if e.compressed.Cap() > maxCachedBufferBytes || e.alternate.Cap() > maxCachedBufferBytes || cap(e.filtered) > maxCachedBufferBytes {
 		return
 	}
 	select {
@@ -90,7 +91,12 @@ func (e *pngEncoder) compress(pixels []byte, width, height, bytesPerPixel int, f
 	e.compressed.WriteString("\x78\x9c")
 	e.zw.Reset(&e.compressed)
 	e.checksum.Reset()
-	filtered := getPixelBuffer(rowLen + 1)
+	if cap(e.filtered) < rowLen+1 {
+		e.filtered = make([]byte, rowLen+1)
+	} else {
+		e.filtered = e.filtered[:rowLen+1]
+	}
+	filtered := e.filtered
 	for y := 0; y < height; y++ {
 		row := pixels[y*rowLen : (y+1)*rowLen]
 		filtered[0] = filter
@@ -112,7 +118,6 @@ func (e *pngEncoder) compress(pixels []byte, width, height, bytesPerPixel int, f
 		_, _ = e.zw.Write(filtered)
 		_, _ = e.checksum.Write(filtered)
 	}
-	putPixelBuffer(filtered)
 	_ = e.zw.Close()
 	var checksum [4]byte
 	binary.BigEndian.PutUint32(checksum[:], e.checksum.Sum32())
