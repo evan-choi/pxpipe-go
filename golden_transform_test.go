@@ -156,25 +156,28 @@ func deepCompare(t *testing.T, path string, want, got any) {
 }
 
 type goldenInfo struct {
-	Compressed        bool   `json:"compressed"`
-	Reason            string `json:"reason"`
-	OrigChars         int    `json:"origChars"`
-	CompressedChars   int    `json:"compressedChars"`
-	ImageCount        int    `json:"imageCount"`
-	ImageBytes        int    `json:"imageBytes"`
-	ImagePixels       int    `json:"imagePixels"`
-	NativeImages      int    `json:"nativeImages"`
-	ImageBudgetSkips  int    `json:"imageBudgetSkips"`
-	WireImages        int    `json:"wireImages"`
-	StaticChars       int    `json:"staticChars"`
-	DynamicChars      int    `json:"dynamicChars"`
-	DynamicBlockCount int    `json:"dynamicBlockCount"`
-	DroppedChars      int    `json:"droppedChars"`
-	FirstUserSha8     string `json:"firstUserSha8"`
-	SystemSha8        string `json:"systemSha8"`
-	ToolDocsChars     int    `json:"toolDocsChars"`
-	OutgoingTextChars int    `json:"outgoingTextChars"`
-	GateEval          *struct {
+	Compressed          bool   `json:"compressed"`
+	Reason              string `json:"reason"`
+	OrigChars           int    `json:"origChars"`
+	CompressedChars     int    `json:"compressedChars"`
+	ImageCount          int    `json:"imageCount"`
+	ImageBytes          int    `json:"imageBytes"`
+	ImagePixels         int    `json:"imagePixels"`
+	NativeImages        int    `json:"nativeImages"`
+	NativeImageBytes    int    `json:"nativeImageBytes"`
+	ImageBudgetSkips    int    `json:"imageBudgetSkips"`
+	ImageByteSkips      int    `json:"imageByteSkips"`
+	ImageBytesNearLimit bool   `json:"imageBytesNearLimit"`
+	WireImages          int    `json:"wireImages"`
+	StaticChars         int    `json:"staticChars"`
+	DynamicChars        int    `json:"dynamicChars"`
+	DynamicBlockCount   int    `json:"dynamicBlockCount"`
+	DroppedChars        int    `json:"droppedChars"`
+	FirstUserSha8       string `json:"firstUserSha8"`
+	SystemSha8          string `json:"systemSha8"`
+	ToolDocsChars       int    `json:"toolDocsChars"`
+	OutgoingTextChars   int    `json:"outgoingTextChars"`
+	GateEval            *struct {
 		Site          string  `json:"site"`
 		ImageTokens   float64 `json:"imageTokens"`
 		TextTokens    float64 `json:"textTokens"`
@@ -209,6 +212,7 @@ type goldenInfo struct {
 	OmittedChars           int            `json:"omittedChars"`
 	KeptSharpBlocks        int            `json:"keptSharpBlocks"`
 	PinChars               int            `json:"pinChars"`
+	BillingLine            string         `json:"billingLine"`
 	Recoverable            []struct {
 		ID         string `json:"id"`
 		Kind       string `json:"kind"`
@@ -276,7 +280,12 @@ func TestGoldenTransform(t *testing.T) {
 			eqInt(t, "imageCount", info.ImageCount, wantInfo.ImageCount)
 			eqInt(t, "imagePixels", info.ImagePixels, wantInfo.ImagePixels)
 			eqInt(t, "nativeImages", info.NativeImages, wantInfo.NativeImages)
+			eqInt(t, "nativeImageBytes", info.NativeImageBytes, wantInfo.NativeImageBytes)
 			eqInt(t, "imageBudgetSkips", info.ImageBudgetSkips, wantInfo.ImageBudgetSkips)
+			eqInt(t, "imageByteSkips", info.ImageByteSkips, wantInfo.ImageByteSkips)
+			if info.ImageBytesNearLimit != wantInfo.ImageBytesNearLimit {
+				t.Errorf("imageBytesNearLimit: got %v want %v", info.ImageBytesNearLimit, wantInfo.ImageBytesNearLimit)
+			}
 			eqInt(t, "wireImages", info.WireImages, wantInfo.WireImages)
 			eqInt(t, "staticChars", info.StaticChars, wantInfo.StaticChars)
 			eqInt(t, "dynamicChars", info.DynamicChars, wantInfo.DynamicChars)
@@ -312,6 +321,7 @@ func TestGoldenTransform(t *testing.T) {
 			eqInt(t, "omittedChars", info.OmittedChars, wantInfo.OmittedChars)
 			eqInt(t, "keptSharpBlocks", info.KeptSharpBlocks, wantInfo.KeptSharpBlocks)
 			eqInt(t, "pinChars", info.PinChars, wantInfo.PinChars)
+			eqStr(t, "billingLine", info.BillingLine, wantInfo.BillingLine)
 			if (wantInfo.HistoryImageSha != "") != (info.HistoryImageSha != "") {
 				t.Errorf("historyImageSha presence: got %q want-present=%v", info.HistoryImageSha, wantInfo.HistoryImageSha != "")
 			}
