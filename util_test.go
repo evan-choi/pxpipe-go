@@ -96,6 +96,24 @@ func TestClassifyResponsesPairsBuildsSharedText(t *testing.T) {
 	}
 }
 
+func TestClassifyResponsesPairsCountsInvalidItems(t *testing.T) {
+	items := []any{
+		map[string]any{"type": "function_call", "call_id": "duplicate"},
+		map[string]any{"type": "function_call", "call_id": "duplicate"},
+		map[string]any{"type": "function_call_output", "call_id": "duplicate"},
+		map[string]any{"type": "function_call", "call_id": "open"},
+		map[string]any{"type": "function_call_output", "call_id": "orphan"},
+		map[string]any{"type": "function_call"},
+	}
+	old, text, state := classifyResponsesPairs(items, 0, nil)
+	if len(old) != 0 || text != "" {
+		t.Fatalf("invalid pairs produced completed output: %#v, %q", old, text)
+	}
+	if state.OpenCalls != 1 || state.OrphanOutputs != 1 || state.MalformedItems != 4 {
+		t.Fatalf("invalid pair state = %+v", state)
+	}
+}
+
 func TestHistoryImageSha8ConcatSemantics(t *testing.T) {
 	imageBlock := func(data string) map[string]any {
 		return map[string]any{"type": "image", "source": map[string]any{"data": data}}

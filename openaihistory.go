@@ -593,12 +593,15 @@ func responseReferencedIds(items []any) map[string]struct{} {
 // classifyResponsesPairs classifies tool state and returns old (imageable)
 // rounds plus counters.
 func classifyResponsesPairs(items []any, keepRecentPairs int, tokenCounts gptTokenCounter) ([]responsesCompletedRound, string, responsesPairState) {
-	calls := map[string][]int{}
-	outputs := map[string][]int{}
+	type indexCount struct {
+		first int
+		count int
+	}
+	calls := map[string]indexCount{}
+	outputs := map[string]indexCount{}
 	missingIDItems := 0
 	// Track id first-seen order for deterministic iteration (TS Set order).
-	var idOrder []string
-	seen := map[string]struct{}{}
+	idOrder := make([]string, 0, len(items))
 	for i, item := range items {
 		t := responseItemType(item)
 		if t != "function_call" && t != "function_call_output" {
@@ -609,14 +612,25 @@ func classifyResponsesPairs(items []any, keepRecentPairs int, tokenCounts gptTok
 			missingIDItems++
 			continue
 		}
-		if t == "function_call" {
-			calls[id] = append(calls[id], i)
-		} else {
-			outputs[id] = append(outputs[id], i)
-		}
-		if _, ok := seen[id]; !ok {
-			seen[id] = struct{}{}
+		_, callSeen := calls[id]
+		_, outputSeen := outputs[id]
+		if !callSeen && !outputSeen {
 			idOrder = append(idOrder, id)
+		}
+		if t == "function_call" {
+			positions := calls[id]
+			if positions.count == 0 {
+				positions.first = i
+			}
+			positions.count++
+			calls[id] = positions
+		} else {
+			positions := outputs[id]
+			if positions.count == 0 {
+				positions.first = i
+			}
+			positions.count++
+			outputs[id] = positions
 		}
 	}
 
@@ -626,8 +640,8 @@ func classifyResponsesPairs(items []any, keepRecentPairs int, tokenCounts gptTok
 		cs := calls[id]
 		os := outputs[id]
 		switch {
-		case len(cs) == 1 && len(os) == 1 && cs[0] < os[0]:
-			callIndex, outputIndex := cs[0], os[0]
+		case cs.count == 1 && os.count == 1 && cs.first < os.first:
+			callIndex, outputIndex := cs.first, os.first
 			call := items[callIndex].(map[string]any)
 			output := items[outputIndex].(map[string]any)
 			name := "tool"
@@ -645,17 +659,17 @@ func classifyResponsesPairs(items []any, keepRecentPairs int, tokenCounts gptTok
 				CallTokens:   tokenCounts.count(jsStringifyString(call)),
 				OutputTokens: tokenCounts.count(outputText),
 			}
-		case len(cs) > 0 && len(os) == 0:
-			openCalls += len(cs)
-		case len(os) > 0 && len(cs) == 0:
-			orphanOutputs += len(os)
+		case cs.count > 0 && os.count == 0:
+			openCalls += cs.count
+		case os.count > 0 && cs.count == 0:
+			orphanOutputs += os.count
 		default:
-			malformedItems += len(cs) + len(os)
+			malformedItems += cs.count + os.count
 		}
 	}
 
 	var completed []responsesCompletedRound
-	acceptedCallIndices := map[int]struct{}{}
+	acceptedCallIndices := make([]bool, len(items))
 	for i := 0; i < len(items); {
 		if responseItemType(items[i]) != "function_call" {
 			i++
@@ -679,47 +693,31 @@ func classifyResponsesPairs(items []any, keepRecentPairs int, tokenCounts gptTok
 		for _, pair := range roundCalls {
 			roundOutputIndices[pair.OutputIndex] = struct{}{}
 		}
-		var outputIdxs []int
+		outputCount := 0
 		for j < len(items) && responseItemType(items[j]) == "function_call_output" {
 			if _, ok := roundOutputIndices[j]; !ok {
 				break
 			}
-			outputIdxs = append(outputIdxs, j)
+			outputCount++
 			j++
 		}
-		outputSet := map[int]struct{}{}
-		for _, oi := range outputIdxs {
-			outputSet[oi] = struct{}{}
-		}
-		valid := len(roundCalls) > 0 && len(outputIdxs) == len(roundCalls)
-		if valid {
-			for _, pair := range roundCalls {
-				if _, ok := outputSet[pair.OutputIndex]; !ok {
-					valid = false
-					break
-				}
-			}
-		}
-		if !valid {
+		if len(roundCalls) == 0 || outputCount != len(roundCalls) {
 			i++
 			continue
 		}
-		byOutput := append([]responsesCompletedPair(nil), roundCalls...)
-		sort.Slice(byOutput, func(a, b int) bool { return byOutput[a].OutputIndex < byOutput[b].OutputIndex })
-		var indices []int
-		for _, pair := range roundCalls {
-			indices = append(indices, pair.CallIndex)
-		}
-		for _, pair := range byOutput {
-			indices = append(indices, pair.OutputIndex)
-		}
+		indices := make([]int, 0, 2*len(roundCalls))
 		callTokens, outputTokens := 0, 0
 		for _, pair := range roundCalls {
+			indices = append(indices, pair.CallIndex)
 			callTokens += pair.CallTokens
 			outputTokens += pair.OutputTokens
 		}
+		sort.Slice(roundCalls, func(a, b int) bool { return roundCalls[a].OutputIndex < roundCalls[b].OutputIndex })
+		for _, pair := range roundCalls {
+			indices = append(indices, pair.OutputIndex)
+		}
 		completed = append(completed, responsesCompletedRound{
-			Pairs:        byOutput,
+			Pairs:        roundCalls,
 			Indices:      indices,
 			StartIndex:   i,
 			EndIndex:     j - 1,
@@ -727,12 +725,12 @@ func classifyResponsesPairs(items []any, keepRecentPairs int, tokenCounts gptTok
 			OutputTokens: outputTokens,
 		})
 		for _, pair := range roundCalls {
-			acceptedCallIndices[pair.CallIndex] = struct{}{}
+			acceptedCallIndices[pair.CallIndex] = true
 		}
 		i = j
 	}
 	for callIndex := range pairByCallIndex {
-		if _, ok := acceptedCallIndices[callIndex]; !ok {
+		if !acceptedCallIndices[callIndex] {
 			malformedItems += 2
 		}
 	}
