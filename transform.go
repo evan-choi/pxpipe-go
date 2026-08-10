@@ -1977,7 +1977,8 @@ func transformParsed(req map[string]any, body []byte, o *resolvedOptions, info *
 	}
 	combinedRaw := strings.Join(combinedParts, "\n\n")
 	combined := maybeReflow(compactSlabWhitespace(combinedRaw), o.Reflow)
-	info.OrigChars = u16len(combinedRaw)
+	combinedRawChars := u16len(combinedRaw)
+	info.OrigChars = combinedRawChars
 	info.CompressedChars = 0
 	if combined != "" {
 		info.SystemSha8 = sha8(combined)
@@ -2096,8 +2097,8 @@ func transformParsed(req map[string]any, body []byte, o *resolvedOptions, info *
 		imageBlocks = append(imageBlocks, block)
 	}
 	info.ImageCount = len(imageBlocks)
-	info.CompressedChars += u16len(combinedRaw)
-	bumpBucket(info, "static_slab", u16len(combinedRaw))
+	info.CompressedChars += combinedRawChars
+	bumpBucket(info, "static_slab", combinedRawChars)
 	if len(images) > 0 {
 		info.FirstImagePNG = images[0].PNG
 		info.FirstImageWidth = images[0].Width
