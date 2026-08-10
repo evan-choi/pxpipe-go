@@ -9,9 +9,8 @@ import (
 	"testing"
 )
 
-func benchmarkVariantScratch(b *testing.B, input []byte) ([]byte, int) {
+func benchmarkVariantScratch(b *testing.B, input []byte, anchor string) ([]byte, int) {
 	b.Helper()
-	const anchor = "Tool number 0."
 	const replacement = "PVAR=00000000"
 	scratch := bytes.Replace(input, []byte(anchor), []byte(replacement), 1)
 	marker := bytes.Index(scratch, []byte(replacement))
@@ -101,7 +100,7 @@ func BenchmarkTransformBigClaudeCodeHighCardinalityParallel(b *testing.B) {
 	b.ReportAllocs()
 	b.ResetTimer()
 	b.RunParallel(func(pb *testing.PB) {
-		scratch, marker := benchmarkVariantScratch(b, input)
+		scratch, marker := benchmarkVariantScratch(b, input, "You are Claude Code")
 		for pb.Next() {
 			putBenchmarkSerial(scratch[marker:marker+8], serial.Add(1))
 			out, info := TransformRequest(scratch, opts)
@@ -124,7 +123,7 @@ func BenchmarkTransformOpenAIChatHighCardinalityParallel(b *testing.B) {
 	b.ReportAllocs()
 	b.ResetTimer()
 	b.RunParallel(func(pb *testing.PB) {
-		scratch, marker := benchmarkVariantScratch(b, input)
+		scratch, marker := benchmarkVariantScratch(b, input, "Agent Operating Manual")
 		for pb.Next() {
 			putBenchmarkSerial(scratch[marker:marker+8], serial.Add(1))
 			out, info := TransformOpenAIChatCompletions(scratch, nil)
@@ -147,7 +146,7 @@ func BenchmarkTransformOpenAIResponsesHighCardinalityParallel(b *testing.B) {
 	b.ReportAllocs()
 	b.ResetTimer()
 	b.RunParallel(func(pb *testing.PB) {
-		scratch, marker := benchmarkVariantScratch(b, input)
+		scratch, marker := benchmarkVariantScratch(b, input, "Agent Operating Manual")
 		for pb.Next() {
 			putBenchmarkSerial(scratch[marker:marker+8], serial.Add(1))
 			out, info := TransformOpenAIResponses(scratch, nil)
