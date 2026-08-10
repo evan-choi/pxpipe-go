@@ -13,6 +13,7 @@ git submodule update --init --recursive
   (2026-08-09)
 - Current reference submodule: `c5fc2a8f3b2864cf72aa1aa79a7e9e72a04ff37a`
   (2026-08-09)
+- Upstream `origin/main` last checked: 2026-08-11; no newer commit.
 
 The baseline advances only after equivalent behavior and regenerated fixtures
 are verified against the pinned reference.
