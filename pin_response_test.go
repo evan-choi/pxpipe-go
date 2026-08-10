@@ -98,6 +98,28 @@ func TestIsPinOnlyRequest(t *testing.T) {
 	}
 }
 
+func TestHasPinCommandCandidate(t *testing.T) {
+	cases := []struct {
+		name     string
+		messages []any
+		system   any
+		want     bool
+	}{
+		{"none", []any{map[string]any{"role": "user", "content": "hello"}}, "system", false},
+		{"assistant", []any{map[string]any{"role": "assistant", "content": "@pxpipe pin ignored"}}, nil, false},
+		{"user string", []any{map[string]any{"role": "user", "content": "@pxpipe pin concise"}}, nil, true},
+		{"user block", []any{map[string]any{"role": "user", "content": []any{textBlock(" @pxpipe\tunpin all")}}}, nil, true},
+		{"system", nil, []any{textBlock("@pxpipe pin from file")}, true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := hasPinCommandCandidate(tc.messages, tc.system); got != tc.want {
+				t.Fatalf("hasPinCommandCandidate() = %v, want %v", got, tc.want)
+			}
+		})
+	}
+}
+
 func TestPinCommandResponseMessages(t *testing.T) {
 	request := []byte(`{"model":"claude-test","messages":[{"role":"user","content":"@pxpipe pin be concise"}]}`)
 	reply := pinCommandResponse(request)
