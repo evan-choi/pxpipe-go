@@ -240,7 +240,8 @@ func runClaudeDesktopProfile(ctx context.Context, p profile, stdin io.Reader, st
 		return 1, err
 	}
 	certificatePath, removeCertificateBundle, err := certificateBundle(
-		filepath.Join(configDir, "pxpipe"), authority.CertificatePath(), os.Getenv("NODE_EXTRA_CA_CERTS"),
+		filepath.Join(configDir, "pxpipe"), authority.CertificatePath(),
+		os.Getenv("NODE_EXTRA_CA_CERTS"), os.Getenv("SSL_CERT_FILE"),
 	)
 	if err != nil {
 		return 1, err
@@ -281,6 +282,7 @@ func runClaudeDesktopProfile(ctx context.Context, p profile, stdin io.Reader, st
 			Env: runner.Environment(os.Environ(), map[string]string{
 				"ANTHROPIC_UNIX_SOCKET": socketPath,
 				"NODE_EXTRA_CA_CERTS":   certificatePath,
+				"SSL_CERT_FILE":         certificatePath,
 			}, nil),
 			Stdin: stdin, Stdout: stdout, Stderr: stderr,
 		})
@@ -358,13 +360,21 @@ func serve(server *http.Server, listener net.Listener) error {
 	return err
 }
 
-func certificateBundle(dir, authorityPath, extraPath string) (string, func(), error) {
-	if extraPath == "" || extraPath == authorityPath {
-		return authorityPath, func() {}, nil
+func certificateBundle(dir, authorityPath string, extraPaths ...string) (string, func(), error) {
+	var extras []byte
+	for _, extraPath := range extraPaths {
+		if extraPath == "" || extraPath == authorityPath {
+			continue
+		}
+		extra, err := os.ReadFile(extraPath)
+		if err != nil {
+			return "", func() {}, fmt.Errorf("read existing CA bundle: %w", err)
+		}
+		extras = append(extras, extra...)
+		extras = append(extras, '\n')
 	}
-	extra, err := os.ReadFile(extraPath)
-	if err != nil {
-		return "", func() {}, fmt.Errorf("read existing CA bundle: %w", err)
+	if len(extras) == 0 {
+		return authorityPath, func() {}, nil
 	}
 	authority, err := os.ReadFile(authorityPath)
 	if err != nil {
@@ -381,9 +391,8 @@ func certificateBundle(dir, authorityPath, extraPath string) (string, func(), er
 		remove()
 		return "", func() {}, fmt.Errorf("secure child CA bundle: %w", err)
 	}
-	content := make([]byte, 0, len(extra)+len(authority)+1)
-	content = append(content, extra...)
-	content = append(content, '\n')
+	content := make([]byte, 0, len(extras)+len(authority))
+	content = append(content, extras...)
 	content = append(content, authority...)
 	if _, err := file.Write(content); err != nil {
 		file.Close()
