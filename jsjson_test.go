@@ -107,17 +107,19 @@ func TestJSStringifyAnthropicImage(t *testing.T) {
 
 func TestOpenAIJSONCapacity(t *testing.T) {
 	for _, tc := range []struct {
-		body, image, want int
+		body, image, replaced, want int
 	}{
-		{100, 0, 100},
-		{100, 3, 104},
-		{-1, -1, 0},
-		{maxOpenAIJSONPreallocBytes, 0, maxOpenAIJSONPreallocBytes},
-		{0, maxOpenAIJSONPreallocBytes, maxOpenAIJSONPreallocBytes},
-		{maxOpenAIJSONPreallocBytes - 1, 1, maxOpenAIJSONPreallocBytes},
+		{100, 0, 0, 100},
+		{100, 3, 0, 104},
+		{100, 3, 40, 74},
+		{100, 3, 1_000, 4},
+		{-1, -1, -1, 0},
+		{maxOpenAIJSONPreallocBytes, 0, 0, maxOpenAIJSONPreallocBytes},
+		{0, maxOpenAIJSONPreallocBytes, 0, maxOpenAIJSONPreallocBytes},
+		{maxOpenAIJSONPreallocBytes - 1, 1, 0, maxOpenAIJSONPreallocBytes},
 	} {
-		if got := openAIJSONCapacity(tc.body, tc.image); got != tc.want {
-			t.Errorf("openAIJSONCapacity(%d, %d) = %d, want %d", tc.body, tc.image, got, tc.want)
+		if got := openAIJSONCapacity(tc.body, tc.image, tc.replaced); got != tc.want {
+			t.Errorf("openAIJSONCapacity(%d, %d, %d) = %d, want %d", tc.body, tc.image, tc.replaced, got, tc.want)
 		}
 	}
 }

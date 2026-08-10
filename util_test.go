@@ -69,6 +69,26 @@ func TestU16Slice(t *testing.T) {
 	if allocs := testing.AllocsPerRun(100, func() { got = u16Slice(input, 1, 3) }); allocs != 0 {
 		t.Fatalf("aligned slice allocated %v times: %q", allocs, got)
 	}
+
+	for _, text := range []string{
+		strings.Repeat("a", 31),
+		strings.Repeat("a", 9) + "한글😀" + strings.Repeat("b", 17),
+		string([]byte{'a', 0xff, 'b'}),
+	} {
+		units := utf16.Encode([]rune(text))
+		for start := 0; start <= len(units)+1; start++ {
+			for end := start + 1; end <= len(units)+2; end++ {
+				clampedEnd := minInt(end, len(units))
+				want := ""
+				if start < clampedEnd {
+					want = string(utf16.Decode(units[start:clampedEnd]))
+				}
+				if got := u16Slice(text, start, end); got != want {
+					t.Fatalf("u16Slice(%q, %d, %d) = %q, want %q", text, start, end, got, want)
+				}
+			}
+		}
+	}
 }
 
 func TestJoinTextPrefixes(t *testing.T) {

@@ -31,12 +31,17 @@ const pinnedRequestFooter = "\n===== END CURRENT USER REQUEST =====\n"
 const maxOpenAIJSONPreallocBytes = 8 << 20
 const openAIImageSourcePreviewChars = 65_536
 
-func openAIJSONCapacity(bodyBytes, imageBytes int) int {
+func openAIJSONCapacity(bodyBytes, imageBytes, replacedChars int) int {
 	if bodyBytes < 0 {
 		bodyBytes = 0
 	}
 	if imageBytes < 0 {
 		imageBytes = 0
+	}
+	if replacedChars > 0 {
+		// Keep 25% for JSON framing, pointers, and factsheets injected in place
+		// of compressed text; UTF-16 units also undercount non-ASCII input bytes.
+		bodyBytes -= minInt(bodyBytes, replacedChars-replacedChars/4)
 	}
 	if bodyBytes >= maxOpenAIJSONPreallocBytes || imageBytes >= maxOpenAIJSONPreallocBytes {
 		return maxOpenAIJSONPreallocBytes
@@ -1192,7 +1197,7 @@ func TransformOpenAIChatCompletions(body []byte, opts *TransformOptions) ([]byte
 				info.Reason = ""
 				info.OutgoingTextChars = chatOutgoingTextChars(req)
 				info.Compressed = true
-				return jsStringifyCap(req, openAIJSONCapacity(len(body), info.ImageBytes)), info
+				return jsStringifyCap(req, openAIJSONCapacity(len(body), info.ImageBytes, info.CompressedChars+info.CollapsedChars)), info
 			}
 		}
 		return body, info
@@ -1321,7 +1326,7 @@ func TransformOpenAIChatCompletions(body []byte, opts *TransformOptions) ([]byte
 	}
 	info.OutgoingTextChars = chatOutgoingTextChars(req)
 	info.Compressed = true
-	return jsStringifyCap(req, openAIJSONCapacity(len(body), info.ImageBytes)), info
+	return jsStringifyCap(req, openAIJSONCapacity(len(body), info.ImageBytes, info.CompressedChars+info.CollapsedChars)), info
 }
 
 // TransformOpenAIResponses ports transformOpenAIResponses.
@@ -1408,7 +1413,7 @@ func TransformOpenAIResponses(body []byte, opts *TransformOptions) ([]byte, *Tra
 	profile := ResolveGptProfile(model)
 
 	finishSerialized := func() ([]byte, *TransformInfo) {
-		encoded := jsStringifyCap(req, openAIJSONCapacity(len(body), info.ImageBytes))
+		encoded := jsStringifyCap(req, openAIJSONCapacity(len(body), info.ImageBytes, info.CompressedChars+info.CollapsedChars))
 		if limit := profile.MaxSerializedRequestBytes; limit > 0 && len(encoded) > limit {
 			if len(body) > limit {
 				info.Reason = "serialized_request_limit"

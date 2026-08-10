@@ -147,7 +147,7 @@ func (c *renderedPageCache) clear() {
 
 type renderedImageBase64 struct {
 	once    sync.Once
-	used    atomic.Bool
+	uses    atomic.Uint32
 	ready   atomic.Bool
 	encoded []byte
 }
@@ -160,12 +160,15 @@ type renderedImageSequence struct {
 
 // AppendPNGBase64 appends the image's base64 payload to dst. Cached render
 // clones share the encoding; uncached images encode directly into dst.
-func (image *RenderedImage) AppendPNGBase64(dst []byte) []byte {
+func (image *RenderedImage) appendPNGBase64(dst []byte, directUses uint32) []byte {
 	cache := image.base64
 	if cache == nil {
 		return base64.StdEncoding.AppendEncode(dst, image.PNG)
 	}
-	if !cache.used.Load() && cache.used.CompareAndSwap(false, true) {
+	if cache.ready.Load() {
+		return append(dst, cache.encoded...)
+	}
+	if cache.uses.Add(1) <= directUses {
 		return base64.StdEncoding.AppendEncode(dst, image.PNG)
 	}
 	cache.once.Do(func() {
@@ -174,6 +177,16 @@ func (image *RenderedImage) AppendPNGBase64(dst []byte) []byte {
 		cache.ready.Store(true)
 	})
 	return append(dst, cache.encoded...)
+}
+
+func (image *RenderedImage) AppendPNGBase64(dst []byte) []byte {
+	return image.appendPNGBase64(dst, 1)
+}
+
+// AppendPNGBase64Deferred avoids retaining an encoded copy until an image is
+// used more than twice, which keeps one-shot multi-pass transforms lean.
+func (image *RenderedImage) AppendPNGBase64Deferred(dst []byte) []byte {
+	return image.appendPNGBase64(dst, 2)
 }
 
 // WritePNGBase64 writes the image's base64 payload to dst.
