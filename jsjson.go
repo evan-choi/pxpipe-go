@@ -294,11 +294,31 @@ func appendJSObject(b []byte, m map[string]any) []byte {
 	return append(b, '}')
 }
 
+func hasZeroByte(word uint64) bool {
+	return (word-0x0101010101010101)&^word&0x8080808080808080 != 0
+}
+
 func appendJSString(b []byte, s string) []byte {
-	const hex = "0123456789abcdef"
+	const (
+		hex            = "0123456789abcdef"
+		highBits       = uint64(0x8080808080808080)
+		controlBits    = uint64(0xe0e0e0e0e0e0e0e0)
+		quoteBytes     = uint64(0x2222222222222222)
+		backslashBytes = uint64(0x5c5c5c5c5c5c5c5c)
+	)
 	b = append(b, '"')
 	start := 0
 	for i := 0; i < len(s); {
+		if len(s)-i >= 8 {
+			word := *(*uint64)(unsafe.Pointer(unsafe.StringData(s[i:])))
+			if word&highBits == 0 &&
+				!hasZeroByte(word&controlBits) &&
+				!hasZeroByte(word^quoteBytes) &&
+				!hasZeroByte(word^backslashBytes) {
+				i += 8
+				continue
+			}
+		}
 		c := s[i]
 		if c >= 0x20 && c != '"' && c != '\\' {
 			if c < utf8.RuneSelf {
