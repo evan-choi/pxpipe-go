@@ -565,7 +565,7 @@ func userTurnBlocks(messages []any, fromInclusive, upToExclusive int, onImage fu
 			return nil, err
 		}
 		for _, img := range imgs {
-			out = append(out, makeImageBlock(img.PNG))
+			out = append(out, makeRenderedImageBlock(img))
 			onImage(img)
 		}
 	}
@@ -904,7 +904,7 @@ func collapseHistory(messages []any, isProfitable profitableFn, o historyCollaps
 		}
 		markerCC, hasMarker := markerByEnd[chunkEnd]
 		for k, img := range imgs {
-			block := makeImageBlock(img.PNG)
+			block := makeRenderedImageBlock(img)
 			if hasMarker && k == len(imgs)-1 {
 				block["cache_control"] = markerCC
 			}
@@ -960,10 +960,18 @@ func floorDiv(a, b int) int {
 }
 
 func makeImageBlock(png []byte) map[string]any {
+	return makeImageBlockData(pngBase64(png))
+}
+
+func makeRenderedImageBlock(image *render.RenderedImage) map[string]any {
+	return makeImageBlockData(pngBase64Image{image: image})
+}
+
+func makeImageBlockData(data any) map[string]any {
 	src := map[string]any{
 		"type":       "base64",
 		"media_type": "image/png",
-		"data":       pngBase64(png),
+		"data":       data,
 	}
 	setObjKeyOrder(src, []string{"type", "media_type", "data"})
 	m := map[string]any{"type": "image", "source": src}
