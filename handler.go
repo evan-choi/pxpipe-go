@@ -144,13 +144,17 @@ func NewHandler(opts HandlerOptions) http.Handler {
 			pr.SetURL(target)
 			pr.Out.Host = target.Host
 			if openAI {
+				credential := classifyInboundCredential(pr.In.Header)
 				pr.Out.Header.Del("X-Api-Key")
 				for name := range pr.Out.Header {
 					if strings.HasPrefix(strings.ToLower(name), "anthropic-") {
 						pr.Out.Header.Del(name)
 					}
 				}
-				if opts.OpenAIAPIKey != "" {
+				switch resolveOpenAIRouteAuth(credential, opts.OpenAIAPIKey != "") {
+				case outboundAuthDrop:
+					pr.Out.Header.Del("Authorization")
+				case outboundAuthReplace:
 					pr.Out.Header.Set("Authorization", "Bearer "+opts.OpenAIAPIKey)
 				}
 			} else if !providerPrefixed || strings.HasPrefix(originalPath, "/anthropic/") {
@@ -281,6 +285,84 @@ func isProviderPrefixedPath(pathname string) bool {
 		}
 	}
 	return false
+}
+
+type inboundCredential uint8
+
+const (
+	inboundCredentialNone inboundCredential = iota
+	inboundCredentialAnthropicKey
+	inboundCredentialAnthropicBearer
+	inboundCredentialOAuthJWT
+	inboundCredentialAPIKeyBearer
+	inboundCredentialOpaqueBearer
+)
+
+func isBase64URLSegment(s string) bool {
+	for _, c := range []byte(s) {
+		if !((c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') ||
+			(c >= '0' && c <= '9') || c == '_' || c == '-') {
+			return false
+		}
+	}
+	return true
+}
+
+func isJWTBearer(token string) bool {
+	parts := strings.Split(token, ".")
+	return len(parts) == 3 && strings.HasPrefix(parts[0], "eyJ") &&
+		isBase64URLSegment(parts[0]) && parts[1] != "" && isBase64URLSegment(parts[1]) &&
+		isBase64URLSegment(parts[2])
+}
+
+func classifyInboundCredential(headers http.Header) inboundCredential {
+	authorization := headers.Get("Authorization")
+	fields := strings.Fields(authorization)
+	if len(fields) == 2 && strings.EqualFold(fields[0], "Bearer") {
+		token := fields[1]
+		switch {
+		case strings.HasPrefix(strings.ToLower(token), "sk-ant-"):
+			return inboundCredentialAnthropicBearer
+		case isJWTBearer(token):
+			return inboundCredentialOAuthJWT
+		case strings.HasPrefix(strings.ToLower(token), "sk-"):
+			return inboundCredentialAPIKeyBearer
+		}
+	}
+	if strings.TrimSpace(authorization) != "" {
+		return inboundCredentialOpaqueBearer
+	}
+	if strings.TrimSpace(headers.Get("X-Api-Key")) != "" {
+		return inboundCredentialAnthropicKey
+	}
+	return inboundCredentialNone
+}
+
+type outboundAuthAction uint8
+
+const (
+	outboundAuthKeep outboundAuthAction = iota
+	outboundAuthReplace
+	outboundAuthDrop
+)
+
+func resolveOpenAIRouteAuth(inbound inboundCredential, hasConfiguredKey bool) outboundAuthAction {
+	if inbound == inboundCredentialAnthropicBearer || inbound == inboundCredentialAnthropicKey {
+		if hasConfiguredKey {
+			return outboundAuthReplace
+		}
+		return outboundAuthDrop
+	}
+	if inbound == inboundCredentialOAuthJWT {
+		return outboundAuthKeep
+	}
+	if hasConfiguredKey {
+		return outboundAuthReplace
+	}
+	if inbound == inboundCredentialNone {
+		return outboundAuthDrop
+	}
+	return outboundAuthKeep
 }
 
 func isCanonicalOpenAIPath(pathname string, headers http.Header, hasOpenAIKey bool) bool {
