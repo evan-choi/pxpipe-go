@@ -37,4 +37,5 @@ func BenchmarkEncodeGrayPNG(b *testing.B) {
 	if err != nil {
 		b.Fatal(err)
 	}
+	b.ReportMetric(float64(len(benchmarkPNG)), "output-B")
 }
