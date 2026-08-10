@@ -12,21 +12,44 @@ import (
 // u16len counts UTF-16 code units, matching TS String.prototype.length —
 // every char-count gate and info field in the reference is UTF-16 based.
 func u16len(s string) int {
-	if isASCII(s) {
-		return len(s)
-	}
+	const highBits = uint64(0x8080808080808080)
 	n := 0
-	for _, r := range s {
+	for len(s) >= 8 {
+		if *(*uint64)(unsafe.Pointer(unsafe.StringData(s)))&highBits == 0 {
+			n += 8
+			s = s[8:]
+			continue
+		}
+		if s[0] < utf8.RuneSelf {
+			n++
+			s = s[1:]
+			continue
+		}
+		r, size := utf8.DecodeRuneInString(s)
 		if r >= 0x10000 {
 			n += 2
 		} else {
 			n++
 		}
+		s = s[size:]
+	}
+	for _, r := range s {
+		if r >= 0x10000 {
+			n++
+		}
+		n++
 	}
 	return n
 }
 
 func isASCII(s string) bool {
+	const highBits = uint64(0x8080808080808080)
+	for len(s) >= 8 {
+		if *(*uint64)(unsafe.Pointer(unsafe.StringData(s)))&highBits != 0 {
+			return false
+		}
+		s = s[8:]
+	}
 	for i := 0; i < len(s); i++ {
 		if s[i] >= utf8.RuneSelf {
 			return false

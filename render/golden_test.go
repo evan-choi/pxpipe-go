@@ -72,6 +72,17 @@ func TestFastCellWidthInvariants(t *testing.T) {
 	}
 }
 
+func TestMeasureContentColsMatchesEscapedLine(t *testing.T) {
+	for _, line := range []string{"ASCII" + NLSentinel, "x\t界", "x\U0010ffff"} {
+		for _, maxCols := range []int{1, 5, 100} {
+			want := max(1, min(maxCols, MeasureLineCols(EscapeMissingGlyphs(ExpandTabsInLine(line)), 2, DefaultRenderFont)))
+			if got := MeasureContentCols(line, maxCols, 2, DefaultRenderFont); got != want {
+				t.Fatalf("MeasureContentCols(%q, %d) = %d, want %d", line, maxCols, got, want)
+			}
+		}
+	}
+}
+
 func TestReflowFastPath(t *testing.T) {
 	got, ok := Reflow("a\nb")
 	if !ok || got != "a"+NLSentinel+"b" {
