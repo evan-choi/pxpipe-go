@@ -202,12 +202,18 @@ func TestClaudeDesktopProfileInjectsUnixSocket(t *testing.T) {
 	t.Setenv("PXPIPE_DESKTOP_APP_HELPER", "1")
 	t.Setenv("ANTHROPIC_UNIX_SOCKET", "/tmp/original-anthropic.sock")
 	t.Setenv("HTTPS_PROXY", "http://existing-proxy.example:8443")
-	existingCA := filepath.Join(home, "existing-ca.pem")
-	if err := os.WriteFile(existingCA, []byte("EXISTING-CA\n"), 0o600); err != nil {
+	nodeCA := filepath.Join(home, "existing-node-ca.pem")
+	if err := os.WriteFile(nodeCA, []byte("EXISTING-NODE-CA\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	t.Setenv("NODE_EXTRA_CA_CERTS", existingCA)
-	t.Setenv("PXPIPE_DESKTOP_EXISTING_CA", existingCA)
+	sslCA := filepath.Join(home, "existing-ssl-ca.pem")
+	if err := os.WriteFile(sslCA, []byte("EXISTING-SSL-CA\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("NODE_EXTRA_CA_CERTS", nodeCA)
+	t.Setenv("SSL_CERT_FILE", sslCA)
+	t.Setenv("PXPIPE_DESKTOP_NODE_CA", nodeCA)
+	t.Setenv("PXPIPE_DESKTOP_SSL_CA", sslCA)
 	t.Setenv("NO_PROXY", "localhost")
 	t.Setenv("PXPIPE_DESKTOP_REQUEST_FIXTURE", filepath.Join("..", "..", "testdata", "transform", "big-claude-code", "input.json"))
 	type observation struct {
@@ -404,14 +410,17 @@ func TestClaudeDesktopAppHelper(t *testing.T) {
 		fmt.Fprintln(os.Stderr, "Claude Desktop Unix socket is not listening")
 		os.Exit(98)
 	}
-	certificateBundle, err := os.ReadFile(os.Getenv("NODE_EXTRA_CA_CERTS"))
-	if err != nil || !strings.Contains(string(certificateBundle), "EXISTING-CA") ||
+	certificateBundle, err := os.ReadFile(os.Getenv("SSL_CERT_FILE"))
+	if err != nil || !strings.Contains(string(certificateBundle), "EXISTING-NODE-CA") ||
+		!strings.Contains(string(certificateBundle), "EXISTING-SSL-CA") ||
 		!strings.Contains(string(certificateBundle), "BEGIN CERTIFICATE") {
 		fmt.Fprintln(os.Stderr, "Claude Desktop CA bundle mismatch")
 		os.Exit(99)
 	}
 	if os.Getenv("HTTPS_PROXY") != "http://existing-proxy.example:8443" ||
-		os.Getenv("NODE_EXTRA_CA_CERTS") == os.Getenv("PXPIPE_DESKTOP_EXISTING_CA") || os.Getenv("NO_PROXY") != "localhost" ||
+		os.Getenv("NODE_EXTRA_CA_CERTS") != os.Getenv("SSL_CERT_FILE") ||
+		os.Getenv("NODE_EXTRA_CA_CERTS") == os.Getenv("PXPIPE_DESKTOP_NODE_CA") ||
+		os.Getenv("SSL_CERT_FILE") == os.Getenv("PXPIPE_DESKTOP_SSL_CA") || os.Getenv("NO_PROXY") != "localhost" ||
 		os.Getenv("ANTHROPIC_BASE_URL") != os.Getenv("PXPIPE_DESKTOP_UPSTREAM") {
 		fmt.Fprintln(os.Stderr, "Claude Desktop inherited environment changed")
 		os.Exit(99)

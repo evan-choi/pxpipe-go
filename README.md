@@ -19,7 +19,7 @@ export CLI, and Gemini/Google surface remain out of scope.
 Install the `pxpipe` CLI globally with the pinned release:
 
 ```bash
-go install github.com/evan-choi/pxpipe-go/cmd/pxpipe@v0.4.4
+go install github.com/evan-choi/pxpipe-go/cmd/pxpipe@v0.4.5
 ```
 
 Use `@latest` to install the newest tagged release:
@@ -63,10 +63,12 @@ configured base URL.
 
 On macOS, `Claude.app` is matched case-insensitively and located in
 `~/Applications` or `/Applications`. pxpipe starts its bundle executable with a
-process-scoped `ANTHROPIC_UNIX_SOCKET` and `NODE_EXTRA_CA_CERTS`. The socket
-uses TLS with a certificate signed by pxpipe's local CA; pxpipe does not install
-the CA in the system trust store. Fully quit an existing Claude process before
-launching it so the new process inherits the socket environment.
+process-scoped `ANTHROPIC_UNIX_SOCKET`, `NODE_EXTRA_CA_CERTS`, and
+`SSL_CERT_FILE`. The socket uses TLS with a certificate signed by pxpipe's local
+CA; pxpipe does not install the CA in the system trust store. `SSL_CERT_FILE`
+keeps that CA available when Claude Desktop starts its bundled Claude Code.
+Fully quit an existing Claude process before launching it so the new process
+inherits the socket environment.
 
 Any other executable uses a protocol-neutral profile that transforms paths
 ending in `/messages`, `/chat/completions`, or `/responses`:
