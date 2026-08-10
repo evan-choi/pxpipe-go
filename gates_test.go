@@ -2,6 +2,12 @@ package pxpipe
 
 import "testing"
 
+func TestInvalidCharsPerTokenUsesCalibratedFallback(t *testing.T) {
+	if got := normCpt(0); got != 3 {
+		t.Fatalf("normCpt(0) = %v, want 3", got)
+	}
+}
+
 func TestCompactSlabWhitespace(t *testing.T) {
 	for _, tc := range []struct {
 		name, input, want string

@@ -14,7 +14,7 @@ import (
 // pass through as text, never generate net-loss images.
 
 const (
-	charsPerTokenDefault = 4.0
+	charsPerTokenDefault = 3.0
 	SlabCharsPerToken    = 2.0
 	HistoryCharsPerToken = 2.0
 	ReportCharsPerToken  = 3.7
