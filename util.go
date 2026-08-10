@@ -68,20 +68,26 @@ func u16Slice(s string, start, end int) string {
 	if start >= end {
 		return ""
 	}
-	if isASCII(s) {
-		if end > len(s) {
-			end = len(s)
-		}
-		if start >= end {
-			return ""
-		}
-		return s[start:end]
-	}
 
 	startByte, endByte := -1, -1
 	startSplit, endSplit := false, false
 	units := 0
 	for i := 0; i < len(s); {
+		if len(s)-i >= 8 && *(*uint64)(unsafe.Pointer(unsafe.StringData(s[i:])))&uint64(0x8080808080808080) == 0 {
+			nextUnits := units + 8
+			if startByte < 0 && start >= units && start <= nextUnits {
+				startByte = i + start - units
+			}
+			if endByte < 0 && end >= units && end <= nextUnits {
+				endByte = i + end - units
+			}
+			units = nextUnits
+			i += 8
+			if startByte >= 0 && endByte >= 0 {
+				break
+			}
+			continue
+		}
 		r, size := utf8.DecodeRuneInString(s[i:])
 		runeUnits := 1
 		if r >= 0x10000 {
