@@ -113,7 +113,7 @@ func runProfile(ctx context.Context, p profile, stdin io.Reader, stdout, stderr 
 			return dialer.DialContext(ctx, "unix", upstreamSocket)
 		}
 		unixServer = &http.Server{
-			Handler:           p.unixHandler(unixTransport, "http"),
+			Handler:           p.unixHandler(unixTransport),
 			ReadHeaderTimeout: 15 * time.Second,
 		}
 		errorChannel := make(chan error, 1)
@@ -212,20 +212,32 @@ func runProfile(ctx context.Context, p profile, stdin io.Reader, stdout, stderr 
 }
 
 func runClaudeDesktopProfile(ctx context.Context, p profile, stdin io.Reader, stdout, stderr io.Writer) (int, error) {
-	listener, socketPath, removeSocket, err := newUnixSocketListener()
-	if err != nil {
-		return 1, err
+	upstream := &url.URL{Scheme: "https", Host: "api.anthropic.com"}
+	if configured := os.Getenv("ANTHROPIC_BASE_URL"); configured != "" {
+		parsed, err := url.Parse(configured)
+		if err != nil {
+			return 1, fmt.Errorf("parse ANTHROPIC_BASE_URL: %w", err)
+		}
+		if (parsed.Scheme != "http" && parsed.Scheme != "https") || parsed.Host == "" {
+			return 1, errors.New("ANTHROPIC_BASE_URL must use http or https and include a host")
+		}
+		upstream = parsed
 	}
-	defer removeSocket()
+
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		return 1, fmt.Errorf("listen for Claude Desktop proxy: %w", err)
+	}
 
 	transport := http.DefaultTransport.(*http.Transport).Clone()
 	defer transport.CloseIdleConnections()
 	server := &http.Server{
-		Handler:           p.unixHandler(transport, "https"),
+		Handler:           p.desktopHandler(transport, upstream),
 		ReadHeaderTimeout: 15 * time.Second,
 	}
 	serverErrors := make(chan error, 1)
 	go func() { serverErrors <- serve(server, listener) }()
+	baseURL := "http://" + listener.Addr().String()
 
 	childDone := make(chan struct {
 		code int
@@ -237,8 +249,8 @@ func runClaudeDesktopProfile(ctx context.Context, p profile, stdin io.Reader, st
 		code, runErr := runner.Run(childContext, runner.Options{
 			Command: p.command, Args: p.args,
 			Env: runner.Environment(os.Environ(), map[string]string{
-				"ANTHROPIC_UNIX_SOCKET": socketPath,
-			}, nil),
+				"ANTHROPIC_BASE_URL": baseURL,
+			}, []string{"ANTHROPIC_UNIX_SOCKET"}),
 			Stdin: stdin, Stdout: stdout, Stderr: stderr,
 		})
 		childDone <- struct {

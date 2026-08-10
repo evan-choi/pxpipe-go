@@ -155,7 +155,7 @@ func TestGenericProfileRecognizesEverySupportedProtocol(t *testing.T) {
 	}
 }
 
-func TestClaudeUnixHandlerUsesRequestedUpstreamScheme(t *testing.T) {
+func TestClaudeDesktopHandlerUsesConfiguredUpstream(t *testing.T) {
 	var scheme, host string
 	transport := profileRoundTripperFunc(func(r *http.Request) (*http.Response, error) {
 		scheme, host = r.URL.Scheme, r.URL.Host
@@ -166,11 +166,14 @@ func TestClaudeUnixHandlerUsesRequestedUpstreamScheme(t *testing.T) {
 			Request:    r,
 		}, nil
 	})
-	request := httptest.NewRequest(http.MethodGet, "http://unix.local/health", nil)
-	request.Host = "api.anthropic.com"
+	upstream, err := url.Parse("https://desktop-api.example")
+	if err != nil {
+		t.Fatal(err)
+	}
+	request := httptest.NewRequest(http.MethodGet, "http://127.0.0.1/health", nil)
 	response := httptest.NewRecorder()
-	claudeProfile("claude", nil).unixHandler(transport, "https").ServeHTTP(response, request)
-	if response.Code != http.StatusNoContent || scheme != "https" || host != "api.anthropic.com" {
+	claudeProfile("claude", nil).desktopHandler(transport, upstream).ServeHTTP(response, request)
+	if response.Code != http.StatusNoContent || scheme != "https" || host != "desktop-api.example" {
 		t.Fatalf("response = %d, upstream = %s://%s", response.Code, scheme, host)
 	}
 }

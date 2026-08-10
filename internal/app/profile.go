@@ -104,9 +104,9 @@ func (p profile) handlerWithOptions(transport http.RoundTripper, transformPath s
 	})
 }
 
-func (p profile) unixHandler(transport http.RoundTripper, upstreamScheme string) http.Handler {
+func (p profile) unixHandler(transport http.RoundTripper) http.Handler {
 	return pxpipe.NewHandler(pxpipe.HandlerOptions{
-		AnthropicUpstream: &url.URL{Scheme: upstreamScheme, Host: "api.anthropic.com"},
+		AnthropicUpstream: &url.URL{Scheme: "http", Host: "api.anthropic.com"},
 		Transport:         transport,
 		ProtocolOf:        p.protocolOf,
 		UpstreamFor: func(r *http.Request, _ pxpipe.Protocol) *url.URL {
@@ -114,8 +114,16 @@ func (p profile) unixHandler(transport http.RoundTripper, upstreamScheme string)
 			if host == "" {
 				host = "api.anthropic.com"
 			}
-			return &url.URL{Scheme: upstreamScheme, Host: host}
+			return &url.URL{Scheme: "http", Host: host}
 		},
+	})
+}
+
+func (p profile) desktopHandler(transport http.RoundTripper, upstream *url.URL) http.Handler {
+	return pxpipe.NewHandler(pxpipe.HandlerOptions{
+		AnthropicUpstream: upstream,
+		Transport:         transport,
+		ProtocolOf:        p.protocolOf,
 	})
 }
 
