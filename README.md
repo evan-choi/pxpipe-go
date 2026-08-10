@@ -324,12 +324,12 @@ Rendered pages are cached by exact render inputs. The cache retains up to
 64 MiB by default. Set `PXPIPE_RENDER_CACHE_BYTES` to another byte limit, or
 set it to `0` to disable the cache.
 
-![pxpipe versus pxpipe-go benchmark: pxpipe-go is 10.1 to 45.1 times faster across four workloads and uses 65.3% less peak RSS](docs/benchmark-improvements.png)
+![pxpipe versus pxpipe-go benchmark: pxpipe-go is 13.4 to 63.8 times faster across four workloads and uses 74.9% less peak RSS](docs/benchmark-improvements.png)
 
-Measured natively on an Apple M1 Pro running macOS 26.5.2, with Node 26.5.0
+Measured natively on an Apple M1 Pro running macOS 26.5.2, with Bun 1.3.14
 and Go 1.26.5. Go used the machine-default `GOMAXPROCS=10` and no PGO profile.
-The comparison uses `pxpipe@a9b9759` and the current pxpipe-go worktree based
-on `27ef82c` (2026-08-07).
+The comparison uses `pxpipe@c5fc2a8` and `pxpipe-go@v0.4.7` (`446e2a4`,
+2026-08-11).
 
 Values are medians of five runs. Each pxpipe run performs two warmups and
 three timed iterations; its table value is the median per-run mean. Each
@@ -338,27 +338,27 @@ CPU architecture, available cores, and request content.
 
 | benchmark | pxpipe time/op | pxpipe-go time/op | speedup |
 |---|---:|---:|---:|
-| TransformBigClaudeCode | 162.60 ms | 16.12 ms | 10.1× |
-| RenderDensePage | 390.40 ms | 8.66 ms | 45.1× |
-| TransformOpenAIChat | 120.10 ms | 7.08 ms | 17.0× |
-| TransformOpenAIResponses | 650.40 ms | 15.79 ms | 41.2× |
+| TransformBigClaudeCode | 49.40 ms | 2.49 ms | 19.9× |
+| RenderDensePage | 12.40 ms | 0.93 ms | 13.4× |
+| TransformOpenAIChat | 51.10 ms | 0.80 ms | 63.8× |
+| TransformOpenAIResponses | 112.80 ms | 2.24 ms | 50.4× |
 
 Peak RSS was measured over the full four-benchmark suite in a fresh process
 for each run:
 
 | implementation | median peak RSS | relative to pxpipe |
 |---|---:|---:|
-| pxpipe | 322.19 MiB | baseline |
-| pxpipe-go | 111.89 MiB | 65.3% lower |
+| pxpipe | 410.44 MiB | baseline |
+| pxpipe-go | 103.08 MiB | 74.9% lower |
 
 Go's `-benchmem` output reports the following allocation volume per operation:
 
 | benchmark | B/op | allocs/op |
 |---|---:|---:|
-| TransformBigClaudeCode | 2,400,496 | 3,679 |
-| RenderDensePage | 801,775 | 70 |
-| TransformOpenAIChat | 1,078,492 | 1,763 |
-| TransformOpenAIResponses | 1,991,537 | 2,073 |
+| TransformBigClaudeCode | 1,656,388 | 2,497 |
+| RenderDensePage | 2,448 | 25 |
+| TransformOpenAIChat | 716,944 | 1,076 |
+| TransformOpenAIResponses | 1,192,000 | 1,339 |
 
 Raw GC counts are not compared because V8 and Go use different collectors and
 event semantics. Peak RSS is the cross-runtime memory metric; `B/op` and
@@ -397,8 +397,15 @@ for benchmark_run in 1 2 3 4 5; do
 done
 ```
 
-Linux ARM64 profiles show PNG rendering and zlib as the largest remaining CPU
-cost. The renderer uses zlib level 6; framebuffers and encoders are pooled.
+Linux ARM64 hot-cache profiles show JSON output serialization, render
+measurement, base64 encoding, and SHA-256 as the largest remaining CPU costs;
+mutex contention is negligible. The renderer uses zlib level 6; framebuffers
+and encoders are pooled.
+
+A Docker Desktop Alpine ARM64 A/B run found `GOGC=400` with
+`GOMEMLIMIT=192MiB` 5.6% faster by parallel geomean than the default GC
+settings, with about 219 MiB peak cgroup memory. Treat this as a deployment
+candidate only and remeasure it on the production EKS instance family.
 
 For production validation, run the native Linux harness inside an Alpine pod
 on the same EKS instance family and architecture as production. It rejects
