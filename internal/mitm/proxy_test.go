@@ -496,7 +496,7 @@ func TestTLSDestinationIdentity(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := authority.tlsConfig("example.com").GetCertificate(&tls.ClientHelloInfo{ServerName: "other.com"}); err == nil {
+	if _, err := authority.TLSConfig("example.com").GetCertificate(&tls.ClientHelloInfo{ServerName: "other.com"}); err == nil {
 		t.Fatal("certificate was issued for an SNI name different from the CONNECT host")
 	}
 }

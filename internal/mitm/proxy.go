@@ -78,7 +78,7 @@ func NewProxy(options Options) (*Proxy, error) {
 		Action: goproxy.ConnectMitm,
 		TLSConfig: func(authority string, _ *goproxy.ProxyCtx) (*tls.Config, error) {
 			host, _ := splitAuthority(authority)
-			config := options.Authority.tlsConfig(host)
+			config := options.Authority.TLSConfig(host)
 			config.NextProtos = []string{"h2", "http/1.1"}
 			return config, nil
 		},
