@@ -144,12 +144,15 @@ func lineRows(line string, cols int) int {
 }
 
 func estimateImageCount(text string, cols, maxCharsPerImage, maxLinesPerColumn int) int {
+	return estimateImageCountFromMetrics(u16len(text), countVisualRows(text, cols), cols, maxCharsPerImage, maxLinesPerColumn)
+}
+
+func estimateImageCountFromMetrics(chars, rows, cols, maxCharsPerImage, maxLinesPerColumn int) int {
 	readableLinesPerCol := maxInt(1, maxCharsPerImage/maxInt(1, cols))
 	hardLinesPerCol := maxInt(1, maxLinesPerColumn)
 	linesPerImage := minInt(hardLinesPerCol, readableLinesPerCol)
 	charBudget := maxInt(1, maxCharsPerImage)
-	rows := countVisualRows(text, cols)
-	return maxInt(maxInt(1, ceilDiv(rows, linesPerImage)), ceilDiv(u16len(text), charBudget))
+	return maxInt(maxInt(1, ceilDiv(rows, linesPerImage)), ceilDiv(chars, charBudget))
 }
 
 type gateEval struct {
