@@ -3,6 +3,7 @@ package app
 import (
 	"fmt"
 	"io"
+	"os"
 	"path/filepath"
 	"strings"
 
@@ -84,14 +85,53 @@ func normalizeCLIArgs(args []string) []string {
 }
 
 func profileForExecutable(command string, args []string) profile {
-	switch strings.ToLower(filepath.Base(command)) {
-	case "claude", "claude.exe":
+	name := filepath.Base(command)
+	switch {
+	case strings.EqualFold(name, "claude.app"):
+		return claudeDesktopProfile(resolveClaudeDesktopExecutable(command), args)
+	case strings.EqualFold(name, "claude"), strings.EqualFold(name, "claude.exe"):
+		if isClaudeDesktopExecutable(command) {
+			return claudeDesktopProfile(command, args)
+		}
 		return claudeProfile(command, args)
-	case "opencode", "opencode.exe":
+	case strings.EqualFold(name, "opencode"), strings.EqualFold(name, "opencode.exe"):
 		return openCodeProfile(command, args)
-	case "codex", "codex.exe":
+	case strings.EqualFold(name, "codex"), strings.EqualFold(name, "codex.exe"):
 		return codexProfile(command, args)
 	default:
 		return genericProfile(command, args)
 	}
+}
+
+func resolveClaudeDesktopExecutable(command string) string {
+	const executable = "Contents/MacOS/Claude"
+	if filepath.Base(command) != command {
+		return filepath.Join(command, executable)
+	}
+	var applications []string
+	if home, err := os.UserHomeDir(); err == nil {
+		applications = append(applications, filepath.Join(home, "Applications", "Claude.app"))
+	}
+	applications = append(applications, "/Applications/Claude.app")
+	for _, application := range applications {
+		path := filepath.Join(application, executable)
+		if info, err := os.Stat(path); err == nil && !info.IsDir() {
+			return path
+		}
+	}
+	return filepath.Join(applications[len(applications)-1], executable)
+}
+
+func isClaudeDesktopExecutable(command string) bool {
+	if !strings.EqualFold(filepath.Base(command), "Claude") {
+		return false
+	}
+	dir := filepath.Dir(command)
+	for _, name := range []string{"MacOS", "Contents", "Claude.app"} {
+		if !strings.EqualFold(filepath.Base(dir), name) {
+			return false
+		}
+		dir = filepath.Dir(dir)
+	}
+	return true
 }
