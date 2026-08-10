@@ -3,6 +3,7 @@ package app
 import (
 	"context"
 	"crypto/rand"
+	"crypto/tls"
 	"encoding/hex"
 	"errors"
 	"fmt"
@@ -230,12 +231,28 @@ func runClaudeDesktopProfile(ctx context.Context, p profile, stdin io.Reader, st
 		}
 		upstream = parsed
 	}
+	configDir, err := os.UserConfigDir()
+	if err != nil {
+		return 1, fmt.Errorf("locate user config directory: %w", err)
+	}
+	authority, err := mitm.LoadOrCreateAuthority(filepath.Join(configDir, "pxpipe"))
+	if err != nil {
+		return 1, err
+	}
+	certificatePath, removeCertificateBundle, err := certificateBundle(
+		filepath.Join(configDir, "pxpipe"), authority.CertificatePath(), os.Getenv("NODE_EXTRA_CA_CERTS"),
+	)
+	if err != nil {
+		return 1, err
+	}
+	defer removeCertificateBundle()
 
 	listener, socketPath, removeSocket, err := newUnixSocketListener()
 	if err != nil {
 		return 1, err
 	}
 	defer removeSocket()
+	listener = claudeDesktopListener(listener, authority, upstream)
 
 	transport := http.DefaultTransport.(*http.Transport).Clone()
 	defer transport.CloseIdleConnections()
@@ -263,6 +280,7 @@ func runClaudeDesktopProfile(ctx context.Context, p profile, stdin io.Reader, st
 			Command: p.command, Args: p.args,
 			Env: runner.Environment(os.Environ(), map[string]string{
 				"ANTHROPIC_UNIX_SOCKET": socketPath,
+				"NODE_EXTRA_CA_CERTS":   certificatePath,
 			}, nil),
 			Stdin: stdin, Stdout: stdout, Stderr: stderr,
 		})
@@ -291,6 +309,13 @@ func runClaudeDesktopProfile(ctx context.Context, p profile, stdin io.Reader, st
 		result.err = err
 	}
 	return result.code, result.err
+}
+
+func claudeDesktopListener(listener net.Listener, authority *mitm.Authority, upstream *url.URL) net.Listener {
+	if upstream.Scheme != "https" {
+		return listener
+	}
+	return tls.NewListener(listener, authority.TLSConfig(upstream.Hostname()))
 }
 
 func newTransformPath() (string, error) {

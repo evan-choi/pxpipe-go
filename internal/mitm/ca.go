@@ -158,7 +158,8 @@ func createAuthority(certificatePath, privateKeyPath string) ([]byte, *x509.Cert
 	return certificatePEM, certificate, privateKey, nil
 }
 
-func (a *Authority) tlsConfig(host string) *tls.Config {
+// TLSConfig returns a server configuration with a leaf certificate for host.
+func (a *Authority) TLSConfig(host string) *tls.Config {
 	return &tls.Config{
 		MinVersion: tls.VersionTLS12,
 		NextProtos: []string{"http/1.1"},

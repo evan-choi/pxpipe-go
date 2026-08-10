@@ -3,6 +3,8 @@ package app
 import (
 	"bytes"
 	"context"
+	"crypto/tls"
+	"crypto/x509"
 	"fmt"
 	"io"
 	"net"
@@ -14,6 +16,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/evan-choi/pxpipe-go/internal/mitm"
 )
 
 func TestRunProfileComposesProxyEnvironmentAndReturnsChildExitCode(t *testing.T) {
@@ -191,11 +195,19 @@ func TestClaudeProfileRoutesUnixSocketOverride(t *testing.T) {
 }
 
 func TestClaudeDesktopProfileInjectsUnixSocket(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("XDG_CONFIG_HOME", filepath.Join(home, "config"))
 	t.Setenv("PXPIPE_MODELS", "claude-fable-5")
 	t.Setenv("PXPIPE_DESKTOP_APP_HELPER", "1")
 	t.Setenv("ANTHROPIC_UNIX_SOCKET", "/tmp/original-anthropic.sock")
 	t.Setenv("HTTPS_PROXY", "http://existing-proxy.example:8443")
-	t.Setenv("NODE_EXTRA_CA_CERTS", "/tmp/existing-ca.pem")
+	existingCA := filepath.Join(home, "existing-ca.pem")
+	if err := os.WriteFile(existingCA, []byte("EXISTING-CA\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("NODE_EXTRA_CA_CERTS", existingCA)
+	t.Setenv("PXPIPE_DESKTOP_EXISTING_CA", existingCA)
 	t.Setenv("NO_PROXY", "localhost")
 	t.Setenv("PXPIPE_DESKTOP_REQUEST_FIXTURE", filepath.Join("..", "..", "testdata", "transform", "big-claude-code", "input.json"))
 	type observation struct {
@@ -248,6 +260,52 @@ func TestClaudeDesktopProfileInjectsUnixSocket(t *testing.T) {
 		}
 	case <-time.After(5 * time.Second):
 		t.Fatal("Claude Desktop upstream did not receive the proxied request")
+	}
+}
+
+func TestClaudeDesktopListenerUsesTLSForHTTPS(t *testing.T) {
+	authority, err := mitm.LoadOrCreateAuthority(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	listener, socketPath, removeSocket, err := newUnixSocketListener()
+	if err != nil {
+		t.Fatal(err)
+	}
+	server := &http.Server{Handler: http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusNoContent)
+	})}
+	done := make(chan error, 1)
+	upstream, _ := url.Parse("https://api.anthropic.com")
+	go func() { done <- serve(server, claudeDesktopListener(listener, authority, upstream)) }()
+	t.Cleanup(func() {
+		_ = server.Close()
+		<-done
+		removeSocket()
+	})
+
+	certificate, err := os.ReadFile(authority.CertificatePath())
+	if err != nil {
+		t.Fatal(err)
+	}
+	roots := x509.NewCertPool()
+	if !roots.AppendCertsFromPEM(certificate) {
+		t.Fatal("load pxpipe CA")
+	}
+	dialer := &net.Dialer{Timeout: 5 * time.Second}
+	client := &http.Client{Transport: &http.Transport{
+		DialContext: func(ctx context.Context, _, _ string) (net.Conn, error) {
+			return dialer.DialContext(ctx, "unix", socketPath)
+		},
+		TLSClientConfig: &tls.Config{RootCAs: roots, MinVersion: tls.VersionTLS12},
+	}, Timeout: 5 * time.Second}
+	response, err := client.Get("https://api.anthropic.com/v1/messages")
+	if err != nil {
+		t.Fatal(err)
+	}
+	response.Body.Close()
+	if response.StatusCode != http.StatusNoContent {
+		t.Fatalf("status = %d", response.StatusCode)
 	}
 }
 
@@ -346,8 +404,14 @@ func TestClaudeDesktopAppHelper(t *testing.T) {
 		fmt.Fprintln(os.Stderr, "Claude Desktop Unix socket is not listening")
 		os.Exit(98)
 	}
+	certificateBundle, err := os.ReadFile(os.Getenv("NODE_EXTRA_CA_CERTS"))
+	if err != nil || !strings.Contains(string(certificateBundle), "EXISTING-CA") ||
+		!strings.Contains(string(certificateBundle), "BEGIN CERTIFICATE") {
+		fmt.Fprintln(os.Stderr, "Claude Desktop CA bundle mismatch")
+		os.Exit(99)
+	}
 	if os.Getenv("HTTPS_PROXY") != "http://existing-proxy.example:8443" ||
-		os.Getenv("NODE_EXTRA_CA_CERTS") != "/tmp/existing-ca.pem" || os.Getenv("NO_PROXY") != "localhost" ||
+		os.Getenv("NODE_EXTRA_CA_CERTS") == os.Getenv("PXPIPE_DESKTOP_EXISTING_CA") || os.Getenv("NO_PROXY") != "localhost" ||
 		os.Getenv("ANTHROPIC_BASE_URL") != os.Getenv("PXPIPE_DESKTOP_UPSTREAM") {
 		fmt.Fprintln(os.Stderr, "Claude Desktop inherited environment changed")
 		os.Exit(99)
