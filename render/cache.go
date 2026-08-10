@@ -1,7 +1,9 @@
 package render
 
 import (
+	"encoding/base64"
 	"hash/maphash"
+	"io"
 	"maps"
 	"os"
 	"sort"
@@ -142,6 +144,45 @@ func (c *renderedPageCache) clear() {
 	c.misses.Store(0)
 }
 
+type renderedImageBase64 struct {
+	once    sync.Once
+	used    atomic.Bool
+	ready   atomic.Bool
+	encoded []byte
+}
+
+// AppendPNGBase64 appends the image's base64 payload to dst. Cached render
+// clones share the encoding; uncached images encode directly into dst.
+func (image *RenderedImage) AppendPNGBase64(dst []byte) []byte {
+	cache := image.base64
+	if cache == nil {
+		return base64.StdEncoding.AppendEncode(dst, image.PNG)
+	}
+	if !cache.used.Load() && cache.used.CompareAndSwap(false, true) {
+		return base64.StdEncoding.AppendEncode(dst, image.PNG)
+	}
+	cache.once.Do(func() {
+		cache.encoded = make([]byte, base64.StdEncoding.EncodedLen(len(image.PNG)))
+		base64.StdEncoding.Encode(cache.encoded, image.PNG)
+		cache.ready.Store(true)
+	})
+	return append(dst, cache.encoded...)
+}
+
+// WritePNGBase64 writes the image's base64 payload to dst.
+func (image *RenderedImage) WritePNGBase64(dst io.Writer) error {
+	cache := image.base64
+	if cache != nil && cache.ready.Load() {
+		_, err := dst.Write(cache.encoded)
+		return err
+	}
+	encoder := base64.NewEncoder(base64.StdEncoding, dst)
+	if _, err := encoder.Write(image.PNG); err != nil {
+		return err
+	}
+	return encoder.Close()
+}
+
 func cloneRenderedImages(images []*RenderedImage) []*RenderedImage {
 	out := make([]*RenderedImage, len(images))
 	for i, image := range images {
@@ -173,7 +214,7 @@ func renderCacheEntryBytes(text string, slotText *string, images []*RenderedImag
 		retained += int64(len(*slotText))
 	}
 	for _, image := range images {
-		retained += int64(len(image.PNG))
+		retained += int64(len(image.PNG)) + int64(base64.StdEncoding.EncodedLen(len(image.PNG)))
 	}
 	return retained
 }
@@ -229,6 +270,11 @@ func (c *renderedPageCache) put(key renderCacheKey, text string, slotText *strin
 	storedKey := key
 	storedKey.style.font = strings.Clone(key.style.font)
 	storedKey.style.inkDilateAxis = strings.Clone(key.style.inkDilateAxis)
+	for _, image := range images {
+		if image.base64 == nil {
+			image.base64 = &renderedImageBase64{}
+		}
+	}
 	entry := &renderedPageCacheEntry{
 		text:        strings.Clone(text),
 		slotPresent: slotText != nil,

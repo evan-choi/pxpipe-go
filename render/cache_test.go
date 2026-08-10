@@ -2,6 +2,7 @@ package render
 
 import (
 	"bytes"
+	"encoding/base64"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -37,6 +38,19 @@ func TestRenderedPageCacheReturnsIndependentMetadata(t *testing.T) {
 		if !bytes.Equal(first[i].PNG, second[i].PNG) || first[i].Width != second[i].Width || first[i].Height != second[i].Height {
 			t.Fatalf("page %d differs", i)
 		}
+	}
+	if first[0].base64 == nil || first[0].base64 != second[0].base64 {
+		t.Fatal("cached render clones do not share base64 state")
+	}
+	if got, want := string(first[0].AppendPNGBase64(nil)), base64.StdEncoding.EncodeToString(first[0].PNG); got != want {
+		t.Fatalf("base64 = %q, want %q", got, want)
+	}
+	if first[0].base64.encoded != nil {
+		t.Fatal("first use populated the base64 cache")
+	}
+	second[0].AppendPNGBase64(nil)
+	if !first[0].base64.ready.Load() || len(first[0].base64.encoded) == 0 {
+		t.Fatal("reused render did not cache base64")
 	}
 
 	first[0].Width = 0
@@ -123,7 +137,7 @@ func TestRenderCacheKeyCoversEveryRenderInput(t *testing.T) {
 func ptr[T any](value T) *T { return &value }
 
 func TestRenderedPageCacheEvictsLeastRecentlyUsed(t *testing.T) {
-	cache := newRenderedPageCache(1_250)
+	cache := newRenderedPageCache(2_850)
 	put := func(text string, fill byte) {
 		images := []*RenderedImage{{PNG: bytes.Repeat([]byte{fill}, 600), DroppedCodepoints: map[rune]int{}}}
 		cache.put(newRenderCacheKey(text, 64, 500, DenseRenderStyle, 96, nil, false), text, nil, images)
@@ -191,6 +205,7 @@ func TestRenderedPageCacheConcurrentHits(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	wantBase64 := base64.StdEncoding.EncodeToString(want[0].PNG)
 	var wg sync.WaitGroup
 	errs := make(chan error, 32)
 	for range 32 {
@@ -203,7 +218,7 @@ func TestRenderedPageCacheConcurrentHits(t *testing.T) {
 					errs <- err
 					return
 				}
-				if len(got) != len(want) || !bytes.Equal(got[0].PNG, want[0].PNG) {
+				if len(got) != len(want) || !bytes.Equal(got[0].PNG, want[0].PNG) || string(got[0].AppendPNGBase64(nil)) != wantBase64 {
 					errs <- fmt.Errorf("cached render differs")
 					return
 				}

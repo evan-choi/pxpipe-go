@@ -557,7 +557,7 @@ func rewriteFlatToolsForGpt(tools []any, hasTools bool) (rewritten []any, change
 
 func openAIImagePart(img *render.RenderedImage) map[string]any {
 	inner := map[string]any{
-		"url":    pngDataURL(img.PNG),
+		"url":    pngDataURL{image: img},
 		"detail": "original",
 	}
 	setObjKeyOrder(inner, []string{"url", "detail"})
@@ -569,7 +569,7 @@ func openAIImagePart(img *render.RenderedImage) map[string]any {
 func responsesImagePart(img *render.RenderedImage) map[string]any {
 	part := map[string]any{
 		"type":      "input_image",
-		"image_url": pngDataURL(img.PNG),
+		"image_url": pngDataURL{image: img},
 		"detail":    "original",
 	}
 	setObjKeyOrder(part, []string{"type", "image_url", "detail"})
@@ -841,9 +841,7 @@ func foldGptHistory(info *TransformInfo, model string, plan *gptCollapsePlan, to
 func historyImageShaOf(images []*render.RenderedImage) string {
 	h := sha256.New()
 	for _, img := range images {
-		enc := base64.NewEncoder(base64.StdEncoding, h)
-		_, _ = enc.Write(img.PNG)
-		_ = enc.Close()
+		_ = img.WritePNGBase64(h)
 	}
 	return hex.EncodeToString(h.Sum(nil)[:4])
 }
