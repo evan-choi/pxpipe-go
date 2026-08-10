@@ -1,10 +1,67 @@
 package o200k
 
 import (
+	"fmt"
 	"strings"
 	"sync"
 	"testing"
 )
+
+func TestCountTokensDigitNormalizationPreservesExactCount(t *testing.T) {
+	e, err := encoding()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for width := 1; width <= 3; width++ {
+		limit := 1
+		for range width {
+			limit *= 10
+		}
+		for n := 0; n < 1000; n++ {
+			digits := fmt.Sprintf("%0*d", width, n%limit)
+			for _, text := range []string{
+				digits,
+				"id=" + digits + "; next",
+				"prefix" + digits + "suffix",
+				"↵id=" + digits,
+			} {
+				want, err := e.Count(text)
+				if err != nil {
+					t.Fatal(err)
+				}
+				if got := CountTokens(text); got != want {
+					t.Fatalf("CountTokens(%q) = %d, want %d", text, got, want)
+				}
+			}
+		}
+	}
+	for width := 4; width <= 32; width++ {
+		for _, digits := range []string{
+			strings.Repeat("0", width),
+			strings.Repeat("9", width),
+			strings.Repeat("1234567890", width/10+1)[:width],
+		} {
+			want, err := e.Count("prefix" + digits + "suffix")
+			if err != nil {
+				t.Fatal(err)
+			}
+			if got := CountTokens("prefix" + digits + "suffix"); got != want {
+				t.Fatalf("CountTokens(%q) = %d, want %d", digits, got, want)
+			}
+		}
+	}
+}
+
+func TestDigitNormalizationRejectsMixedUnicodeNumbers(t *testing.T) {
+	if !canNormalizeDigits("↵ 123") {
+		t.Error("canNormalizeDigits rejected non-number Unicode")
+	}
+	for _, text := range []string{"१२3", "3²", "Ⅳ4"} {
+		if canNormalizeDigits(text) {
+			t.Errorf("canNormalizeDigits(%q) = true", text)
+		}
+	}
+}
 
 func TestCountTokensMatchesGptTokenizer(t *testing.T) {
 	cases := []struct {
