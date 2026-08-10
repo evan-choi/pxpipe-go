@@ -53,6 +53,7 @@ type TransformOptions struct {
 	MinToolResultChars         *int
 	Cols                       *int
 	MaxImagesPerToolResult     *int
+	MaxImageBytes              *int
 	CharsPerToken              *float64
 	HistoryAmortizationHorizon *int
 	PriorWarmTokens            *float64
@@ -78,6 +79,7 @@ type resolvedOptions struct {
 	Cols                       int
 	colsSet                    bool
 	MaxImagesPerToolResult     int
+	MaxImageBytes              int
 	CharsPerToken              float64
 	charsPerTokenSet           bool
 	HistoryAmortizationHorizon int
@@ -100,6 +102,7 @@ func resolveOptions(opts *TransformOptions) *resolvedOptions {
 		MinToolResultChars:         6000,
 		Cols:                       render.AnthropicSlabCols,
 		MaxImagesPerToolResult:     10,
+		MaxImageBytes:              18 << 20,
 		CharsPerToken:              4,
 		HistoryAmortizationHorizon: 1,
 		Reflow:                     true,
@@ -133,6 +136,9 @@ func resolveOptions(opts *TransformOptions) *resolvedOptions {
 	}
 	if opts.MaxImagesPerToolResult != nil {
 		o.MaxImagesPerToolResult = *opts.MaxImagesPerToolResult
+	}
+	if opts.MaxImageBytes != nil {
+		o.MaxImageBytes = *opts.MaxImageBytes
 	}
 	if opts.CharsPerToken != nil {
 		o.CharsPerToken = *opts.CharsPerToken
@@ -218,7 +224,10 @@ type TransformInfo struct {
 	ImageSourceText        string             `json:"imageSourceText,omitempty"`
 	ToolResultImgs         int                `json:"toolResultImgs,omitempty"`
 	NativeImages           int                `json:"nativeImages,omitempty"`
+	NativeImageBytes       int                `json:"nativeImageBytes,omitempty"`
 	ImageBudgetSkips       int                `json:"imageBudgetSkips,omitempty"`
+	ImageByteSkips         int                `json:"imageByteSkips,omitempty"`
+	ImageBytesNearLimit    bool               `json:"imageBytesNearLimit,omitempty"`
 	WireImages             int                `json:"wireImages,omitempty"`
 	ToolDocsChars          int                `json:"toolDocsChars,omitempty"`
 	DroppedChars           int                `json:"droppedChars"`
@@ -1507,13 +1516,58 @@ func countNativeImages(messages []any) int {
 	return n
 }
 
+func countNativeImageBytes(messages []any) int {
+	bytes := 0
+	add := func(v any) {
+		block, ok := asMap(v)
+		if ok && blockType(v) == "image" {
+			bytes += approxBlockBytes(block)
+		}
+	}
+	for _, mv := range messages {
+		m, ok := asMap(mv)
+		if !ok {
+			continue
+		}
+		content, ok := asArr(m["content"])
+		if !ok {
+			continue
+		}
+		for _, bv := range content {
+			add(bv)
+			if blockType(bv) != "tool_result" {
+				continue
+			}
+			block, _ := asMap(bv)
+			inner, _ := asArr(block["content"])
+			for _, iv := range inner {
+				add(iv)
+			}
+		}
+	}
+	return bytes
+}
+
 func imageHeadroom(info *TransformInfo) int {
 	return maxInt(0, AnthropicMaxImages-historyImageSafetyMargin-info.ImageCount-info.NativeImages)
+}
+
+func imageByteHeadroom(info *TransformInfo, limit int) int {
+	return maxInt(0, limit-info.ImageBytes-info.NativeImageBytes)
+}
+
+func nearImageByteLimit(info *TransformInfo, limit int) bool {
+	return limit > 0 && info.ImageBytes+info.NativeImageBytes >= limit*9/10
 }
 
 func recordImageBudgetSkip(info *TransformInfo) {
 	bumpPassthrough(info, "image_budget")
 	info.ImageBudgetSkips++
+}
+
+func recordImageByteSkip(info *TransformInfo) {
+	bumpPassthrough(info, "image_budget")
+	info.ImageByteSkips++
 }
 
 func finalizeWireTelemetry(req map[string]any, info *TransformInfo) {
@@ -1610,6 +1664,11 @@ func runHistoryCollapse(req map[string]any, info *TransformInfo, o *resolvedOpti
 			info.HistoryReason = "too_many_images"
 			return false, nil
 		}
+		if histInfo.collapsedImageBytes > imageByteHeadroom(info, o.MaxImageBytes) {
+			recordImageByteSkip(info)
+			info.HistoryReason = "image_bytes"
+			return false, nil
+		}
 		recordHistoryGridInfo(info, histInfo, tuning)
 		if histInfo.freezeStep > 0 {
 			o.historySessions.recordFreezeStep(sessionKey, histInfo.freezeStep)
@@ -1673,6 +1732,7 @@ func finalizeEarly(req map[string]any, bodyBytes int, info *TransformInfo, o *re
 	applyPins(req, info, pins)
 	info.OutgoingTextChars = countOutgoingTextChars(req)
 	finalizeWireTelemetry(req, info)
+	info.ImageBytesNearLimit = nearImageByteLimit(info, o.MaxImageBytes)
 	return jsStringifyCap(req, openAIJSONCapacity(bodyBytes, info.ImageBytes)), collapsed, nil
 }
 
@@ -1723,6 +1783,7 @@ func TransformRequest(body []byte, opts *TransformOptions) (outBody []byte, info
 func transformParsed(req map[string]any, body []byte, o *resolvedOptions, info *TransformInfo, droppedCodepoints map[rune]int) ([]byte, error) {
 	msgsAtEntry, _ := asArr(req["messages"])
 	info.NativeImages = countNativeImages(msgsAtEntry)
+	info.NativeImageBytes = countNativeImageBytes(msgsAtEntry)
 
 	// Step 0: fold user pins and strip their commands from the outbound copy.
 	var pins []pin
@@ -1940,9 +2001,20 @@ func transformParsed(req map[string]any, body []byte, o *resolvedOptions, info *
 	if err != nil {
 		return nil, err
 	}
-	if len(images) > imageHeadroom(info) {
-		info.Reason = "image_budget (slab needs " + strconv.Itoa(len(images)) + ", headroom " + strconv.Itoa(imageHeadroom(info)) + ")"
-		recordImageBudgetSkip(info)
+	slabBytes := 0
+	for _, img := range images {
+		slabBytes += len(img.PNG)
+	}
+	slabOverCount := len(images) > imageHeadroom(info)
+	slabOverBytes := slabBytes > imageByteHeadroom(info, o.MaxImageBytes)
+	if slabOverCount || slabOverBytes {
+		if slabOverCount {
+			info.Reason = "image_budget (slab needs " + strconv.Itoa(len(images)) + ", headroom " + strconv.Itoa(imageHeadroom(info)) + ")"
+			recordImageBudgetSkip(info)
+		} else {
+			info.Reason = "image_bytes (slab needs " + strconv.Itoa(slabBytes) + ", headroom " + strconv.Itoa(imageByteHeadroom(info, o.MaxImageBytes)) + ")"
+			recordImageByteSkip(info)
+		}
 		finalBody, collapsed, err := finalizeEarly(req, len(body), info, o, droppedCodepoints, pins)
 		if err != nil {
 			return nil, err
@@ -2104,6 +2176,7 @@ func transformParsed(req map[string]any, body []byte, o *resolvedOptions, info *
 	applyPins(req, info, pins)
 	info.OutgoingTextChars = countOutgoingTextChars(req)
 	finalizeWireTelemetry(req, info)
+	info.ImageBytesNearLimit = nearImageByteLimit(info, o.MaxImageBytes)
 	return jsStringifyCap(req, openAIJSONCapacity(len(body), info.ImageBytes)), nil
 }
 
@@ -2168,6 +2241,15 @@ func compressToolResults(req map[string]any, o *resolvedOptions, info *Transform
 				}
 				if len(rb.blocks) > imageHeadroom(info) {
 					recordImageBudgetSkip(info)
+					rewritten = append(rewritten, bv)
+					continue
+				}
+				groupBytes := 0
+				for _, img := range rb.blocks {
+					groupBytes += approxBlockBytes(img)
+				}
+				if groupBytes > imageByteHeadroom(info, o.MaxImageBytes) {
+					recordImageByteSkip(info)
 					rewritten = append(rewritten, bv)
 					continue
 				}
@@ -2248,6 +2330,15 @@ func compressToolResults(req map[string]any, o *resolvedOptions, info *Transform
 					}
 					if len(rb.blocks) > imageHeadroom(info) {
 						recordImageBudgetSkip(info)
+						newInner = append(newInner, iv)
+						continue
+					}
+					partBytes := 0
+					for _, img := range rb.blocks {
+						partBytes += approxBlockBytes(img)
+					}
+					if partBytes > imageByteHeadroom(info, o.MaxImageBytes) {
+						recordImageByteSkip(info)
 						newInner = append(newInner, iv)
 						continue
 					}
