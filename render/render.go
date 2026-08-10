@@ -477,6 +477,28 @@ func MeasureLineCols(line string, markerScale int, font string) int {
 	return w
 }
 
+func measureEscapedLineCols(line string, maxCols, markerScale int, selected *atlas.Set, def *atlas.Atlas) int {
+	w := 0
+	for i := 0; i < len(line); {
+		if line[i] < utf8.RuneSelf {
+			i++
+			w++
+		} else {
+			r, size := utf8.DecodeRuneInString(line[i:])
+			i += size
+			if r != nlSentinelCp && def.Rank(r) < 0 && !isEscapeExempt(r) {
+				w += len(GlyphEscapeOpen) + len(strconvHex(r)) + len(GlyphEscapeClose)
+			} else {
+				w += cellsFor(r, markerScale, selected)
+			}
+		}
+		if w >= maxCols {
+			return maxCols
+		}
+	}
+	return w
+}
+
 func ShrinkColsToContent(text string, cols, markerScale int, font string) int {
 	return MeasureContentCols(text, cols, markerScale, font)
 }
@@ -489,8 +511,16 @@ func MeasureContentCols(text string, maxCols, markerScale int, font string) int 
 		cap_ = 1
 	}
 	widest := 1
+	selected := atlasSet(font)
+	def := atlas.Default().Bit
 	for line := range strings.SplitSeq(text, "\n") {
-		w := MeasureLineCols(EscapeMissingGlyphs(ExpandTabsInLine(line)), markerScale, font)
+		line = ExpandTabsInLine(line)
+		w := 0
+		if len(line) <= cap_ {
+			w = MeasureLineCols(EscapeMissingGlyphs(line), markerScale, font)
+		} else {
+			w = measureEscapedLineCols(line, cap_, markerScale, selected, def)
+		}
 		if w > widest {
 			widest = w
 		}
