@@ -430,7 +430,7 @@ Initialize the pinned TS reference implementation first:
 ```bash
 git submodule update --init --recursive
 cd pxpipe
-bun install --frozen-lockfile --no-save
+pnpm install --frozen-lockfile
 bun run ../tools/dump-atlas.ts
 bun run ../tools/gen-fixtures.ts
 bun run ../tools/gen-fixtures-openai.ts
