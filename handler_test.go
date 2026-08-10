@@ -660,7 +660,7 @@ func TestDefaultProtocolOf(t *testing.T) {
 	}
 }
 
-func TestHandlerOversizedBodyPassesThroughUnchanged(t *testing.T) {
+func TestHandlerRejectsOversizedTransformableBody(t *testing.T) {
 	payload := []byte(`{"model":"claude-fable-5","messages":[],"padding":"` + strings.Repeat("x", 128) + `"}`)
 
 	for _, chunked := range []bool{false, true} {
@@ -700,30 +700,36 @@ func TestHandlerOversizedBodyPassesThroughUnchanged(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
+			responseBody, _ := io.ReadAll(resp.Body)
 			resp.Body.Close()
+			if resp.StatusCode != http.StatusRequestEntityTooLarge || !bytes.Contains(responseBody, []byte(`"type":"request_too_large"`)) {
+				t.Fatalf("response = %d %s", resp.StatusCode, responseBody)
+			}
 			if called {
 				t.Fatal("oversized body must not be transformed")
 			}
-			if !bytes.Equal(upstreamBody, payload) {
-				t.Fatalf("upstream body was truncated: got %d bytes, want %d", len(upstreamBody), len(payload))
+			if upstreamBody != nil {
+				t.Fatalf("oversized body reached upstream: %d bytes", len(upstreamBody))
 			}
 		})
 	}
 }
 
 func TestHandlerBodyLengthHintsPreservePayload(t *testing.T) {
+	payload := []byte(`{"model":"claude-sonnet-4-6","messages":[],"padding":"` + strings.Repeat("x", 40) + `"}`)
 	for _, tc := range []struct {
 		name          string
 		contentLength int64
 		maxBodyBytes  int64
+		wantStatus    int
 		wantResult    bool
 	}{
-		{name: "short_hint_oversized", contentLength: 32, maxBodyBytes: 64},
-		{name: "long_hint", contentLength: 120, maxBodyBytes: 128, wantResult: true},
-		{name: "false_large_hint", contentLength: 8 << 20, maxBodyBytes: defaultMaxBodyBytes, wantResult: true},
+		{name: "short_hint_oversized", contentLength: 32, maxBodyBytes: 64, wantStatus: http.StatusRequestEntityTooLarge},
+		{name: "exact_boundary", contentLength: int64(len(payload)), maxBodyBytes: int64(len(payload)), wantStatus: http.StatusNoContent, wantResult: true},
+		{name: "long_hint", contentLength: 120, maxBodyBytes: 128, wantStatus: http.StatusNoContent, wantResult: true},
+		{name: "false_large_hint", contentLength: 8 << 20, maxBodyBytes: defaultMaxBodyBytes, wantStatus: http.StatusNoContent, wantResult: true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			payload := []byte(`{"model":"claude-sonnet-4-6","messages":[],"padding":"` + strings.Repeat("x", 40) + `"}`)
 			var forwarded []byte
 			var called bool
 			zero := time.Duration(0)
@@ -747,16 +753,40 @@ func TestHandlerBodyLengthHintsPreservePayload(t *testing.T) {
 			req.ContentLength = tc.contentLength
 			recorder := httptest.NewRecorder()
 			h.ServeHTTP(recorder, req)
-			if recorder.Code != http.StatusNoContent {
+			if recorder.Code != tc.wantStatus {
 				t.Fatalf("status = %d", recorder.Code)
 			}
 			if called != tc.wantResult {
 				t.Fatalf("OnResult called = %v, want %v", called, tc.wantResult)
 			}
-			if !bytes.Equal(forwarded, payload) {
+			if tc.wantStatus == http.StatusNoContent && !bytes.Equal(forwarded, payload) {
 				t.Fatalf("forwarded %d bytes, want %d", len(forwarded), len(payload))
 			}
+			if tc.wantStatus != http.StatusNoContent && forwarded != nil {
+				t.Fatalf("rejected request forwarded %d bytes", len(forwarded))
+			}
 		})
+	}
+}
+
+func TestHandlerOversizedBypassPassesThrough(t *testing.T) {
+	payload := []byte(`{"model":"claude-fable-5","messages":[],"padding":"` + strings.Repeat("x", 128) + `"}`)
+	var upstreamBody []byte
+	up := upstreamEcho(t, &upstreamBody)
+	defer up.Close()
+	u, _ := url.Parse(up.URL)
+	srv := httptest.NewServer(NewHandler(HandlerOptions{AnthropicUpstream: u, MaxBodyBytes: 32}))
+	defer srv.Close()
+
+	req, _ := http.NewRequest(http.MethodPost, srv.URL+"/v1/messages", bytes.NewReader(payload))
+	req.Header.Set("X-Pxpipe-Bypass", "1")
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusOK || !bytes.Equal(upstreamBody, payload) {
+		t.Fatalf("bypass response=%d body=%d/%d", resp.StatusCode, len(upstreamBody), len(payload))
 	}
 }
 
