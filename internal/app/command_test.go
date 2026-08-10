@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"strings"
 	"testing"
 )
 
@@ -90,6 +91,33 @@ func TestReportsBuildVersion(t *testing.T) {
 				t.Fatalf("version output = %q, want %q", got, want)
 			}
 		})
+	}
+}
+
+func TestHelpShowsSupportedLaunchers(t *testing.T) {
+	var stdout bytes.Buffer
+	command, _ := newRootCommand(nil, &stdout, io.Discard, func(profile) (int, error) {
+		t.Fatal("execute called")
+		return 0, nil
+	}, func(int) error {
+		t.Fatal("serve called")
+		return nil
+	})
+	command.SetArgs([]string{"help"})
+	if err := command.Execute(); err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{
+		"pxpipe claude --model opus",
+		"pxpipe Claude.app",
+		"pxpipe codex --model gpt-5.6-sol",
+		"pxpipe opencode --model openai/gpt-5.6-sol",
+		"pxpipe another-cli --its-child-flag",
+		"pxpipe serve",
+	} {
+		if !strings.Contains(stdout.String(), want) {
+			t.Fatalf("help missing %q: %s", want, stdout.String())
+		}
 	}
 }
 
