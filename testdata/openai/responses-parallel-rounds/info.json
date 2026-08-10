@@ -3,7 +3,7 @@
   "origChars": 54,
   "compressedChars": 0,
   "imageCount": 2,
-  "imageBytes": 150251,
+  "imageBytes": 130091,
   "staticChars": 38,
   "dynamicChars": 0,
   "dynamicBlockCount": 0,
@@ -59,6 +59,6 @@
     "history": 49302
   },
   "nativeInjectedTokens": 888,
-  "historyImageSha": "2e35565b",
+  "historyImageSha": "b902b674",
   "outgoingTextChars": 3082
 }

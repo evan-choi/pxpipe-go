@@ -9,6 +9,7 @@
   "dynamicBlockCount": 0,
   "droppedChars": 0,
   "nativeImages": 0,
+  "nativeImageBytes": 0,
   "firstUserSha8": "ea5c1e77",
   "systemSha8": "97dd3b60",
   "reason": "below_min_chars (14 < 2000)",

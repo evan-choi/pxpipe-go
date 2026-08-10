@@ -3,7 +3,7 @@
   "origChars": 29439,
   "compressedChars": 29439,
   "imageCount": 20,
-  "imageBytes": 422366,
+  "imageBytes": 480009,
   "staticChars": 23533,
   "dynamicChars": 0,
   "dynamicBlockCount": 0,
@@ -162,6 +162,6 @@
   "collapsedImages": 8,
   "historyTextChars": 19056,
   "historyReason": "collapsed",
-  "historyImageSha": "3de67477",
+  "historyImageSha": "7012906d",
   "outgoingTextChars": 5187
 }

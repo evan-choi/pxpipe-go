@@ -286,7 +286,8 @@ async function genTransform() {
     writeFileSync(join(dir, 'opts.json'), JSON.stringify(serializableOpts, null, 2));
     const { body, info } = await transformRequest(bodyBytes, c.opts);
     writeFileSync(join(dir, 'output.json'), body);
-    writeFileSync(join(dir, 'info.json'), JSON.stringify(info, null, 2));
+    const { imagePngs: _p, firstImagePng: _f, ...serializableInfo } = info as unknown as Record<string, unknown>;
+    writeFileSync(join(dir, 'info.json'), JSON.stringify(serializableInfo, null, 2));
     console.log(`transform/${c.name}: compressed=${info.compressed} reason=${info.reason ?? ''} images=${info.imageCount}`);
   }
 }
