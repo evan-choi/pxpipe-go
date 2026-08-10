@@ -1,6 +1,8 @@
 package pxpipe
 
 import (
+	"bytes"
+	"encoding/json"
 	"strconv"
 	"strings"
 	"sync"
@@ -9,6 +11,32 @@ import (
 
 var benchmarkJSONBytes []byte
 var benchmarkJSONString string
+
+func TestAppendJSStringWordScan(t *testing.T) {
+	for offset := range 17 {
+		for value := range 128 {
+			input := bytes.Repeat([]byte{'a'}, 17)
+			input[offset] = byte(value)
+			var want bytes.Buffer
+			encoder := json.NewEncoder(&want)
+			encoder.SetEscapeHTML(false)
+			if err := encoder.Encode(string(input)); err != nil {
+				t.Fatal(err)
+			}
+			if got := string(appendJSString(nil, string(input))); got != strings.TrimSuffix(want.String(), "\n") {
+				t.Fatalf("appendJSString byte %#x at %d = %q, want %q", value, offset, got, strings.TrimSuffix(want.String(), "\n"))
+			}
+		}
+	}
+	for input, want := range map[string]string{
+		"한글😀":                          `"한글😀"`,
+		string([]byte{'a', 0xff, 'b'}): `"a�b"`,
+	} {
+		if got := string(appendJSString(nil, input)); got != want {
+			t.Fatalf("appendJSString(%q) = %q, want %q", input, got, want)
+		}
+	}
+}
 
 func TestParseOrderedJSONByteView(t *testing.T) {
 	body := []byte(`{"first":1,"second":"value"}`)
