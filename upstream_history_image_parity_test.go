@@ -353,7 +353,7 @@ func TestUpstreamHistoryImageParity(t *testing.T) {
 		}
 	})
 
-	t.Run("wire telemetry counts outgoing images after history absorption", func(t *testing.T) {
+	t.Run("wire telemetry counts outgoing images after history collapse", func(t *testing.T) {
 		messages := []any{map[string]any{"role": "user", "content": "ANCHOR " + strings.Repeat("a", 200)}}
 		for i := 0; i < 60; i++ {
 			messages = append(messages, map[string]any{
@@ -376,8 +376,8 @@ func TestUpstreamHistoryImageParity(t *testing.T) {
 		if info.WireImages != actual {
 			t.Fatalf("wire telemetry=%d, outgoing body=%d", info.WireImages, actual)
 		}
-		if info.ImageCount <= actual {
-			t.Fatalf("test did not observe absorbed rendered images: render=%d wire=%d", info.ImageCount, actual)
+		if info.ImageCount != actual {
+			t.Fatalf("render telemetry=%d, outgoing body=%d", info.ImageCount, actual)
 		}
 		if actual > AnthropicMaxImages {
 			t.Fatalf("outgoing body has %d images, cap=%d", actual, AnthropicMaxImages)
