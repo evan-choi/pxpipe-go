@@ -325,9 +325,25 @@ func SlotCopyBody(body string) string {
 // role-wrapped turn `<tag attr>\nbody\n</tag>`; marker runs must cover the
 // attr too since coloring is positional.
 func RoleSlotSegment(tag, body, mark, attr string) string {
-	open := "<" + tag + attr + ">"
-	close := "</" + tag + ">"
-	return strings.Repeat(mark, utf16Len(open)) + "\n" + SlotCopyBody(body) + "\n" + strings.Repeat(mark, utf16Len(close))
+	var out strings.Builder
+	WriteRoleSlotSegment(&out, tag, body, mark, attr)
+	return out.String()
+}
+
+// WriteRoleSlotSegment appends RoleSlotSegment directly to out.
+func WriteRoleSlotSegment(out *strings.Builder, tag, body, mark, attr string) {
+	openLen := 2 + utf16Len(tag) + utf16Len(attr)
+	closeLen := 3 + utf16Len(tag)
+	out.Grow((openLen+closeLen)*len(mark) + len(body) + 2)
+	for range openLen {
+		out.WriteString(mark)
+	}
+	out.WriteByte('\n')
+	out.WriteString(SlotCopyBody(body))
+	out.WriteByte('\n')
+	for range closeLen {
+		out.WriteString(mark)
+	}
 }
 
 func slotForMarkCp(cp rune, ok bool) int {

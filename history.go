@@ -739,7 +739,7 @@ func collapseHistory(messages []any, isProfitable profitableFn, o historyCollaps
 			textOut.WriteString(cost.tag)
 			textOut.WriteByte('>')
 			if withSlots {
-				slotOut.WriteString(render.RoleSlotSegment(cost.tag, cost.body, cost.mark, attr))
+				render.WriteRoleSlotSegment(&slotOut, cost.tag, cost.body, cost.mark, attr)
 			}
 			wrote = true
 		}
