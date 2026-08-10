@@ -1047,6 +1047,12 @@ func planResponsesMixedCollapse(items []any, old []responsesCompletedRound, stat
 		}
 		low, high := 0, len(run)+1
 		var best renderedUnits
+		full := prepareUnitTextPrefix(source, len(source), packed, packedEnds, len(run), o)
+		if full.fits(o, remainingImages) {
+			low, best = len(run), full
+		} else {
+			high--
+		}
 		for low+1 < high {
 			count := (low + high) / 2
 			prefixEnd := allTextEnds[runStart+count-1] - sourceStart
@@ -1243,6 +1249,12 @@ func planResponsesPairCollapse(items []any, isProfitable gptProfitableFn, o gptH
 		}
 		low, high := 0, len(run)+1
 		var best renderedUnits
+		full := prepareUnitTextPrefix(source, len(source), packed, packedEnds, len(run), o)
+		if full.fits(o, remainingImages) {
+			low, best = len(run), full
+		} else {
+			high--
+		}
 		for low+1 < high {
 			count := (low + high) / 2
 			prefixEnd := allTextEnds[runStart+count-1] - sourceStart
