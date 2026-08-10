@@ -23,10 +23,12 @@ const (
 )
 
 type modelProfile struct {
-	stripCols   int
-	maxHeightPx int
-	style       render.RenderStyle
-	pricing     *GptModelProfile
+	stripCols        int
+	maxHeightPx      int
+	style            render.RenderStyle
+	historyStripCols *int
+	historyStyle     *render.RenderStyle
+	pricing          *GptModelProfile
 }
 
 func isClaudeModel(model string) bool {
@@ -86,10 +88,12 @@ func resolveProfile(model string) *modelProfile {
 	}
 	p := ResolveGptProfile(model)
 	return &modelProfile{
-		stripCols:   p.StripCols,
-		maxHeightPx: p.MaxHeightPx,
-		style:       p.Style,
-		pricing:     p,
+		stripCols:        p.StripCols,
+		maxHeightPx:      p.MaxHeightPx,
+		style:            p.Style,
+		historyStripCols: p.HistoryStripCols,
+		historyStyle:     p.HistoryStyle,
+		pricing:          p,
 	}
 }
 

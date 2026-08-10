@@ -274,6 +274,22 @@ func TestHistoryCollapseSeesOriginalToolResults(t *testing.T) {
 	}
 }
 
+func TestClaudeHistoryUsesProfileGeometry(t *testing.T) {
+	fable := historyGateGeometry(resolveOptions(&TransformOptions{Model: "claude-fable-5"}))
+	if fable.cols != 312 || fable.style.Font == "jetbrains-mono-14" {
+		t.Fatalf("Fable history geometry = cols %d, font %q", fable.cols, fable.style.Font)
+	}
+	opus := historyGateGeometry(resolveOptions(&TransformOptions{Model: "claude-opus-5"}))
+	if opus.cols != 172 || opus.style.Font != "jetbrains-mono-14" {
+		t.Fatalf("Opus history geometry = cols %d, font %q", opus.cols, opus.style.Font)
+	}
+	cols := 160
+	overridden := historyGateGeometry(resolveOptions(&TransformOptions{Model: "claude-opus-5", Cols: &cols}))
+	if overridden.cols != cols || overridden.style.Font != "jetbrains-mono-14" {
+		t.Fatalf("overridden history geometry = cols %d, font %q", overridden.cols, overridden.style.Font)
+	}
+}
+
 func TestCachePrefixComponentAndMarkedDiagnostics(t *testing.T) {
 	marked := map[string]any{"type": "image", "source": map[string]any{"data": "a"}, "cache_control": map[string]any{"type": "ephemeral"}}
 	req := map[string]any{

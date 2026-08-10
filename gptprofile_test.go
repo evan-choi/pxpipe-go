@@ -117,7 +117,7 @@ func TestGoldenGptProfiles(t *testing.T) {
 }
 
 func TestGptEnvProfileOverride(t *testing.T) {
-	t.Setenv("PXPIPE_GPT_PROFILES", `{"kimi-k3":{"vision":{"regime":"mpix","tokensPerMegapixel":1000},"stripCols":152,"maxHeightPx":1932},"gpt-5.6-sol":{"stripCols":120}}`)
+	t.Setenv("PXPIPE_GPT_PROFILES", `{"kimi-k3":{"vision":{"regime":"mpix","tokensPerMegapixel":1000},"stripCols":152,"maxHeightPx":1932},"gpt-5.6-sol":{"stripCols":120,"historyStripCols":111,"historyStyle":{"font":"jetbrains-mono-12"}}}`)
 	p := ResolveGptProfile("moonshotai/kimi-k3")
 	if p.Vision.Regime != "mpix" || p.Vision.TokensPerMegapixel != 1000 {
 		t.Errorf("kimi-k3 vision = %+v", p.Vision)
@@ -132,6 +132,9 @@ func TestGptEnvProfileOverride(t *testing.T) {
 	// Inherits Sol's font even though the env only set stripCols.
 	if sol.Style.Font != "jetbrains-mono-14" {
 		t.Errorf("sol override font = %q", sol.Style.Font)
+	}
+	if sol.HistoryStripCols == nil || *sol.HistoryStripCols != 111 || sol.HistoryStyle == nil || sol.HistoryStyle.Font != "jetbrains-mono-12" {
+		t.Errorf("sol history geometry = cols %v style %+v", sol.HistoryStripCols, sol.HistoryStyle)
 	}
 	if IsMisresolvedModelId("moonshotai/kimi-k3") {
 		t.Error("declared env id must not be misresolved")

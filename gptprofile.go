@@ -72,12 +72,14 @@ type GptModelProfile struct {
 	// MinCompressTokens nil preserves the legacy character floor.
 	MinCompressTokens *int `json:"minCompressTokens,omitempty"`
 	// VisionTier "" = standard; only Claude profiles set it.
-	VisionTier                string             `json:"visionTier,omitempty"`
-	FactSheetFormat           string             `json:"factSheetFormat"` // "full" | "compact"
-	History                   GptHistoryProfile  `json:"history"`
-	Style                     render.RenderStyle `json:"style"`
-	MaxSerializedRequestBytes int                `json:"maxSerializedRequestBytes,omitempty"`
-	ExactStaticBaseline       bool               `json:"exactStaticBaseline,omitempty"`
+	VisionTier                string              `json:"visionTier,omitempty"`
+	FactSheetFormat           string              `json:"factSheetFormat"` // "full" | "compact"
+	History                   GptHistoryProfile   `json:"history"`
+	Style                     render.RenderStyle  `json:"style"`
+	HistoryStripCols          *int                `json:"historyStripCols,omitempty"`
+	HistoryStyle              *render.RenderStyle `json:"historyStyle,omitempty"`
+	MaxSerializedRequestBytes int                 `json:"maxSerializedRequestBytes,omitempty"`
+	ExactStaticBaseline       bool                `json:"exactStaticBaseline,omitempty"`
 }
 
 func intPtr(v int) *int { return &v }
@@ -233,11 +235,33 @@ var claudeLegacyGptProfile = func() *GptModelProfile {
 	return &p
 }()
 
+var claudeLegibleGptProfile = func() *GptModelProfile {
+	p := *claudeGptProfile
+	p.HistoryStripCols = intPtr(172)
+	style := render.RenderStyle{Font: "jetbrains-mono-14", AA: true, MarkerScale: 1}
+	p.HistoryStyle = &style
+	return &p
+}()
+
+var claudeLegacyLegibleGptProfile = func() *GptModelProfile {
+	p := *claudeLegibleGptProfile
+	p.VisionTier = "standard"
+	return &p
+}()
+
+func isFableClaude(m string) bool { return strings.Contains(strings.ToLower(m), "fable") }
+
 func resolveClaudeGptProfile(m string) *GptModelProfile {
-	if isPre47Claude(m) {
-		return claudeLegacyGptProfile
+	if isFableClaude(m) {
+		if isPre47Claude(m) {
+			return claudeLegacyGptProfile
+		}
+		return claudeGptProfile
 	}
-	return claudeGptProfile
+	if isPre47Claude(m) {
+		return claudeLegacyLegibleGptProfile
+	}
+	return claudeLegibleGptProfile
 }
 
 // Gemini 3.6 Flash (gemini-model-profiles.ts).
@@ -417,6 +441,8 @@ type envProfileIn struct {
 	FactSheetFormat           *string       `json:"factSheetFormat"`
 	History                   *envHistoryIn `json:"history"`
 	Style                     *envStyleIn   `json:"style"`
+	HistoryStripCols          *float64      `json:"historyStripCols"`
+	HistoryStyle              *envStyleIn   `json:"historyStyle"`
 	MaxSerializedRequestBytes *float64      `json:"maxSerializedRequestBytes"`
 	ExactStaticBaseline       *bool         `json:"exactStaticBaseline"`
 }
@@ -614,6 +640,21 @@ func parseGptEnvProfiles(raw string) (map[string]*GptModelProfile, []string) {
 		if p.ExactStaticBaseline != nil {
 			exactBase = *p.ExactStaticBaseline
 		}
+		historyStripCols := base.HistoryStripCols
+		if p.HistoryStripCols != nil {
+			fallback := base.StripCols
+			if historyStripCols != nil {
+				fallback = *historyStripCols
+			}
+			value := envPosInt(p.HistoryStripCols, fallback)
+			historyStripCols = &value
+		}
+		historyStyle := base.HistoryStyle
+		if p.HistoryStyle != nil {
+			value := style
+			value.Font = envRenderFont(p.HistoryStyle.Font, style.Font)
+			historyStyle = &value
+		}
 		out[key] = &GptModelProfile{
 			Vision:                    vision,
 			CacheReadRate:             envRate(p.CacheReadRate, base.CacheReadRate),
@@ -625,6 +666,8 @@ func parseGptEnvProfiles(raw string) (map[string]*GptModelProfile, []string) {
 			FactSheetFormat:           envEnum(p.FactSheetFormat, base.FactSheetFormat, "full", "compact"),
 			History:                   history,
 			Style:                     style,
+			HistoryStripCols:          historyStripCols,
+			HistoryStyle:              historyStyle,
 			MaxSerializedRequestBytes: maxSer,
 			ExactStaticBaseline:       exactBase,
 		}
