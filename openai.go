@@ -28,6 +28,7 @@ const pinnedRequestHeader = "\n===== CURRENT USER REQUEST (live; kept as text by
 const pinnedRequestFooter = "\n===== END CURRENT USER REQUEST =====\n"
 
 const maxOpenAIJSONPreallocBytes = 8 << 20
+const openAIImageSourcePreviewChars = 65_536
 
 func openAIJSONCapacity(bodyBytes, imageBytes int) int {
 	if bodyBytes < 0 {
@@ -44,6 +45,13 @@ func openAIJSONCapacity(bodyBytes, imageBytes int) int {
 		return maxOpenAIJSONPreallocBytes
 	}
 	return bodyBytes + imageBase64Bytes
+}
+
+func openAIImageSourceText(text string, chars int) string {
+	if chars <= openAIImageSourcePreviewChars {
+		return text
+	}
+	return u16Slice(text, 0, openAIImageSourcePreviewChars)
 }
 
 // ChatHeader mirrors CHAT_HEADER in openai.ts.
@@ -683,9 +691,10 @@ func gptDroppedCodepointsTop(droppedCodepoints map[rune]int) map[string]int {
 }
 
 type openAIGateResult struct {
-	ImageTokens float64
-	TextTokens  float64
-	Profitable  bool
+	ImageTokens   float64
+	TextTokens    float64
+	RenderedChars int
+	Profitable    bool
 }
 
 // evalOpenAIGate reproduces the renderer's exact page split and compares
@@ -730,7 +739,7 @@ func evalOpenAIGate(model, renderedText string, cols int, charsPerToken float64,
 	default:
 		textTokens = float64(renderedChars) / math.Max(1e-6, charsPerToken)
 	}
-	return openAIGateResult{ImageTokens: imageTokens, TextTokens: textTokens, Profitable: imageTokens < textTokens}
+	return openAIGateResult{ImageTokens: imageTokens, TextTokens: textTokens, RenderedChars: renderedChars, Profitable: imageTokens < textTokens}
 }
 
 func accumulateRenderedImages(images []*render.RenderedImage, info *TransformInfo) map[rune]int {
@@ -1204,8 +1213,8 @@ func TransformOpenAIChatCompletions(body []byte, opts *TransformOptions) ([]byte
 	info.ImageCount = len(images)
 	info.ImageTokens = gptImageTokens(model, images)
 	info.BaselineImagedTokens = staticBaselineTokens
-	info.CompressedChars = u16len(combinedRaw)
-	info.BucketChars = map[string]int{"static_slab": u16len(combinedRaw)}
+	info.CompressedChars = info.OrigChars
+	info.BucketChars = map[string]int{"static_slab": info.OrigChars}
 	info.SystemSha8 = sha8(combined)
 	info.FirstImagePNG = images[0].PNG
 	info.FirstImageWidth = images[0].Width
@@ -1214,7 +1223,7 @@ func TransformOpenAIChatCompletions(body []byte, opts *TransformOptions) ([]byte
 		info.ImagePNGs = append(info.ImagePNGs, img.PNG)
 		info.ImageDims = append(info.ImageDims, imageDim{Width: img.Width, Height: img.Height})
 	}
-	info.ImageSourceText = u16Slice(renderedText, 0, 65_536)
+	info.ImageSourceText = openAIImageSourceText(renderedText, gate.RenderedChars)
 	for range images {
 		info.ImageSourceTexts = append(info.ImageSourceTexts, info.ImageSourceText)
 	}
@@ -1439,8 +1448,8 @@ func TransformOpenAIResponses(body []byte, opts *TransformOptions) ([]byte, *Tra
 	info.ImageCount = len(images)
 	info.ImageTokens = gptImageTokens(model, images)
 	info.BaselineImagedTokens = staticBaselineTokens
-	info.CompressedChars = u16len(combinedRaw)
-	info.BucketChars = map[string]int{"static_slab": u16len(combinedRaw)}
+	info.CompressedChars = info.OrigChars
+	info.BucketChars = map[string]int{"static_slab": info.OrigChars}
 	info.SystemSha8 = sha8(combined)
 	info.FirstImagePNG = images[0].PNG
 	info.FirstImageWidth = images[0].Width
@@ -1449,7 +1458,7 @@ func TransformOpenAIResponses(body []byte, opts *TransformOptions) ([]byte, *Tra
 		info.ImagePNGs = append(info.ImagePNGs, img.PNG)
 		info.ImageDims = append(info.ImageDims, imageDim{Width: img.Width, Height: img.Height})
 	}
-	info.ImageSourceText = u16Slice(renderedText, 0, 65_536)
+	info.ImageSourceText = openAIImageSourceText(renderedText, gate.RenderedChars)
 	for range images {
 		info.ImageSourceTexts = append(info.ImageSourceTexts, info.ImageSourceText)
 	}
