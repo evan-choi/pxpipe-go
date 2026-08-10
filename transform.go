@@ -1819,7 +1819,7 @@ func transformParsed(req map[string]any, body []byte, o *resolvedOptions, info *
 	// Step 0: fold user pins and strip their commands from the outbound copy.
 	var pins []pin
 	pinsRewrote := false
-	if msgs, ok := asArr(req["messages"]); ok && canAppendPinBlock(msgs) {
+	if msgs, ok := asArr(req["messages"]); ok && canAppendPinBlock(msgs) && hasPinCommandCandidate(msgs, req["system"]) {
 		func() {
 			defer func() {
 				if r := recover(); r != nil {
