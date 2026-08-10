@@ -115,12 +115,17 @@ func imageTokensForRows(visualRows, cols, imageCountCap, maxCharsPerImage int, g
 }
 
 func imageTokensCost(text string, cols, imageCountCap int, shrinkWidth bool, maxCharsPerImage int, g gateGeometry) float64 {
+	tokens, _ := imageTokensCostMetrics(text, cols, imageCountCap, shrinkWidth, maxCharsPerImage, g)
+	return tokens
+}
+
+func imageTokensCostMetrics(text string, cols, imageCountCap int, shrinkWidth bool, maxCharsPerImage int, g gateGeometry) (float64, int) {
 	effectiveCols := cols
 	if shrinkWidth {
 		effectiveCols = render.ShrinkColsToContent(text, cols, 1, g.style.Font)
 	}
-	rows := countVisualRows(text, effectiveCols)
-	return imageTokensForRows(rows, effectiveCols, imageCountCap, maxCharsPerImage, g)
+	rows, chars := measureVisualRows(text, effectiveCols)
+	return imageTokensForRows(rows, effectiveCols, imageCountCap, maxCharsPerImage, g), chars
 }
 
 // countVisualRows counts soft-wrapped rows: only hard \n breaks; the ↵
@@ -192,8 +197,8 @@ func evalCompressionProfitability(text string, cols, imageCountCap int, charsPer
 		return nil
 	}
 	cpt := normCpt(charsPerToken)
-	imageTokens := imageTokensCost(text, cols, imageCountCap, shrinkWidth, render.ReadableCharsPerImage, g)
-	textTokens := float64(u16len(text)) / cpt
+	imageTokens, chars := imageTokensCostMetrics(text, cols, imageCountCap, shrinkWidth, render.ReadableCharsPerImage, g)
+	textTokens := float64(chars) / cpt
 	burnImg, burnText := burnSides(priorWarmTokens, priorWarmImageTokens)
 	return &gateEval{
 		ImageTokens:   imageTokens,
@@ -209,8 +214,8 @@ func isCompressionProfitable(text string, cols, imageCountCap int, charsPerToken
 		return false
 	}
 	cpt := normCpt(charsPerToken)
-	cost := imageTokensCost(text, cols, imageCountCap, shrinkWidth, maxCharsPerImage, g)
-	textTokens := float64(u16len(text)) / cpt
+	cost, chars := imageTokensCostMetrics(text, cols, imageCountCap, shrinkWidth, maxCharsPerImage, g)
+	textTokens := float64(chars) / cpt
 	burnImg, burnText := burnSides(priorWarmTokens, priorWarmImageTokens)
 	return cost+burnImg < textTokens+burnText
 }
@@ -224,8 +229,8 @@ func isCompressionProfitableAmortized(text string, cols, imageCountCap int, char
 		return false
 	}
 	cpt := normCpt(charsPerToken)
-	imageTokens := imageTokensCost(text, cols, imageCountCap, shrinkWidth, maxCharsPerImage, g)
-	textTokens := float64(u16len(text)) / cpt
+	imageTokens, chars := imageTokensCostMetrics(text, cols, imageCountCap, shrinkWidth, maxCharsPerImage, g)
+	textTokens := float64(chars) / cpt
 	imageLifetime := imageTokens * (cacheCreateRate + cacheReadRate*float64(n-1))
 	textLifetime := textTokens * cacheReadRate * float64(n)
 	burnImg, burnText := burnSides(priorWarmTokens, priorWarmImageTokens)
