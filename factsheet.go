@@ -5,6 +5,7 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+	"sync"
 )
 
 // Fact-sheet extraction: precision-critical tokens (paths, URLs, SHAs, version
@@ -509,8 +510,19 @@ type factSheetSpan struct {
 	token  string
 }
 
+var orderedCountsPool = sync.Pool{New: func() any {
+	return &orderedCounts{counts: make(map[string]int)}
+}}
+
 func newOrderedCounts() *orderedCounts {
-	return &orderedCounts{counts: map[string]int{}}
+	return orderedCountsPool.Get().(*orderedCounts)
+}
+
+func putOrderedCounts(o *orderedCounts) {
+	clear(o.order)
+	o.order = o.order[:0]
+	clear(o.counts)
+	orderedCountsPool.Put(o)
 }
 
 func (o *orderedCounts) add(tok string, n int) {
@@ -576,7 +588,9 @@ func ExtractFactSheetEntries(text string) []FactSheetEntry {
 			break
 		}
 	}
-	return budgetEntries(oc.order, oc.counts, true)
+	entries := budgetEntries(oc.order, oc.counts, true)
+	putOrderedCounts(oc)
+	return entries
 }
 
 func budgetEntries(all []string, counts map[string]int, collapse bool) []FactSheetEntry {
@@ -644,6 +658,9 @@ func budgetEntries(all []string, counts map[string]int, collapse bool) []FactShe
 		return strings.Compare(a.t, b.t)
 	})
 	var kept []FactSheetEntry
+	if len(rs) > 0 {
+		kept = make([]FactSheetEntry, 0, min(len(rs), FactSheetMaxTokens))
+	}
 	urls := 0
 	for _, r := range rs {
 		if len(kept) >= FactSheetMaxTokens {
@@ -678,7 +695,9 @@ func extractFactSheetEntriesAllPages(text string, charsPerPage int) (kept []Fact
 		}
 	}
 	kept = budgetEntries(oc.order, oc.counts, false)
-	return kept, len(oc.order) - len(kept)
+	dropped = len(oc.order) - len(kept)
+	putOrderedCounts(oc)
+	return kept, dropped
 }
 
 const (
