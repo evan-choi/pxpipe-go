@@ -17,6 +17,17 @@ var pngFilterNone [1]byte
 
 const maxCachedBufferBytes = 8 << 20
 
+const (
+	packedLowBits  uint64 = 0x7f7f7f7f7f7f7f7f
+	packedHighBits uint64 = 0x8080808080808080
+)
+
+func filterAverage8(value, left, above uint64) uint64 {
+	average := (left & above) + (((left ^ above) >> 1) & packedLowBits)
+	difference := ((value & packedLowBits) | packedHighBits) - (average & packedLowBits)
+	return (difference & packedLowBits) | ((value ^ average ^ ^difference) & packedHighBits)
+}
+
 type pngEncoder struct {
 	compressed bytes.Buffer
 	alternate  bytes.Buffer
@@ -113,7 +124,13 @@ func (e *pngEncoder) compress(pixels []byte, width, height, bytesPerPixel int, f
 			first := min(bytesPerPixel, rowLen)
 			if y == 0 {
 				copy(filtered[1:first+1], row[:first])
-				for x := first; x < rowLen; x++ {
+				x := first
+				for ; x+8 <= rowLen; x += 8 {
+					value := binary.LittleEndian.Uint64(row[x:])
+					left := binary.LittleEndian.Uint64(row[x-bytesPerPixel:])
+					binary.LittleEndian.PutUint64(filtered[x+1:], filterAverage8(value, left, 0))
+				}
+				for ; x < rowLen; x++ {
 					filtered[x+1] = row[x] - row[x-bytesPerPixel]/2
 				}
 			} else {
@@ -121,7 +138,14 @@ func (e *pngEncoder) compress(pixels []byte, width, height, bytesPerPixel int, f
 				for x := range first {
 					filtered[x+1] = row[x] - above[x]/2
 				}
-				for x := first; x < rowLen; x++ {
+				x := first
+				for ; x+8 <= rowLen; x += 8 {
+					value := binary.LittleEndian.Uint64(row[x:])
+					left := binary.LittleEndian.Uint64(row[x-bytesPerPixel:])
+					up := binary.LittleEndian.Uint64(above[x:])
+					binary.LittleEndian.PutUint64(filtered[x+1:], filterAverage8(value, left, up))
+				}
+				for ; x < rowLen; x++ {
 					filtered[x+1] = row[x] - byte((uint16(row[x-bytesPerPixel])+uint16(above[x]))>>1)
 				}
 			}
