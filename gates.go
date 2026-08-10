@@ -81,6 +81,8 @@ func historyGateGeometry(o *resolvedOptions) gateGeometry {
 	if profile.historyStyle != nil {
 		g.style = *profile.historyStyle
 	}
+	lines := maxInt(1, (g.maxHeightPx-2*render.PadY)/render.RenderCellHeight(g.style))
+	g.maxChars = minInt(g.maxChars, g.cols*lines)
 	return g
 }
 

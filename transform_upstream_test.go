@@ -6,6 +6,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/evan-choi/pxpipe-go/render"
 )
 
 func upstreamImageBlock() map[string]any {
@@ -280,8 +282,9 @@ func TestClaudeHistoryUsesProfileGeometry(t *testing.T) {
 		t.Fatalf("Fable history geometry = cols %d, font %q", fable.cols, fable.style.Font)
 	}
 	opus := historyGateGeometry(resolveOptions(&TransformOptions{Model: "claude-opus-5"}))
-	if opus.cols != 172 || opus.style.Font != "jetbrains-mono-14" {
-		t.Fatalf("Opus history geometry = cols %d, font %q", opus.cols, opus.style.Font)
+	wantChars := opus.cols * ((opus.maxHeightPx - 2*render.PadY) / render.RenderCellHeight(opus.style))
+	if opus.cols != 172 || opus.style.Font != "jetbrains-mono-14" || opus.maxChars != wantChars {
+		t.Fatalf("Opus history geometry = cols %d, font %q, chars %d; want chars %d", opus.cols, opus.style.Font, opus.maxChars, wantChars)
 	}
 	cols := 160
 	overridden := historyGateGeometry(resolveOptions(&TransformOptions{Model: "claude-opus-5", Cols: &cols}))
