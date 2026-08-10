@@ -76,6 +76,7 @@ type resolvedOptions struct {
 	MinCompressChars           int
 	MinToolResultChars         int
 	Cols                       int
+	colsSet                    bool
 	MaxImagesPerToolResult     int
 	CharsPerToken              float64
 	charsPerTokenSet           bool
@@ -128,6 +129,7 @@ func resolveOptions(opts *TransformOptions) *resolvedOptions {
 	}
 	if opts.Cols != nil {
 		o.Cols = *opts.Cols
+		o.colsSet = true
 	}
 	if opts.MaxImagesPerToolResult != nil {
 		o.MaxImagesPerToolResult = *opts.MaxImagesPerToolResult
@@ -1578,7 +1580,7 @@ func runHistoryCollapse(req map[string]any, info *TransformInfo, o *resolvedOpti
 		historyCpt = o.CharsPerToken
 	}
 	horizon := maxInt(1, o.HistoryAmortizationHorizon)
-	geo := denseGateGeometry(o)
+	geo := historyGateGeometry(o)
 	profitable := func(text string, cols int) bool {
 		return isCompressionProfitableAmortized(
 			text, geo.cols, 0, historyCpt, horizon,
@@ -1586,7 +1588,7 @@ func runHistoryCollapse(req map[string]any, info *TransformInfo, o *resolvedOpti
 		)
 	}
 	ho := historyDefaults()
-	ho.cols = o.Cols
+	ho.cols = geo.cols
 	ho.protectedPrefix = protectedPrefix
 	ho.reflow = o.Reflow
 	ho.style = geo.style

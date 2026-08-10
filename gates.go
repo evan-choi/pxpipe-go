@@ -68,6 +68,22 @@ func denseGateGeometry(o *resolvedOptions) gateGeometry {
 	return g
 }
 
+func historyGateGeometry(o *resolvedOptions) gateGeometry {
+	g := denseGateGeometry(o)
+	profile := resolveProfile(o.Model)
+	if profile == nil {
+		return g
+	}
+	if !o.colsSet && profile.historyStripCols != nil {
+		g.cols = *profile.historyStripCols
+		g.maxChars = render.MaxCharsPerImage(g.cols)
+	}
+	if profile.historyStyle != nil {
+		g.style = *profile.historyStyle
+	}
+	return g
+}
+
 func singleColWidthPx(cols int, style render.RenderStyle) int {
 	return 2*render.PadX + cols*render.RenderCellWidth(style)
 }
