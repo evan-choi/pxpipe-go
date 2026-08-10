@@ -28,6 +28,17 @@ func TestBelowMinGptTokens(t *testing.T) {
 	}
 }
 
+func TestOpenAIImageSourceTextUsesKnownUTF16Length(t *testing.T) {
+	short := "a😀"
+	if got := openAIImageSourceText(short, 3); got != short {
+		t.Fatalf("short image source = %q, want %q", got, short)
+	}
+	long := strings.Repeat("😀", openAIImageSourcePreviewChars/2+1)
+	if got := openAIImageSourceText(long, openAIImageSourcePreviewChars+2); got != long[:len(long)-4] {
+		t.Fatalf("long image source bytes = %d, want %d", len(got), len(long)-4)
+	}
+}
+
 func TestGptHistoryOptionsPrecedence(t *testing.T) {
 	intp := func(v int) *int { return &v }
 	boolp := func(v bool) *bool { return &v }
