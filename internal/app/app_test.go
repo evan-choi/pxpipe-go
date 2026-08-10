@@ -184,7 +184,7 @@ func TestClaudeProfileRoutesUnixSocketOverride(t *testing.T) {
 	}
 }
 
-func TestClaudeDesktopProfileInjectsLoopbackBaseURL(t *testing.T) {
+func TestClaudeDesktopProfileInjectsUnixSocket(t *testing.T) {
 	t.Setenv("PXPIPE_MODELS", "claude-fable-5")
 	t.Setenv("PXPIPE_DESKTOP_APP_HELPER", "1")
 	t.Setenv("ANTHROPIC_UNIX_SOCKET", "/tmp/original-anthropic.sock")
@@ -218,16 +218,12 @@ func TestClaudeDesktopProfileInjectsLoopbackBaseURL(t *testing.T) {
 	if code != 17 {
 		t.Fatalf("helper exit code = %d", code)
 	}
-	baseURL, err := url.Parse(strings.TrimSpace(stdout.String()))
-	if err != nil {
-		t.Fatal(err)
+	socketPath := strings.TrimSpace(stdout.String())
+	if socketPath == "" || socketPath == "/tmp/original-anthropic.sock" {
+		t.Fatalf("Claude Desktop Unix socket = %q", socketPath)
 	}
-	if baseURL.Scheme != "http" || !strings.HasPrefix(baseURL.Host, "127.0.0.1:") {
-		t.Fatalf("Claude Desktop base URL = %q", baseURL)
-	}
-	if connection, err := net.DialTimeout("tcp", baseURL.Host, 100*time.Millisecond); err == nil {
-		connection.Close()
-		t.Fatal("Claude Desktop proxy is still listening")
+	if _, err := os.Stat(socketPath); !os.IsNotExist(err) {
+		t.Fatalf("Claude Desktop Unix socket was not removed: %v", err)
 	}
 	select {
 	case request := <-upstreamRequests:
@@ -328,19 +324,18 @@ func TestClaudeDesktopAppHelper(t *testing.T) {
 	if os.Getenv("PXPIPE_DESKTOP_APP_HELPER") != "1" {
 		return
 	}
-	baseURL := os.Getenv("ANTHROPIC_BASE_URL")
-	parsed, err := url.Parse(baseURL)
-	if err != nil || parsed.Scheme != "http" || !strings.HasPrefix(parsed.Host, "127.0.0.1:") ||
-		baseURL == os.Getenv("PXPIPE_DESKTOP_UPSTREAM") {
-		fmt.Fprintln(os.Stderr, "missing Claude Desktop loopback base URL")
+	socketPath := os.Getenv("ANTHROPIC_UNIX_SOCKET")
+	if socketPath == "" || socketPath == "/tmp/original-anthropic.sock" {
+		fmt.Fprintln(os.Stderr, "missing Claude Desktop Unix socket")
 		os.Exit(97)
 	}
-	if os.Getenv("ANTHROPIC_UNIX_SOCKET") != "" {
-		fmt.Fprintln(os.Stderr, "Claude Desktop Unix socket was not removed")
+	if _, err := os.Stat(socketPath); err != nil {
+		fmt.Fprintln(os.Stderr, "Claude Desktop Unix socket is not listening")
 		os.Exit(98)
 	}
 	if os.Getenv("HTTPS_PROXY") != "http://existing-proxy.example:8443" ||
-		os.Getenv("NODE_EXTRA_CA_CERTS") != "/tmp/existing-ca.pem" || os.Getenv("NO_PROXY") != "localhost" {
+		os.Getenv("NODE_EXTRA_CA_CERTS") != "/tmp/existing-ca.pem" || os.Getenv("NO_PROXY") != "localhost" ||
+		os.Getenv("ANTHROPIC_BASE_URL") != os.Getenv("PXPIPE_DESKTOP_UPSTREAM") {
 		fmt.Fprintln(os.Stderr, "Claude Desktop inherited environment changed")
 		os.Exit(99)
 	}
@@ -349,13 +344,17 @@ func TestClaudeDesktopAppHelper(t *testing.T) {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(100)
 	}
-	request, err := http.NewRequest(http.MethodPost, strings.TrimRight(baseURL, "/")+"/tenant/v1/messages", bytes.NewReader(payload))
+	request, err := http.NewRequest(http.MethodPost, "http://api.anthropic.com/tenant/v1/messages", bytes.NewReader(payload))
 	if err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(101)
 	}
 	request.Header.Set("Content-Type", "application/json")
-	client := &http.Client{Transport: &http.Transport{}, Timeout: 30 * time.Second}
+	dialer := &net.Dialer{Timeout: 5 * time.Second}
+	transport := &http.Transport{DialContext: func(ctx context.Context, _, _ string) (net.Conn, error) {
+		return dialer.DialContext(ctx, "unix", socketPath)
+	}}
+	client := &http.Client{Transport: transport, Timeout: 30 * time.Second}
 	response, err := client.Do(request)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, err)
@@ -367,6 +366,6 @@ func TestClaudeDesktopAppHelper(t *testing.T) {
 		fmt.Fprintln(os.Stderr, response.Status)
 		os.Exit(103)
 	}
-	fmt.Println(baseURL)
+	fmt.Println(socketPath)
 	os.Exit(17)
 }
