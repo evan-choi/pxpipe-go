@@ -459,6 +459,9 @@ func demoteRelocatedCacheControl(cc any) any {
 
 func stripBillingLine(text string) (kept string, body string) {
 	const prefix = "x-anthropic-billing-header:"
+	if !strings.Contains(text, prefix) {
+		return "", text
+	}
 	lineStart := 0
 	for lineStart <= len(text) {
 		lineEnd := strings.IndexByte(text[lineStart:], '\n')
