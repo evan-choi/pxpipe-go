@@ -19,7 +19,7 @@ export CLI, and Gemini/Google surface remain out of scope.
 Install the `pxpipe` CLI globally with the pinned release:
 
 ```bash
-go install github.com/evan-choi/pxpipe-go/cmd/pxpipe@v0.4.2
+go install github.com/evan-choi/pxpipe-go/cmd/pxpipe@v0.4.3
 ```
 
 Use `@latest` to install the newest tagged release:
@@ -90,10 +90,10 @@ process-scoped Unix socket for Claude Code, transforms matching HTTP requests,
 and forwards them over the original socket. The original socket path is never
 exposed to the child.
 
-When the child exits, pxpipe writes a summary to stderr with request and
-transformation counts, effective input tokens, saved or lost tokens, output
-tokens, and cache hits. Metrics unavailable from the provider are shown as
-`-`.
+When the child exits, pxpipe writes the estimated input token usage without
+pxpipe and the actual usage with pxpipe to stderr, including the percentage
+change. If the provider does not report enough data, it prints
+`token usage unavailable`.
 
 Command startup and process-scoped CA/proxy injection have been smoke-tested
 against the installed Claude Code, OpenCode, and Codex releases. Local Codex

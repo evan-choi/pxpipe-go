@@ -108,7 +108,7 @@ func TestProfilesRouteLocalOverridesByPath(t *testing.T) {
 			if code != 0 {
 				t.Fatalf("helper exit code = %d", code)
 			}
-			for _, want := range []string{"pxpipe summary", "requests 1, transformed 1"} {
+			for _, want := range []string{"pxpipe summary", "token usage unavailable"} {
 				if !strings.Contains(stderr.String(), want) {
 					t.Fatalf("wrapper summary missing %q: %s", want, stderr.String())
 				}
@@ -225,7 +225,7 @@ func TestClaudeDesktopProfileInjectsUnixSocket(t *testing.T) {
 		t.Fatalf("helper exit code = %d", code)
 	}
 	for _, want := range []string{
-		"pxpipe summary", "requests 1, transformed 1", "sent 128", "output 5", "cache hits 30",
+		"pxpipe summary", "estimated without pxpipe ", "actual with pxpipe 128 tokens (-",
 	} {
 		if !strings.Contains(stderr.String(), want) {
 			t.Fatalf("Claude Desktop summary missing %q: %s", want, stderr.String())
