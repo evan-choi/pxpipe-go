@@ -2,6 +2,7 @@ package pxpipe
 
 import (
 	"encoding/json"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -225,6 +226,51 @@ func TestHistoryImageHashSelectsSyntheticMessage(t *testing.T) {
 	}
 	if historyImageSha8(messages) == sha8(slabData) {
 		t.Fatal("history digest incorrectly describes the slab message")
+	}
+}
+
+func TestHistoryCollapseSeesOriginalToolResults(t *testing.T) {
+	messages := []any{
+		map[string]any{"role": "user", "content": "go"},
+		map[string]any{"role": "assistant", "content": []any{map[string]any{
+			"type": "tool_use", "id": "t_old", "name": "Read", "input": map[string]any{"path": "notes.txt"},
+		}}},
+		map[string]any{"role": "user", "content": []any{map[string]any{
+			"type": "tool_result", "tool_use_id": "t_old", "content": "RESULT t_old\n" + strings.Repeat("x", 40_000),
+		}}},
+	}
+	for i := 0; i < 60; i++ {
+		role := "user"
+		if i%2 == 0 {
+			role = "assistant"
+		}
+		messages = append(messages, map[string]any{
+			"role": role, "content": "turn " + strconv.Itoa(i) + ": " + strings.Repeat("y", 3500),
+		})
+	}
+	body, err := json.Marshal(map[string]any{
+		"model": "claude-3-5-sonnet",
+		"system": []any{map[string]any{
+			"type": "text", "text": "SLAB\n" + strings.Repeat("s", 80_000),
+			"cache_control": map[string]any{"type": "ephemeral"},
+		}},
+		"messages": messages,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	withImaging := &TransformOptions{historySessions: newSessionStateStore()}
+	_, got := TransformRequest(body, withImaging)
+	without := false
+	withoutImaging := &TransformOptions{CompressToolResults: &without, historySessions: newSessionStateStore()}
+	_, want := TransformRequest(body, withoutImaging)
+	if got.CollapsedTurns == 0 || got.CollapsedChars <= 40_000 {
+		t.Fatalf("fixture did not collapse the old tool result: %+v", got)
+	}
+	if got.CollapsedTurns != want.CollapsedTurns || got.CollapsedChars != want.CollapsedChars {
+		t.Fatalf("history changed after enabling tool-result imaging: turns %d/%d, chars %d/%d",
+			got.CollapsedTurns, want.CollapsedTurns, got.CollapsedChars, want.CollapsedChars)
 	}
 }
 

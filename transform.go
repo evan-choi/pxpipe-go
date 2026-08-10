@@ -2032,18 +2032,12 @@ func transformParsed(req map[string]any, body []byte, o *resolvedOptions, info *
 		m["content"] = newContent
 	}
 
-	// Step 5b: compress tool_result content across ALL user messages.
-	if o.CompressToolResults {
-		if err := compressToolResults(req, o, info, denseGeo, droppedCodepoints); err != nil {
-			return nil, err
-		}
-	}
-
 	if toolsRewritten != nil {
 		req["tools"] = toolsRewritten
 	}
 
-	// Step 6: history collapse (protected prefix = slab-bearing first user message).
+	// Step 6: collapse history before imaging tool results. Otherwise the
+	// history serializer sees only "[image]" and drops the original result.
 	if msgs, ok := asArr(req["messages"]); ok && len(msgs) > 0 {
 		slabAnchorIdx := -1
 		for i, mv := range msgs {
@@ -2059,6 +2053,13 @@ func transformParsed(req map[string]any, body []byte, o *resolvedOptions, info *
 			protectedPrefix = slabAnchorIdx + 1
 		}
 		if _, err := runHistoryCollapse(req, info, o, droppedCodepoints, protectedPrefix, true); err != nil {
+			return nil, err
+		}
+	}
+
+	// Step 5b: image only tool results that survived in the live tail.
+	if o.CompressToolResults {
+		if err := compressToolResults(req, o, info, denseGeo, droppedCodepoints); err != nil {
 			return nil, err
 		}
 	}
