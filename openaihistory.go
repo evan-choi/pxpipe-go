@@ -635,6 +635,7 @@ func classifyResponsesPairs(items []any, keepRecentPairs int, tokenCounts gptTok
 	}
 
 	pairByCallIndex := map[int]responsesCompletedPair{}
+	var scratch []byte
 	openCalls, orphanOutputs, malformedItems := 0, 0, missingIDItems
 	for _, id := range idOrder {
 		cs := calls[id]
@@ -656,7 +657,7 @@ func classifyResponsesPairs(items []any, keepRecentPairs int, tokenCounts gptTok
 				Name:         name,
 				Arguments:    arguments,
 				Output:       outputText,
-				CallTokens:   tokenCounts.count(jsStringifyString(call)),
+				CallTokens:   tokenCounts.countJSON(&scratch, call),
 				OutputTokens: tokenCounts.count(outputText),
 			}
 		case cs.count > 0 && os.count == 0:
