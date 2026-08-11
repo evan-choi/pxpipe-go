@@ -145,7 +145,7 @@ func renderWrappedPageCached(lines, slots []string, cols int, style RenderStyle,
 	if err != nil {
 		return nil, err
 	}
-	return pageCache.put(key, pageText, pageSlotText, []*RenderedImage{image})[0], nil
+	return pageCache.putRepeated(key, pageText, pageSlotText, []*RenderedImage{image})[0], nil
 }
 
 type RenderedImage struct {
