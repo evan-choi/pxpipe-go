@@ -329,11 +329,11 @@ Rendered pages are cached by exact render inputs. The cache retains up to
 64 MiB by default. Set `PXPIPE_RENDER_CACHE_BYTES` to another byte limit, or
 set it to `0` to disable the cache.
 
-![pxpipe versus pxpipe-go benchmark: pxpipe-go is 71.1 to 249.6 times faster across four workloads and uses 75.1% less peak RSS](docs/benchmark-improvements.png)
+![pxpipe versus pxpipe-go benchmark: pxpipe-go is 72.6 to 282.2 times faster across four workloads and uses 73.4% less peak RSS](docs/benchmark-improvements.png)
 
 Measured natively on an Apple M1 Pro running macOS 26.5.2, with Bun 1.3.14
 and Go 1.26.5. Go used the machine-default `GOMAXPROCS=10` and no PGO profile.
-The comparison uses `pxpipe@c5fc2a8` and `pxpipe-go@6b1c65e`
+The comparison uses `pxpipe@c5fc2a8` and `pxpipe-go@c3e0e50`
 (2026-08-11).
 
 Values are medians of five runs. Each pxpipe run performs two warmups and
@@ -343,27 +343,27 @@ CPU architecture, available cores, and request content.
 
 | benchmark | pxpipe time/op | pxpipe-go time/op | speedup |
 |---|---:|---:|---:|
-| TransformBigClaudeCode | 49.50 ms | 0.70 ms | 71.1× |
-| RenderDensePage | 11.80 ms | 0.13 ms | 90.7× |
-| TransformOpenAIChat | 51.40 ms | 0.25 ms | 203.4× |
-| TransformOpenAIResponses | 111.40 ms | 0.45 ms | 249.6× |
+| TransformBigClaudeCode | 52.20 ms | 0.72 ms | 72.6× |
+| RenderDensePage | 12.50 ms | 0.14 ms | 91.7× |
+| TransformOpenAIChat | 52.40 ms | 0.28 ms | 190.5× |
+| TransformOpenAIResponses | 132.50 ms | 0.47 ms | 282.2× |
 
 Peak RSS was measured over the full four-benchmark suite in a fresh process
 for each run:
 
 | implementation | median peak RSS | relative to pxpipe |
 |---|---:|---:|
-| pxpipe | 415.20 MiB | baseline |
-| pxpipe-go | 103.28 MiB | 75.1% lower |
+| pxpipe | 405.00 MiB | baseline |
+| pxpipe-go | 107.70 MiB | 73.4% lower |
 
 Go's `-benchmem` output reports the following allocation volume per operation:
 
 | benchmark | B/op | allocs/op |
 |---|---:|---:|
-| TransformBigClaudeCode | 1,165,528 | 1,813 |
+| TransformBigClaudeCode | 1,165,232 | 1,813 |
 | RenderDensePage | 2,736 | 25 |
 | TransformOpenAIChat | 633,320 | 993 |
-| TransformOpenAIResponses | 1,069,496 | 1,043 |
+| TransformOpenAIResponses | 1,069,497 | 1,043 |
 
 Raw GC counts are not compared because V8 and Go use different collectors and
 event semantics. Peak RSS is the cross-runtime memory metric; `B/op` and
