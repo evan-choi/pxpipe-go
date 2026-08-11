@@ -47,6 +47,10 @@ type transformEstimate struct {
 }
 
 func runServer(ctx context.Context, force <-chan struct{}, port int, stdin io.Reader, stdout io.Writer) error {
+	if strings.TrimSpace(os.Getenv("PXPIPE_MODELS")) == "" {
+		pxpipe.SetAllowedModelBases([]string{"*"})
+		defer pxpipe.SetAllowedModelBases(nil)
+	}
 	configDir, err := os.UserConfigDir()
 	if err != nil {
 		return fmt.Errorf("locate user config directory: %w", err)
