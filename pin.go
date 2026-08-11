@@ -93,6 +93,38 @@ func foldPins(messages []any, system any) []pin {
 	return pins
 }
 
+func hasPinCommandCandidate(messages []any, system any) bool {
+	contains := func(content any) bool {
+		if text, ok := content.(string); ok {
+			return strings.Contains(text, "@pxpipe")
+		}
+		blocks, _ := asArr(content)
+		for _, value := range blocks {
+			block, ok := asMap(value)
+			if !ok || blockType(value) != "text" {
+				continue
+			}
+			if text, ok := getStr(block, "text"); ok && strings.Contains(text, "@pxpipe") {
+				return true
+			}
+		}
+		return false
+	}
+	if contains(system) {
+		return true
+	}
+	for _, value := range messages {
+		message, ok := asMap(value)
+		if !ok {
+			continue
+		}
+		if role, _ := getStr(message, "role"); role == "user" && contains(message["content"]) {
+			return true
+		}
+	}
+	return false
+}
+
 func foldSystemPins(pins *[]pin, sys any) {
 	if sys == nil {
 		return

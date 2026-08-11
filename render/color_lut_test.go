@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"crypto/sha256"
 	"encoding/hex"
+	"strings"
 	"testing"
 )
 
@@ -84,5 +85,16 @@ func TestColorRenderParity(t *testing.T) {
 			}
 			t.Fatalf("RGBA SHA-256 = %x, want %s", got, tc.want)
 		})
+	}
+}
+
+func TestWriteRoleSlotSegmentMatchesString(t *testing.T) {
+	const prefix = "prefix:"
+	var out strings.Builder
+	out.WriteString(prefix)
+	WriteRoleSlotSegment(&out, "user", "body\x01text", SlotMarkUser, ` t="12"`)
+	want := strings.Repeat(SlotMarkUser, 13) + "\nbody\x03text\n" + strings.Repeat(SlotMarkUser, 7)
+	if got := strings.TrimPrefix(out.String(), prefix); got != want {
+		t.Fatalf("WriteRoleSlotSegment() = %q, want %q", got, want)
 	}
 }
