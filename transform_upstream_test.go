@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"strconv"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -387,6 +388,60 @@ func TestCachePrefixDiagnosticsWithoutMarkerStopsAfterSystem(t *testing.T) {
 	marked := jsStringifyString(tool) + "\x00" + jsStringifyString(system)
 	if got.markedSha8 != sha8(marked) || got.markedBytes != u16len(marked) || got.markerPos != "" {
 		t.Fatalf("unmarked prefix = %+v, want sha=%s bytes=%d", got, sha8(marked), u16len(marked))
+	}
+}
+
+func TestCachePrefixDigestCacheVerifiesExactBody(t *testing.T) {
+	body := []byte(`{"transformed":"exact body"}`)
+	fingerprint := cachePrefixRequestFingerprint([]byte("cache-prefix-exact-parts"))
+	slot := &cachePrefixDigestCache[fingerprint&(cachePrefixDigestCacheSlots-1)]
+	previous := slot.Swap(nil)
+	defer slot.Store(previous)
+
+	want := cachePrefixDigests{sha8: "aggregate", bytes: 13, headSha8: "head", markerPos: "m0.b1"}
+	admitCachePrefixDigests(fingerprint, body, want)
+	if got, ok := cachedCachePrefixDigests(fingerprint, body); !ok || got != want {
+		t.Fatalf("exact cache hit = %+v, %v; want %+v, true", got, ok, want)
+	}
+	collision := append([]byte(nil), body...)
+	collision[len(collision)-2] ^= 1
+	if _, ok := cachedCachePrefixDigests(fingerprint, collision); ok {
+		t.Fatal("sampled fingerprint collision returned a cached digest")
+	}
+
+	var wg sync.WaitGroup
+	for range 16 {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for range 100 {
+				if !shouldTryCachePrefixDigests(fingerprint) {
+					t.Error("concurrent cache hit was rejected")
+					return
+				}
+				if got, ok := cachedCachePrefixDigests(fingerprint, body); !ok || got != want {
+					t.Errorf("concurrent cache hit = %+v, %v; want %+v, true", got, ok, want)
+					return
+				}
+			}
+		}()
+	}
+	wg.Wait()
+}
+
+func TestCachePrefixDigestCacheRejectsOversizedBody(t *testing.T) {
+	fingerprint := uint64(0x123456789abcdef)
+	slot := &cachePrefixDigestCache[fingerprint&(cachePrefixDigestCacheSlots-1)]
+	previous := slot.Swap(nil)
+	defer slot.Store(previous)
+
+	admitCachePrefixDigests(fingerprint, make([]byte, maxCachePrefixDigestCacheBytes+1), cachePrefixDigests{sha8: "ignored"})
+	entry := slot.Load()
+	if entry == nil || entry.fingerprint != fingerprint || entry.body != "" {
+		t.Fatalf("oversized cache sentinel = %+v", entry)
+	}
+	if shouldTryCachePrefixDigests(fingerprint) {
+		t.Fatal("oversized cache entry was retried")
 	}
 }
 
