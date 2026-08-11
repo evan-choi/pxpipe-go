@@ -1556,6 +1556,7 @@ func cachePrefixDigest(req map[string]any) (string, int, bool) {
 
 func countOutgoingTextChars(req map[string]any) int {
 	n := 0
+	var stringifyScratch []byte
 	if s, ok := req["system"].(string); ok {
 		n += u16len(s)
 	} else if arr, ok := asArr(req["system"]); ok {
@@ -1580,7 +1581,7 @@ func countOutgoingTextChars(req map[string]any) int {
 				n += u16len(desc)
 			}
 			if schema, has := tm["input_schema"]; has {
-				n += jsonStringifyLen(schema)
+				n += jsStringifyU16Len(&stringifyScratch, schema)
 			}
 		}
 	}
@@ -1613,7 +1614,7 @@ func countOutgoingTextChars(req map[string]any) int {
 					n += u16len(name)
 				}
 				if input, has := bm["input"]; has {
-					n += jsonStringifyLen(input)
+					n += jsStringifyU16Len(&stringifyScratch, input)
 				}
 			case "tool_result":
 				if id, ok := getStr(bm, "tool_use_id"); ok {
@@ -2054,49 +2055,22 @@ func transformParsed(
 
 	// Step 2: move tool docs into the imaged Tool Reference, stubbing originals.
 	toolDocsText := ""
-	var toolsRewritten []any
+	var toolsToRewrite []any
 	if tools, ok := asArr(req["tools"]); o.CompressTools && ok && len(tools) > 0 {
 		var docs []string
-		toolsRewritten = make([]any, len(tools))
-		for i, tv := range tools {
+		toolsToRewrite = tools
+		for _, tv := range tools {
 			tm, isMap := asMap(tv)
 			if !isMap {
-				toolsRewritten[i] = tv
 				continue
 			}
 			if tType, hasType := getStr(tm, "type"); hasType && tType != "custom" {
-				toolsRewritten[i] = tv
 				continue
 			}
 			if deferLoading, ok := tm["defer_loading"].(bool); ok && deferLoading {
-				toolsRewritten[i] = tv
 				continue
 			}
 			docs = append(docs, renderToolDoc(tm))
-			schema := tm["input_schema"]
-			_, hasSchema := tm["input_schema"]
-			if sm, ok := asMap(schema); ok {
-				stripped := stripSchemaDescriptions(sm, 0)
-				if strippedMap, ok := asMap(stripped); ok && schemaHasStructure(strippedMap) {
-					schema = strippedMap
-				}
-			}
-			name, _ := getStr(tm, "name")
-			if name == "" {
-				name = "?"
-			}
-			readFirstNote := ""
-			if _, isReadFirst := readFirstTools[name]; isReadFirst {
-				readFirstNote = " Requires a Read of the same file earlier in THIS session when the file" +
-					" already exists — the call is rejected otherwise; file content recalled" +
-					" from imaged or prior-session context does not satisfy this."
-			}
-			nt := cloneMap(tm)
-			nt["description"] = "ⓘ Full docs: see \"## Tool: " + name + "\" in the Tool Reference section." + readFirstNote
-			if hasSchema {
-				nt["input_schema"] = schema
-			}
-			toolsRewritten[i] = nt
 		}
 		toolDocsText = strings.Join(docs, "\n\n")
 		if toolDocsText != "" {
@@ -2304,8 +2278,34 @@ func transformParsed(
 		m["content"] = newContent
 	}
 
-	if toolsRewritten != nil {
-		req["tools"] = toolsRewritten
+	if toolsToRewrite != nil {
+		for _, tool := range toolsToRewrite {
+			tm, ok := asMap(tool)
+			if !ok {
+				continue
+			}
+			if toolType, hasType := getStr(tm, "type"); hasType && toolType != "custom" {
+				continue
+			}
+			if deferLoading, ok := tm["defer_loading"].(bool); ok && deferLoading {
+				continue
+			}
+			name, _ := getStr(tm, "name")
+			if name == "" {
+				name = "?"
+			}
+			readFirstNote := ""
+			if _, isReadFirst := readFirstTools[name]; isReadFirst {
+				readFirstNote = " Requires a Read of the same file earlier in THIS session when the file" +
+					" already exists — the call is rejected otherwise; file content recalled" +
+					" from imaged or prior-session context does not satisfy this."
+			}
+			tm["description"] = "ⓘ Full docs: see \"## Tool: " + name + "\" in the Tool Reference section." + readFirstNote
+			if schema, ok := asMap(tm["input_schema"]); ok && schemaHasStructure(schema) {
+				stripSchemaDescriptionsInPlace(schema, 0)
+			}
+		}
+		req["tools"] = toolsToRewrite
 	}
 
 	// Step 6: collapse history before imaging tool results. Otherwise the

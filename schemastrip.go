@@ -34,45 +34,49 @@ var schemaVerbatimKeys = map[string]struct{}{
 const schemaFormatMaxLen = 32
 
 func stripSchemaDescriptions(node any, depth int) any {
-	stripped, _ := stripSchemaDescriptionsChanged(node, depth)
+	stripped, _ := stripSchemaDescriptionsChanged(node, depth, true)
 	return stripped
 }
 
-func stripSchemaArray(values []any, depth int) ([]any, bool) {
+func stripSchemaDescriptionsInPlace(node any, depth int) {
+	_, _ = stripSchemaDescriptionsChanged(node, depth, false)
+}
+
+func stripSchemaArray(values []any, depth int, copyOnWrite bool) ([]any, bool) {
 	out := values
 	changed := false
 	for i, value := range values {
-		stripped, childChanged := stripSchemaDescriptionsChanged(value, depth)
+		stripped, childChanged := stripSchemaDescriptionsChanged(value, depth, copyOnWrite)
 		if !childChanged {
 			continue
 		}
-		if !changed {
+		if !changed && copyOnWrite {
 			out = append([]any(nil), values...)
-			changed = true
 		}
+		changed = true
 		out[i] = stripped
 	}
 	return out, changed
 }
 
-func stripSchemaMapValues(values map[string]any, depth int) (map[string]any, bool) {
+func stripSchemaMapValues(values map[string]any, depth int, copyOnWrite bool) (map[string]any, bool) {
 	out := values
 	changed := false
 	for key, value := range values {
-		stripped, childChanged := stripSchemaDescriptionsChanged(value, depth)
+		stripped, childChanged := stripSchemaDescriptionsChanged(value, depth, copyOnWrite)
 		if !childChanged {
 			continue
 		}
-		if !changed {
+		if !changed && copyOnWrite {
 			out = cloneMap(values)
-			changed = true
 		}
+		changed = true
 		out[key] = stripped
 	}
 	return out, changed
 }
 
-func stripSchemaDescriptionsChanged(node any, depth int) (any, bool) {
+func stripSchemaDescriptionsChanged(node any, depth int, copyOnWrite bool) (any, bool) {
 	if depth > schemaStripMaxDepth {
 		return node, false
 	}
@@ -83,20 +87,23 @@ func stripSchemaDescriptionsChanged(node any, depth int) (any, bool) {
 	if !ok {
 		return node, false
 	}
-	var out map[string]any
+	out := obj
+	changed := false
 	for k, v := range obj {
 		if _, strip := schemaStripKeys[k]; strip {
-			if out == nil {
+			if !changed && copyOnWrite {
 				out = cloneMap(obj)
 			}
+			changed = true
 			delete(out, k)
 			continue
 		}
 		if k == "format" {
 			if s, isStr := v.(string); isStr && u16len(s) > schemaFormatMaxLen {
-				if out == nil {
+				if !changed && copyOnWrite {
 					out = cloneMap(obj)
 				}
+				changed = true
 				delete(out, k)
 				continue
 			}
@@ -106,10 +113,11 @@ func stripSchemaDescriptionsChanged(node any, depth int) (any, bool) {
 		}
 		if _, named := schemaNamedSubschemaKeys[k]; named {
 			if vm, isMap := asMap(v); isMap {
-				if nested, childChanged := stripSchemaMapValues(vm, depth+1); childChanged {
-					if out == nil {
+				if nested, childChanged := stripSchemaMapValues(vm, depth+1, copyOnWrite); childChanged {
+					if !changed && copyOnWrite {
 						out = cloneMap(obj)
 					}
+					changed = true
 					out[k] = nested
 				}
 				continue
@@ -117,10 +125,11 @@ func stripSchemaDescriptionsChanged(node any, depth int) (any, bool) {
 		}
 		if _, comp := schemaCompositionKeys[k]; comp {
 			if va, isArr := asArr(v); isArr {
-				if mapped, childChanged := stripSchemaArray(va, depth+1); childChanged {
-					if out == nil {
+				if mapped, childChanged := stripSchemaArray(va, depth+1, copyOnWrite); childChanged {
+					if !changed && copyOnWrite {
 						out = cloneMap(obj)
 					}
+					changed = true
 					out[k] = mapped
 				}
 				continue
@@ -130,32 +139,35 @@ func stripSchemaDescriptionsChanged(node any, depth int) (any, bool) {
 			switch tv := v.(type) {
 			case bool:
 			case []any:
-				if mapped, childChanged := stripSchemaArray(tv, depth+1); childChanged {
-					if out == nil {
+				if mapped, childChanged := stripSchemaArray(tv, depth+1, copyOnWrite); childChanged {
+					if !changed && copyOnWrite {
 						out = cloneMap(obj)
 					}
+					changed = true
 					out[k] = mapped
 				}
 			default:
-				if stripped, childChanged := stripSchemaDescriptionsChanged(v, depth+1); childChanged {
-					if out == nil {
+				if stripped, childChanged := stripSchemaDescriptionsChanged(v, depth+1, copyOnWrite); childChanged {
+					if !changed && copyOnWrite {
 						out = cloneMap(obj)
 					}
+					changed = true
 					out[k] = stripped
 				}
 			}
 			continue
 		}
 		if _, isMap := v.(map[string]any); isMap {
-			if stripped, childChanged := stripSchemaDescriptionsChanged(v, depth+1); childChanged {
-				if out == nil {
+			if stripped, childChanged := stripSchemaDescriptionsChanged(v, depth+1, copyOnWrite); childChanged {
+				if !changed && copyOnWrite {
 					out = cloneMap(obj)
 				}
+				changed = true
 				out[k] = stripped
 			}
 		}
 	}
-	if out == nil {
+	if !changed {
 		return obj, false
 	}
 	return out, true

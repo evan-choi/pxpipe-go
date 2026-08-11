@@ -15,9 +15,6 @@ var jsonAPI = sonic.Config{
 
 func jsonMarshal(v any) ([]byte, error)   { return jsonAPI.Marshal(v) }
 func jsonUnmarshal(b []byte, v any) error { return jsonAPI.Unmarshal(b, v) }
-func jsonStringifyLen(v any) int {
-	return u16len(jsStringifyString(v))
-}
 
 func asMap(v any) (map[string]any, bool) {
 	m, ok := v.(map[string]any)
