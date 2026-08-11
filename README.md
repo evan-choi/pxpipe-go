@@ -19,7 +19,7 @@ export CLI, and Gemini/Google surface remain out of scope.
 Install the `pxpipe` CLI globally with the pinned release:
 
 ```bash
-go install github.com/evan-choi/pxpipe-go/cmd/pxpipe@v0.4.15
+go install github.com/evan-choi/pxpipe-go/cmd/pxpipe@v0.4.16
 ```
 
 Use `@latest` to install the newest tagged release:
