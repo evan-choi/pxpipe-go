@@ -208,3 +208,35 @@ func TestHistoryImageSha8RawChunkBoundary(t *testing.T) {
 		t.Fatalf("historyImageSha8(chunked raw PNGs) = %q, want %q", got, want)
 	}
 }
+
+func TestSha8CacheVerifiesExactText(t *testing.T) {
+	clearCache := func() {
+		for i := range sha8Cache {
+			sha8Cache[i].Store(nil)
+		}
+		for i := range sha8CacheCandidates {
+			sha8CacheCandidates[i].Store(0)
+		}
+	}
+	clearCache()
+	t.Cleanup(clearCache)
+
+	first := strings.Repeat("a", 8<<10)
+	secondBytes := []byte(first)
+	secondBytes[1<<10] = 'b'
+	second := string(secondBytes)
+	fingerprint := sampledTextFingerprint(14695981039346656037, first)
+	if fingerprint != sampledTextFingerprint(14695981039346656037, second) {
+		t.Fatal("test inputs must share a sampled fingerprint")
+	}
+	if got, want := sha8(first), sha8Uncached(first); got != want {
+		t.Fatalf("first sha8 = %q, want %q", got, want)
+	}
+	_ = sha8(first)
+	if entry := sha8Cache[fingerprint&(sha8CacheSlots-1)].Load(); entry == nil || entry.text != first {
+		t.Fatal("repeated text was not cached")
+	}
+	if got, want := sha8(second), sha8Uncached(second); got != want {
+		t.Fatalf("sampled collision sha8 = %q, want %q", got, want)
+	}
+}

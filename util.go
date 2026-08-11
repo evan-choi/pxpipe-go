@@ -4,6 +4,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"strings"
+	"sync/atomic"
 	"unicode/utf16"
 	"unicode/utf8"
 	"unsafe"
@@ -174,8 +175,75 @@ func u16SliceFallback(s string, start, end int) string {
 	return string(utf16.Decode(units[start:end]))
 }
 
-func sha8(text string) string {
+const (
+	sha8CacheMinBytes       = 4 << 10
+	sha8CacheMaxBytes       = 512 << 10
+	sha8CacheSlots          = 8
+	sha8CacheCandidateSlots = 1 << 10
+)
+
+type sha8CacheEntry struct {
+	fingerprint uint64
+	text        string
+	value       string
+}
+
+// ponytail: direct slots cap retained source text at 4 MiB and keep hits
+// lock-free; use a byte-budgeted LRU only if production profiles show churn.
+var sha8Cache [sha8CacheSlots]atomic.Pointer[sha8CacheEntry]
+var sha8CacheCandidates [sha8CacheCandidateSlots]atomic.Uint64
+
+func sampledTextFingerprint(h uint64, text string) uint64 {
+	const (
+		prime  = uint64(1099511628211)
+		sample = 128
+	)
+	h = (h ^ uint64(len(text))) * prime
+	hash := func(part string) {
+		for i := 0; i < len(part); i++ {
+			h = (h ^ uint64(part[i])) * prime
+		}
+	}
+	if len(text) <= 3*sample {
+		hash(text)
+		return h
+	}
+	hash(text[:sample])
+	mid := len(text)/2 - sample/2
+	hash(text[mid : mid+sample])
+	hash(text[len(text)-sample:])
+	return h
+}
+
+func sha8Uncached(text string) string {
 	// Sum256 only reads its input; avoid copying large rendered contexts.
 	sum := sha256.Sum256(unsafe.Slice(unsafe.StringData(text), len(text)))
 	return hex.EncodeToString(sum[:4])
+}
+
+func sha8(text string) string {
+	if len(text) < sha8CacheMinBytes || len(text) > sha8CacheMaxBytes {
+		return sha8Uncached(text)
+	}
+	fingerprint := sampledTextFingerprint(14695981039346656037, text)
+	if fingerprint == 0 {
+		fingerprint = 1
+	}
+	slot := &sha8Cache[fingerprint&(sha8CacheSlots-1)]
+	if entry := slot.Load(); entry != nil {
+		if entry.fingerprint == fingerprint && entry.text == text {
+			return entry.value
+		}
+		return sha8Uncached(text)
+	}
+	value := sha8Uncached(text)
+	candidate := &sha8CacheCandidates[fingerprint&(sha8CacheCandidateSlots-1)]
+	if candidate.Swap(fingerprint) == fingerprint {
+		slot.CompareAndSwap(nil, &sha8CacheEntry{
+			fingerprint: fingerprint,
+			text:        strings.Clone(text),
+			value:       value,
+		})
+	}
+	return value
 }
