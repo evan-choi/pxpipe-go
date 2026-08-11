@@ -403,10 +403,10 @@ done
 ```
 
 Current macOS hot-cache profiles put the cache-prefix hit path at 0.6% of CPU;
-mutex contention remains negligible. The high-cardinality Responses profile
-fell from 12.04 ms/op on main to 7.37 ms/op; level-6 PNG compression accounts
-for 57.9% of CPU and uncached o200k counting for 8.3%. Framebuffers and encoders
-are pooled.
+mutex contention remains negligible. The optimized high-cardinality Responses
+path fell from 12.04 ms/op to 7.02 ms/op; level-6 PNG compression accounts for
+58.0% of CPU and uncached o200k counting for 7.2%. Framebuffers and encoders are
+pooled.
 
 A Docker Desktop Alpine ARM64 A/B run found `GOGC=400` with
 `GOMEMLIMIT=192MiB` 5.6% faster by parallel geomean than the default GC
