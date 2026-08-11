@@ -15,7 +15,10 @@ import (
 var pngSignature = []byte{0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a}
 var pngFilterNone [1]byte
 
-const maxCachedBufferBytes = 8 << 20
+const (
+	maxCachedBufferBytes = 8 << 20
+	pngCompressionLevel  = 6
+)
 
 const (
 	packedLowBits  uint64 = 0x7f7f7f7f7f7f7f7f
@@ -28,9 +31,34 @@ func filterAverage8(value, left, above uint64) uint64 {
 	return (difference & packedLowBits) | ((value ^ average ^ ^difference) & packedHighBits)
 }
 
+func preferAverageFilter(pixels []byte, width, height int) bool {
+	// ponytail: this bounded sample can miss a rare size winner; add per-row
+	// selection only if representative payloads regress.
+	const (
+		rowStride = 5
+		colStride = 7
+		threshold = 47
+	)
+	score, samples := 0, 0
+	for y := rowStride / 2; y < height; y += rowStride {
+		row := pixels[y*width : (y+1)*width]
+		above := pixels[(y-1)*width : y*width]
+		for x := colStride / 2; x < width; x += colStride {
+			value := row[x]
+			filtered := value - byte((uint16(row[x-1])+uint16(above[x]))>>1)
+			if filtered < 128 {
+				score += int(filtered)
+			} else {
+				score += 256 - int(filtered)
+			}
+			samples++
+		}
+	}
+	return score > samples*threshold
+}
+
 type pngEncoder struct {
 	compressed bytes.Buffer
-	alternate  bytes.Buffer
 	filtered   []byte
 	zw         *flate.Writer
 	checksum   hash.Hash32
@@ -41,7 +69,7 @@ var pixelBufferCache = make(chan []byte, runtime.GOMAXPROCS(0))
 
 func newPNGEncoder() *pngEncoder {
 	e := &pngEncoder{checksum: adler32.New()}
-	e.zw, _ = flate.NewWriter(&e.compressed, 6)
+	e.zw, _ = flate.NewWriter(&e.compressed, pngCompressionLevel)
 	return e
 }
 
@@ -55,7 +83,7 @@ func getPNGEncoder() *pngEncoder {
 }
 
 func putPNGEncoder(e *pngEncoder) {
-	if e.compressed.Cap() > maxCachedBufferBytes || e.alternate.Cap() > maxCachedBufferBytes || cap(e.filtered) > maxCachedBufferBytes {
+	if e.compressed.Cap() > maxCachedBufferBytes || cap(e.filtered) > maxCachedBufferBytes {
 		return
 	}
 	select {
@@ -169,20 +197,14 @@ func encodePNG(pixels []byte, width, height, bytesPerPixel int, colorType byte) 
 
 	e := getPNGEncoder()
 	var compressed []byte
-	if bytesPerPixel == 1 && width > 1024 {
-		// ponytail: wide grayscale pages use the measured winner; compare both if a future profile regresses.
-		compressed = e.compress(pixels, width, height, bytesPerPixel, 0)
+	if bytesPerPixel == 1 {
+		filter := byte(0)
+		if width <= 1024 && preferAverageFilter(pixels, width, height) {
+			filter = 3
+		}
+		compressed = e.compress(pixels, width, height, bytesPerPixel, filter)
 	} else {
 		compressed = e.compress(pixels, width, height, bytesPerPixel, 3)
-		if bytesPerPixel == 1 {
-			e.alternate.Reset()
-			e.alternate.Write(compressed)
-			if unfiltered := e.compress(pixels, width, height, bytesPerPixel, 0); len(unfiltered) < e.alternate.Len() {
-				compressed = unfiltered
-			} else {
-				compressed = e.alternate.Bytes()
-			}
-		}
 	}
 	out := make([]byte, len(compressed)+57)
 	offset := copy(out, pngSignature)
@@ -194,7 +216,7 @@ func encodePNG(pixels []byte, width, height, bytesPerPixel int, colorType byte) 
 }
 
 // EncodeGrayPNG encodes a row-major single-channel buffer (len = w×h) as an
-// 8-bit grayscale PNG (smallest of None/Average, single IDAT).
+// 8-bit grayscale PNG (sample-selected None/Average filter, single IDAT).
 func EncodeGrayPNG(pixels []byte, width, height int) ([]byte, error) {
 	if len(pixels) != width*height {
 		return nil, fmt.Errorf("EncodeGrayPNG: pixels=%d != %d×%d", len(pixels), width, height)

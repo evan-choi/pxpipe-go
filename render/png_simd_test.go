@@ -30,6 +30,27 @@ func TestFilterAverage8MatchesScalar(t *testing.T) {
 	}
 }
 
+func TestPreferAverageFilter(t *testing.T) {
+	const width, height = 768, 100
+	uniform := make([]byte, width*height)
+	for i := range uniform {
+		uniform[i] = 255
+	}
+	if preferAverageFilter(uniform, width, height) {
+		t.Fatal("uniform page selected Average")
+	}
+
+	noise := make([]byte, width*height)
+	state := uint64(1)
+	for i := range noise {
+		state = state*6364136223846793005 + 1
+		noise[i] = byte(state >> 32)
+	}
+	if !preferAverageFilter(noise, width, height) {
+		t.Fatal("high-entropy page selected None")
+	}
+}
+
 func TestSIMDAdlerPNGMatchesZlib(t *testing.T) {
 	for _, tc := range []struct {
 		name                         string
@@ -39,6 +60,7 @@ func TestSIMDAdlerPNGMatchesZlib(t *testing.T) {
 		{"empty_gray", 0, 0, 1, 0},
 		{"zero_width_gray", 0, 7, 1, 0},
 		{"single_gray", 1, 1, 1, 0},
+		{"sampled_gray", 768, 100, 1, 0},
 		{"dense_gray", 1568, 720, 1, 0},
 		{"dense_rgb", 1568, 720, 3, 2},
 	} {
@@ -70,7 +92,7 @@ func TestSIMDAdlerPNGMatchesZlib(t *testing.T) {
 						raw.WriteByte(value - byte((uint16(left)+uint16(above))>>1))
 					}
 				}
-				zw, err := zlib.NewWriterLevel(&compressed, 6)
+				zw, err := zlib.NewWriterLevel(&compressed, pngCompressionLevel)
 				if err != nil {
 					t.Fatal(err)
 				}
@@ -82,13 +104,14 @@ func TestSIMDAdlerPNGMatchesZlib(t *testing.T) {
 				}
 				return compressed.Bytes()
 			}
-			compressed := compress(3)
+			filter := byte(3)
 			if tc.bytesPerPixel == 1 {
-				unfiltered := compress(0)
-				if tc.width > 1024 || len(unfiltered) < len(compressed) {
-					compressed = unfiltered
+				filter = 0
+				if tc.width <= 1024 && preferAverageFilter(pixels, tc.width, tc.height) {
+					filter = 3
 				}
 			}
+			compressed := compress(filter)
 			want := make([]byte, len(compressed)+57)
 			offset := copy(want, pngSignature)
 			var ihdr [13]byte
