@@ -1,46 +1,44 @@
 # pxpipe-go
 
-Go port of the core of [pxpipe](https://github.com/teamchong/pxpipe): a
-token-saving transform for the Anthropic Messages API that renders bulky
-context (system prompt, tool docs, old history, large tool results) into dense
-PNG pages, cutting input tokens by reading them through the vision channel.
+A Go port of the core of [pxpipe](https://github.com/teamchong/pxpipe). It
+converts large system prompts, tool definitions, earlier conversation turns,
+and tool results into dense PNG pages when the vision input is estimated to
+cost fewer tokens than the source text.
 
-This port provides a Go **library** and a CLI. Embed the library into your own
-Go server as an `http.Handler` reverse proxy or as pure functions over request
-bodies. It covers the Anthropic Messages surface **and** the OpenAI Chat
-Completions / Responses surfaces (the GPT path, including the o200k-exact
-profitability gate and GPT history imaging). The CLI provides process-scoped
-MITM launchers for Claude Code, OpenCode, and Codex plus a standalone reverse
-and forward proxy with terminal request telemetry. The dashboard, offline
-export CLI, and Gemini/Google surface remain out of scope.
+The transform supports Anthropic Messages, OpenAI Chat Completions, and OpenAI
+Responses request bodies. The Gemini/Google API surface, upstream dashboard,
+and offline export CLI are not included.
 
-## Install
+## Interfaces
 
-Install the `pxpipe` CLI globally with the pinned release:
+| Interface | Entry point | Use case |
+|---|---|---|
+| CLI wrapper | `pxpipe <executable>` | Run Claude Code, Claude Desktop, OpenCode, or Codex through a process-scoped proxy |
+| Standalone proxy | `pxpipe serve` | Connect an existing client to a loopback reverse/forward proxy |
+| Go package | `pxpipe.NewHandler` and transform functions | Embed the proxy or request transform in a Go server |
+
+## Installation
+
+pxpipe-go requires Go 1.26.3 or later.
 
 ```bash
 go install github.com/evan-choi/pxpipe-go/cmd/pxpipe@v0.4.19
-```
-
-Use `@latest` to install the newest tagged release:
-
-```bash
-go install github.com/evan-choi/pxpipe-go/cmd/pxpipe@latest
-```
-
-Go installs the binary into `go env GOBIN` when set, or
-`$(go env GOPATH)/bin` otherwise. Add that directory to `PATH`; for the default
-location:
-
-```bash
-export PATH="$(go env GOPATH)/bin:$PATH"
 pxpipe --version
 ```
 
-## Use the CLI
+`go install` writes the binary to `go env GOBIN`, or to
+`$(go env GOPATH)/bin` when `GOBIN` is unset. Add that directory to `PATH` if
+needed.
 
-Run an officially supported CLI directly and pass all following arguments to
-the child unchanged:
+Add the Go package to a module with:
+
+```bash
+go get github.com/evan-choi/pxpipe-go@v0.4.19
+```
+
+## Quick start
+
+### CLI wrapper
 
 ```bash
 pxpipe claude --model opus
@@ -49,405 +47,95 @@ PXPIPE_MODELS=gpt-5.6-sol pxpipe opencode --model openai/gpt-5.6-sol
 PXPIPE_MODELS=gpt-5.6-sol pxpipe codex --model gpt-5.6-sol
 ```
 
-The Claude profile transforms HTTP requests whose paths end in `/messages` and
-preserves `ANTHROPIC_BASE_URL` HTTP(S) overrides. The OpenCode profile covers
-paths ending in `/messages`, `/chat/completions`, or `/responses` and disables
-OpenCode's experimental WebSocket transport. The Codex profile transforms
-paths ending in `/responses`; Codex must use a provider configured with
-`supports_websockets=false` because WebSocket request bodies cannot be
-transformed. These routes are independent of the provider domain and preserve
-the original scheme, authority, path, and query after transformation, so custom
-base URLs and localhost intermediaries work without config-file discovery.
-Anthropic base URLs normally omit `/v1`; Claude appends `/v1/messages` to the
-configured base URL.
+Arguments after the executable are passed to the child unchanged. Proxy and
+local CA settings apply only to the child; pxpipe does not modify the system
+trust store. A Codex provider must set `supports_websockets=false` so request
+bodies use HTTP and can be transformed.
 
-On macOS, `Claude.app` is matched case-insensitively and located in
-`~/Applications` or `/Applications`. pxpipe starts its bundle executable with a
-process-scoped `ANTHROPIC_UNIX_SOCKET`, `NODE_EXTRA_CA_CERTS`, and
-`SSL_CERT_FILE`. The socket uses TLS with a certificate signed by pxpipe's local
-CA; pxpipe does not install the CA in the system trust store. `SSL_CERT_FILE`
-keeps that CA available when Claude Desktop starts its bundled Claude Code.
-Fully quit an existing Claude process before launching it so the new process
-inherits the socket environment.
-
-Any other executable uses a protocol-neutral profile that transforms paths
-ending in `/messages`, `/chat/completions`, or `/responses`:
-
-```bash
-pxpipe another-cli --its-child-flag
-```
-
-If the executable is literally named `serve` or `help`, disambiguate it with
-`pxpipe -- <executable> [args...]`.
-
-The CLI starts process-scoped listeners on kernel-assigned
-`127.0.0.1` ports, inherits the child's terminal streams and exit status, and
-does not install its CA into the system trust store. Only the child receives
-the proxy and CA environment. Requests matching the profile's Messages, Chat
-Completions, or Responses routes are transformed; other paths and hosts retain
-their original destination. The named profiles can use arbitrary provider
-domains, so they decrypt the child's HTTPS connections to inspect the request
-path; non-matching requests are forwarded unchanged to their original
-destination. When `ANTHROPIC_UNIX_SOCKET` is already set, pxpipe opens a
-process-scoped Unix socket for Claude Code, transforms matching HTTP requests,
-and forwards them over the original socket. The original socket path is never
-exposed to the child.
-
-When the child exits, pxpipe writes the estimated input token usage without
-pxpipe and the actual usage with pxpipe to stderr, including the percentage
-change. If the provider does not report enough data, it prints
-`token usage unavailable`.
-
-Command startup and process-scoped CA/proxy injection have been smoke-tested
-against the installed Claude Code, OpenCode, and Codex releases. Local Codex
-path routing, transformation, and upstream restoration are integration-tested;
-live OpenCode and Codex inference still need provider end-to-end validation.
-
-### Standalone server
-
-Run a loopback reverse/forward proxy on port `47821`, or select another port
-with `-p`/`--port`:
+### Standalone proxy
 
 ```bash
 pxpipe serve
 pxpipe serve --port 8080
 ```
 
-Startup presents ready-to-run Claude and Codex commands. In a terminal, click
-the `[copy]` button at the right of either line to copy the full command through
-OSC 52. Point clients at the displayed address, for example:
+The default port is `47821`. The startup view prints ready-to-run Claude and
+Codex commands. The Codex command includes the generated CA path and proxy
+environment.
 
 ```bash
 ANTHROPIC_BASE_URL=http://localhost:47821 claude
-NO_PROXY= no_proxy= HTTPS_PROXY=http://localhost:47821 https_proxy=http://localhost:47821 HTTP_PROXY=http://localhost:47821 http_proxy=http://localhost:47821 CODEX_CA_CERTIFICATE='/path/to/pxpipe/mitm-ca.pem' codex
 ```
 
-The displayed Codex command supplies the generated CA and uses `serve` as a
-process-scoped forward proxy. It does not override `model_provider` or its base
-URL, so ChatGPT login, OpenAI API keys, custom provider credentials, and
-localhost intermediaries retain their original destination and authorization.
-Both uppercase and lowercase proxy variables are set by the generated command,
-and `NO_PROXY`/`no_proxy` are cleared so localhost providers are intercepted.
-The active Codex provider must set `supports_websockets=false` because WebSocket
-request bodies cannot be transformed.
+### Go reverse proxy
 
-The Bubble Tea terminal view shows the 20 most recent requests with status,
-endpoint, model, whether context was sent as text or images, cache hits, and
-token estimates.
-Anthropic `Sent` and cache values use provider-reported usage with cache reads
-weighted at `0.1x` and cache creation at `1.25x`. For transformed requests,
-`As text` and `Saved/lost` are local estimates based on transform diagnostics;
-OpenAI token columns are shown as `-` until OpenAI response usage parsing is
-available. Redirected/non-terminal output emits one row per request instead of
-redrawing the table. The server shuts down gracefully on interrupt or SIGTERM.
-
-## Use as an embedded reverse proxy
+`NewHandler` forwards to the public Anthropic and OpenAI APIs by default.
 
 ```go
 package main
 
 import (
-    "log"
-    "net/http"
-    "net/url"
+	"log"
+	"net/http"
 
-    pxpipe "github.com/evan-choi/pxpipe-go"
+	pxpipe "github.com/evan-choi/pxpipe-go"
 )
 
 func main() {
-    anthropic, _ := url.Parse("https://api.anthropic.com")
-    openAI, _ := url.Parse("https://api.openai.com")
-    h := pxpipe.NewHandler(pxpipe.HandlerOptions{
-        AnthropicUpstream: anthropic,
-        OpenAIUpstream:    openAI,
-        OnResult: func(r *http.Request, res *pxpipe.TransformResult) {
-            log.Printf("%s applied=%v reason=%s images=%d",
-                r.URL.Path, res.Applied, res.Reason, res.Info.ImageCount)
-        },
-    })
-    log.Fatal(http.ListenAndServe("127.0.0.1:47821", h))
+	handler := pxpipe.NewHandler(pxpipe.HandlerOptions{})
+	log.Fatal(http.ListenAndServe("127.0.0.1:47821", handler))
 }
 ```
 
-Then point Claude Code at it:
+Point Claude Code at the handler:
 
 ```bash
 ANTHROPIC_BASE_URL=http://127.0.0.1:47821 claude
 ```
 
-Canonical `/v1/messages` requests go to `AnthropicUpstream`; canonical
-`/v1/chat/completions`, `/v1/responses`, and `/v1/responses/*` requests go to
-`OpenAIUpstream`. `/v1/models` uses the request's auth style to choose between
-them. Both upstreams have the public API defaults shown above.
+See the [usage reference](docs/usage.md) for custom upstreams, route mapping,
+credential injection, and pure transforms.
 
-Provider-prefixed paths (`/anthropic/*`, `/openai/*`,
-`/google-ai-studio/*`, `/compat/*`) keep their full path and go to
-`AnthropicUpstream`, which lets an API gateway route them. Supported POST
-bodies are still transformed by wire shape; `count_tokens`, unknown routes,
-and all responses (including SSE) pass through unchanged.
+## Model configuration
 
-Set `APIKey` or `AuthToken`/`AuthTokenFunc` for Anthropic credentials and
-`OpenAIAPIKey` for OpenAI. Direct OpenAI requests never receive `x-api-key` or
-`anthropic-*` headers.
+| Setting | Behavior |
+|---|---|
+| `PXPIPE_MODELS` | CSV list of model base IDs to transform; models outside the list pass through unchanged |
+| `PXPIPE_GPT_PROFILES` | JSON profiles for GPT-compatible models not in the built-in table |
+| `PXPIPE_RENDER_CACHE_BYTES` | Render cache capacity; defaults to `64 MiB`, and `0` disables it |
 
-The handler defaults to a 5-minute response-header timeout, a 2-minute stream
-idle timeout, and a 1-minute identical-request hold. Set
-`UpstreamHeadersTimeout`, `UpstreamIdleTimeout`, or `DuplicateHold` to a
-duration pointer; a pointer to zero disables that guard. `TransformFunc` can
-return live transform options per request and takes precedence over the static
-`Transform` value.
+The library and CLI wrapper have a built-in allowlist of `claude-fable-5` and
+`gemini-3.6-flash`; GPT models are opt-in. `pxpipe serve` accepts every valid
+Anthropic and OpenAI model when `PXPIPE_MODELS` is empty.
 
-A turn containing only `@pxpipe pin` or `@pxpipe unpin` is answered locally in
-the caller's Anthropic Messages, Chat Completions, or Responses wire format.
-Set `x-pxpipe-bypass: 1` to forward it instead.
+## Documentation
 
-### Custom routes
-
-Set `ProtocolOf` to map your own paths to wire protocols; return
-`pxpipe.ProtocolNone` to pass a request through, or fall back to
-`pxpipe.DefaultProtocolOf` for the built-in rules:
-
-```go
-h := pxpipe.NewHandler(pxpipe.HandlerOptions{
-    AnthropicUpstream: anthropic,
-    OpenAIUpstream:    openAI,
-    ProtocolOf: func(path string) pxpipe.Protocol {
-        switch path {
-        case "/api/llm/claude":
-            return pxpipe.ProtocolAnthropicMessages
-        case "/api/llm/gpt/chat":
-            return pxpipe.ProtocolOpenAIChat
-        case "/api/llm/gpt/responses":
-            return pxpipe.ProtocolOpenAIResponses
-        }
-        return pxpipe.DefaultProtocolOf(path)
-    },
-    RewritePath: func(path string, _ pxpipe.Protocol) string {
-        switch path {
-        case "/api/llm/claude":
-            return "/v1/messages"
-        case "/api/llm/gpt/chat":
-            return "/v1/chat/completions"
-        case "/api/llm/gpt/responses":
-            return "/v1/responses"
-        }
-        return path
-    },
-})
-```
-
-`ProtocolOf` chooses the request-body transform. `RewritePath` chooses the
-outbound API path, which also controls direct Anthropic/OpenAI routing.
-`UpstreamFor` can select an HTTP(S) upstream per request and protocol; a
-non-nil result takes precedence over `AnthropicUpstream` and `OpenAIUpstream`.
-`OnResponseComplete` runs after a response body reaches a clean EOF and includes
-Anthropic JSON/SSE token usage when present.
-
-## Use as a pure transform
-
-```go
-res := pxpipe.TransformAnthropicMessages(pxpipe.TransformInput{
-    Body:  bodyBytes,          // the JSON request body
-    Model: "claude-fable-5",  // resolved model id (gates applicability)
-})
-if res.Applied {
-    forward(res.Body)
-} else {
-    forward(bodyBytes) // res.Reason explains why (below_min_chars, …)
-}
-```
-
-For the OpenAI surfaces:
-
-```go
-body, info := pxpipe.TransformOpenAIChatCompletions(bodyBytes, nil)
-body, info  = pxpipe.TransformOpenAIResponses(bodyBytes, nil)
-```
-
-Per-model GPT render/pricing profiles (gpt-5.x, o-series, Grok, …) resolve via
-`pxpipe.ResolveGptProfile`; unknown models can be declared without a code
-change through the `PXPIPE_GPT_PROFILES` env JSON, exactly as upstream.
-
-Or render arbitrary text with the same model-specific geometry and style:
-
-```go
-out, _ := pxpipe.RenderTextToImages(text, pxpipe.RenderOptions{
-    Model: "gpt-5.6-sol",
-    Reflow: true,
-})
-for _, page := range out.Pages { os.WriteFile("page.png", page.PNG, 0o644) }
-```
-
-## Model scope
-
-Same semantics as upstream pxpipe: the built-in allowlist is
-`claude-fable-5` plus `gemini-3.6-flash`; GPT models are opt-in. Override with
-the `PXPIPE_MODELS` env CSV (e.g. `PXPIPE_MODELS=claude-fable-5,gpt-5.6-sol`)
-or at runtime via `pxpipe.SetAllowedModelBases`. Unlisted models pass through
-untransformed — that is the escape hatch for byte-exact work.
-
-The standalone `pxpipe serve` command accepts every valid Anthropic and OpenAI
-model when `PXPIPE_MODELS` is unset or blank. Set `PXPIPE_MODELS` to restrict
-that server to an explicit model list.
-
-## Fidelity
-
-The port is verified against golden fixtures generated only by the pinned
-TypeScript reference implementation in `pxpipe/` (`testdata/`, tooling in
-`tools/`):
-
-- 17 render cases pass **pixel-exact** (PNG bytes differ only by deflate
-  implementation; decoded pixels are identical).
-- 9 Anthropic transform cases match on every text output, hash, gate
-  verdict, page count, and page dimensions; image blocks are compared by
-  decoded pixels.
-- 15 OpenAI (Chat + Responses) cases match on every text output, hash, gate
-  verdict (including exact o200k token counts), history-collapse plan, page
-  count, and page dimensions; the embedded o200k tokenizer reproduces
-  gpt-tokenizer counts exactly.
-- GPT model-profile resolution (27 ids incl. env overrides and misresolution
-  guards) matches the TS table verbatim.
-- TS UTF-16 string-length semantics are reproduced for every char gate and
-  telemetry counter; JSON object key order is preserved through parse →
-  imaged-text serialization so rendered tool schemas match the reference
-  byte-for-byte.
-
-Known deviations:
-
-- PNG byte streams (and therefore `imageBytes`, `historyImageSha`,
-  `cachePrefixSha8`) differ from TS — deflate output is implementation
-  specific. They remain deterministic per input, which is what prompt-cache
-  stability requires.
-- Keys *added* by the transform to objects it did not create serialize after
-  the object's original keys in sorted order (TS appends in insertion order).
-- No Gemini/Google surface, Messages↔OpenAI bridges, or savings
-  measurement.
+- [Usage reference](docs/usage.md): CLI profiles, standalone proxy, Go handler,
+  and pure transforms
+- [Performance and compatibility](docs/performance.md): golden parity,
+  benchmarks, and reproduction commands
+- [Upstream port status](UPSTREAM.md): pinned revision, port scope, and fixture
+  verification
 
 ## Performance
 
-Rendered pages are cached by exact render inputs. The cache retains up to
-64 MiB by default. Set `PXPIPE_RENDER_CACHE_BYTES` to another byte limit, or
-set it to `0` to disable the cache.
-
 ![pxpipe versus pxpipe-go benchmark: pxpipe-go is 72.6 to 282.2 times faster across four workloads and uses 73.4% less peak RSS](docs/benchmark-improvements.png)
 
-Measured natively on an Apple M1 Pro running macOS 26.5.2, with Bun 1.3.14
-and Go 1.26.5. Go used the machine-default `GOMAXPROCS=10` and no PGO profile.
-The comparison uses `pxpipe@c5fc2a8` and `pxpipe-go@c3e0e50`
-(2026-08-11).
+On an Apple M1 Pro, the four measured workloads ran 72.6–282.2 times faster
+than the TypeScript implementation, while peak RSS for the full suite was
+73.4% lower. See [performance and compatibility](docs/performance.md) for the
+measurement conditions.
 
-Values are medians of five runs. Each pxpipe run performs two warmups and
-three timed iterations; its table value is the median per-run mean. Each
-pxpipe-go run uses a one-second benchmark window. Actual latency varies with
-CPU architecture, available cores, and request content.
+## Verification
 
-| benchmark | pxpipe time/op | pxpipe-go time/op | speedup |
-|---|---:|---:|---:|
-| TransformBigClaudeCode | 52.20 ms | 0.72 ms | 72.6× |
-| RenderDensePage | 12.50 ms | 0.14 ms | 91.7× |
-| TransformOpenAIChat | 52.40 ms | 0.28 ms | 190.5× |
-| TransformOpenAIResponses | 132.50 ms | 0.47 ms | 282.2× |
-
-Peak RSS was measured over the full four-benchmark suite in a fresh process
-for each run:
-
-| implementation | median peak RSS | relative to pxpipe |
-|---|---:|---:|
-| pxpipe | 405.00 MiB | baseline |
-| pxpipe-go | 107.70 MiB | 73.4% lower |
-
-Go's `-benchmem` output reports the following allocation volume per operation:
-
-| benchmark | B/op | allocs/op |
-|---|---:|---:|
-| TransformBigClaudeCode | 1,165,232 | 1,813 |
-| RenderDensePage | 2,736 | 25 |
-| TransformOpenAIChat | 633,320 | 993 |
-| TransformOpenAIResponses | 1,069,497 | 1,043 |
-
-Raw GC counts are not compared because V8 and Go use different collectors and
-event semantics. Peak RSS is the cross-runtime memory metric; `B/op` and
-`allocs/op` identify allocation pressure within the Go implementation.
-
-After installing dependencies, reproduce the latency and allocation comparison
-from the repository root on Apple Silicon macOS:
+Golden fixtures come only from the pinned TypeScript implementation. Tests
+compare text, gate decisions, page geometry, and decoded pixels.
 
 ```bash
-for benchmark_run in 1 2 3 4 5; do
-  (cd pxpipe && bun run ../tools/bench-ts.ts)
-done
-
-GOTOOLCHAIN=go1.26.5 go test -pgo=off -run '^$' \
-  -bench '^(BenchmarkTransformBigClaudeCode|BenchmarkRenderDensePage|BenchmarkTransformOpenAIChat|BenchmarkTransformOpenAIResponses)$' \
-  -benchtime=1s -benchmem -count=5 .
+go test ./...
 ```
-
-Reproduce peak RSS with macOS `/usr/bin/time -l` by running each full suite in
-a fresh process five times and taking the median `maximum resident set size`
-value (reported in bytes). Build the Go benchmark binary first so the
-measurement excludes the compiler and `go` command:
-
-```bash
-for benchmark_run in 1 2 3 4 5; do
-  (cd pxpipe &&
-    /usr/bin/time -l bun run ../tools/bench-ts.ts >/dev/null)
-done
-
-GOTOOLCHAIN=go1.26.5 go test -pgo=off \
-  -c -o /tmp/pxpipe-go-bench.test .
-for benchmark_run in 1 2 3 4 5; do
-  /usr/bin/time -l /tmp/pxpipe-go-bench.test -test.run '^$' \
-    -test.bench '^(BenchmarkTransformBigClaudeCode|BenchmarkRenderDensePage|BenchmarkTransformOpenAIChat|BenchmarkTransformOpenAIResponses)$' \
-    -test.benchtime=1s -test.count=1 >/dev/null
-done
-```
-
-Current macOS hot-cache profiles put the cache-prefix hit path at 0.6% of CPU;
-mutex contention remains negligible. The optimized high-cardinality Responses
-path fell from 12.04 ms/op to 7.02 ms/op; level-6 PNG compression accounts for
-58.0% of CPU and uncached o200k counting for 7.2%. Framebuffers and encoders are
-pooled.
-
-A Docker Desktop Alpine ARM64 A/B run found `GOGC=400` with
-`GOMEMLIMIT=192MiB` 5.6% faster by parallel geomean than the default GC
-settings, with about 219 MiB peak cgroup memory. Treat this as a deployment
-candidate only and remeasure it on the production EKS instance family.
-
-For production validation, run the native Linux harness inside an Alpine pod
-on the same EKS instance family and architecture as production. It rejects
-macOS, non-Alpine environments, architecture mismatches, Docker Desktop,
-LinuxKit, and WSL. Set `BENCH_GOMAXPROCS` to the pod's integer CPU limit:
-
-```bash
-BENCH_GOMAXPROCS=4 tools/bench-linux.sh /results/current
-BENCH_GOMAXPROCS=4 BENCH_PGO=1 tools/bench-linux.sh /results/current-pgo
-```
-
-Run the first command from clean baseline and candidate checkouts, then compare
-their `sequential.txt` and `parallel.txt` files with `benchstat`. PGO profiles
-are workload- and architecture-specific; do not ship a profile trained on a
-developer machine or an emulated CPU.
-
-## Regenerating fixtures
-
-Initialize the pinned TS reference implementation first:
-
-```bash
-git submodule update --init --recursive
-cd pxpipe
-pnpm install --frozen-lockfile
-bun run ../tools/dump-atlas.ts
-bun run ../tools/gen-fixtures.ts
-bun run ../tools/gen-fixtures-openai.ts
-bun run ../tools/dump-gpt-profiles.ts > ../testdata/openai/profiles.json
-```
-
-Run every TypeScript generator with Bun. Do not generate golden data from the
-Go port or invoke these scripts through `tsx`.
-
-See [UPSTREAM.md](UPSTREAM.md) for the pinned reference revision and current
-porting status.
 
 ## License
 
-MIT. Portions derived from [teamchong/pxpipe](https://github.com/teamchong/pxpipe) (MIT).
+[MIT](LICENSE). Portions derived from
+[teamchong/pxpipe](https://github.com/teamchong/pxpipe) (MIT).
