@@ -14,6 +14,18 @@ import (
 func u16len(s string) int {
 	const highBits = uint64(0x8080808080808080)
 	n := 0
+	for len(s) >= 32 {
+		p := unsafe.Pointer(unsafe.StringData(s))
+		word := *(*uint64)(p) |
+			*(*uint64)(unsafe.Add(p, 8)) |
+			*(*uint64)(unsafe.Add(p, 16)) |
+			*(*uint64)(unsafe.Add(p, 24))
+		if word&highBits != 0 {
+			break
+		}
+		n += 32
+		s = s[32:]
+	}
 	for len(s) >= 8 {
 		if *(*uint64)(unsafe.Pointer(unsafe.StringData(s)))&highBits == 0 {
 			n += 8
