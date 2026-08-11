@@ -14,7 +14,10 @@ import (
 	"sync/atomic"
 )
 
-const defaultRenderCacheBytes int64 = 64 << 20
+const (
+	defaultRenderCacheBytes   int64 = 64 << 20
+	renderCacheAdmissionSlots       = 4096
+)
 
 type renderCacheStyleKey struct {
 	font          string
@@ -115,12 +118,15 @@ func (e *renderedPageCacheEntry) matches(text string, slotText *string) bool {
 type renderedPageCache struct {
 	maxBytes int64
 	values   sync.Map
-	mu       sync.Mutex
-	entries  atomic.Int64
-	bytes    atomic.Int64
-	hits     atomic.Uint64
-	misses   atomic.Uint64
-	clock    atomic.Uint64
+	// ponytail: fixed admission slots may delay caching under heavy collision;
+	// increase the table only if cache-hit telemetry regresses.
+	admissions [renderCacheAdmissionSlots]atomic.Uint64
+	mu         sync.Mutex
+	entries    atomic.Int64
+	bytes      atomic.Int64
+	hits       atomic.Uint64
+	misses     atomic.Uint64
+	clock      atomic.Uint64
 }
 
 type renderedPageCacheStats struct {
@@ -150,10 +156,33 @@ func (c *renderedPageCache) clear() {
 		c.values.Delete(key)
 		return true
 	})
+	for i := range c.admissions {
+		c.admissions[i].Store(0)
+	}
 	c.entries.Store(0)
 	c.bytes.Store(0)
 	c.hits.Store(0)
 	c.misses.Store(0)
+}
+
+func (c *renderedPageCache) admit(key renderCacheKey) bool {
+	fingerprint := key.textHash ^ key.slotHash ^ uint64(uint32(key.cols))<<32 ^ uint64(uint32(key.maxCharsPerPage))
+	fingerprint ^= uint64(uint32(key.maxHeightPx)) * 0x9e3779b97f4a7c15
+	if key.page {
+		fingerprint ^= 0xd6e8feb86659fd93 ^ uint64(uint32(key.pageLines))<<32 ^ uint64(uint32(key.pageSlotLines))
+	}
+	if key.reflowed {
+		fingerprint ^= 0xa0761d6478bd642f
+	}
+	if fingerprint == 0 {
+		fingerprint = 1
+	}
+	slot := &c.admissions[fingerprint&(renderCacheAdmissionSlots-1)]
+	if slot.Load() == fingerprint {
+		return true
+	}
+	slot.Store(fingerprint)
+	return false
 }
 
 type renderedImageBase64 struct {
@@ -357,6 +386,13 @@ func (c *renderedPageCache) put(key renderCacheKey, text string, slotText *strin
 	return cloneRenderedImages(images)
 }
 
+func (c *renderedPageCache) putRepeated(key renderCacheKey, text string, slotText *string, images []*RenderedImage) []*RenderedImage {
+	if !c.admit(key) {
+		return images
+	}
+	return c.put(key, text, slotText, images)
+}
+
 func renderCacheBudget() int64 {
 	raw, ok := os.LookupEnv("PXPIPE_RENDER_CACHE_BYTES")
 	if !ok || strings.TrimSpace(raw) == "" {
@@ -385,5 +421,5 @@ func renderTextToPngsCached(cache *renderedPageCache, text string, cols, maxChar
 	if err != nil {
 		return nil, err
 	}
-	return cache.put(key, text, slotText, images), nil
+	return cache.putRepeated(key, text, slotText, images), nil
 }
