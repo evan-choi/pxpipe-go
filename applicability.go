@@ -92,7 +92,7 @@ func GetAllowedModelBases() []string { return allowedModelBases() }
 func GetConfiguredModelBases() []string { return envOrDefaultBases() }
 
 // SetAllowedModelBases sets a runtime override; nil clears it, an empty slice
-// compresses nothing.
+// compresses nothing, and "*" allows every correctly resolved model.
 func SetAllowedModelBases(list []string) {
 	if list == nil {
 		runtimeModelBases.Store(nil)
@@ -129,7 +129,7 @@ func isAllowed(model string) bool {
 	}
 	for _, b := range allowedModelBasesView() {
 		target := strings.ToLower(b)
-		if hit(base, target) || (hasUnqualified && hit(unqualified, target)) {
+		if target == "*" || hit(base, target) || (hasUnqualified && hit(unqualified, target)) {
 			return true
 		}
 	}

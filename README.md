@@ -286,6 +286,10 @@ the `PXPIPE_MODELS` env CSV (e.g. `PXPIPE_MODELS=claude-fable-5,gpt-5.6-sol`)
 or at runtime via `pxpipe.SetAllowedModelBases`. Unlisted models pass through
 untransformed — that is the escape hatch for byte-exact work.
 
+The standalone `pxpipe serve` command accepts every valid Anthropic and OpenAI
+model when `PXPIPE_MODELS` is unset or blank. Set `PXPIPE_MODELS` to restrict
+that server to an explicit model list.
+
 ## Fidelity
 
 The port is verified against golden fixtures generated only by the pinned

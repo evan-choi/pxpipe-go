@@ -74,6 +74,18 @@ func TestSupportedModelRejectsMisresolvedSibling(t *testing.T) {
 	}
 }
 
+func TestSupportedModelWildcardAllowsAnthropicAndOpenAI(t *testing.T) {
+	SetAllowedModelBases([]string{"*"})
+	t.Cleanup(func() { SetAllowedModelBases(nil) })
+
+	if !IsSupportedModel("claude-opus-5") || !IsSupportedGptModel("gpt-5.6-sol") {
+		t.Fatal("wildcard must allow Anthropic and OpenAI models")
+	}
+	if IsSupportedModel("gemini-3.6-flash-preview") {
+		t.Fatal("wildcard must not admit a misresolved model")
+	}
+}
+
 func TestShouldTransformAnthropicMessages(t *testing.T) {
 	SetAllowedModelBases([]string{"claude-fable-5"})
 	t.Cleanup(func() { SetAllowedModelBases(nil) })
