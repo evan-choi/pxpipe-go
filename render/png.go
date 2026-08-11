@@ -35,8 +35,8 @@ func preferAverageFilter(pixels []byte, width, height int) bool {
 	// ponytail: this bounded sample can miss a rare size winner; add per-row
 	// selection only if representative payloads regress.
 	const (
-		rowStride = 5
-		colStride = 7
+		rowStride = 11
+		colStride = 13
 		threshold = 47
 	)
 	score, samples := 0, 0
