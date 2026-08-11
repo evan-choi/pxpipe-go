@@ -660,12 +660,9 @@ func chatTextPart(text string) map[string]any {
 	return part
 }
 
-func safeStringifyLen(v any) int {
-	return u16len(jsStringifyString(v))
-}
-
 func chatOutgoingTextChars(req map[string]any) int {
 	n := 0
+	var stringifyScratch []byte
 	messages, _ := req["messages"].([]any)
 	for _, m := range messages {
 		if msg, ok := m.(map[string]any); ok {
@@ -685,7 +682,7 @@ func chatOutgoingTextChars(req map[string]any) int {
 				n += u16len(desc)
 			}
 			if params, present := fn["parameters"]; present {
-				n += safeStringifyLen(params)
+				n += jsStringifyU16Len(&stringifyScratch, params)
 			}
 		}
 	}
@@ -694,6 +691,7 @@ func chatOutgoingTextChars(req map[string]any) int {
 
 func responsesOutgoingTextChars(req map[string]any) int {
 	n := 0
+	var stringifyScratch []byte
 	if instructions, ok := req["instructions"].(string); ok {
 		n += u16len(instructions)
 	}
@@ -720,7 +718,7 @@ func responsesOutgoingTextChars(req map[string]any) int {
 				n += u16len(desc)
 			}
 			if params, present := t["parameters"]; present {
-				n += safeStringifyLen(params)
+				n += jsStringifyU16Len(&stringifyScratch, params)
 			}
 		}
 	}
