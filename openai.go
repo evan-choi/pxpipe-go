@@ -122,6 +122,20 @@ func (c gptTokenCounter) count(text string) int {
 	return n
 }
 
+func (c gptTokenCounter) countJSON(scratch *[]byte, value any) int {
+	*scratch = appendJSValue((*scratch)[:0], value)
+	if len(*scratch) == 0 {
+		return 0
+	}
+	text := unsafe.String(unsafe.SliceData(*scratch), len(*scratch))
+	if n, ok := c[text]; ok {
+		return n
+	}
+	// The scratch backing is reused by the next value, so do not retain it as
+	// a map key. The process-wide tokenizer cache handles repeated JSON text.
+	return gptTextTokens(text)
+}
+
 func resolveOpenAIOpts(opts *TransformOptions) openaiResolvedOptions {
 	o := openaiResolvedOptions{
 		Compress:         true,
@@ -846,13 +860,14 @@ func gptBaselineImagedTokens(systemTexts []string, originalTools []any, hasOrigi
 	for _, t := range systemTexts {
 		n += tokenCounts.count(t)
 	}
+	var scratch []byte
 	orig := 0
 	if hasOriginal && len(originalTools) > 0 {
-		orig = tokenCounts.count(jsStringifyString(originalTools))
+		orig = tokenCounts.countJSON(&scratch, originalTools)
 	}
 	stripped := 0
 	if hasStripped && len(strippedTools) > 0 {
-		stripped = tokenCounts.count(jsStringifyString(strippedTools))
+		stripped = tokenCounts.countJSON(&scratch, strippedTools)
 	}
 	return n + maxInt(0, orig-stripped)
 }
@@ -1060,11 +1075,12 @@ func applyResponsesHistoryCollapse(req map[string]any, inputItems []any, info *T
 
 func measureResponsesComposition(req map[string]any, inputWasString bool, originalInput string, inputItems []any, tokenCounts gptTokenCounter) *ResponsesComposition {
 	c := &ResponsesComposition{}
+	var scratch []byte
 	if instructions, ok := req["instructions"].(string); ok {
 		c.Instructions = tokenCounts.count(instructions)
 	}
 	if tools, ok := req["tools"].([]any); ok {
-		c.ToolsJSON = tokenCounts.count(jsStringifyString(tools))
+		c.ToolsJSON = tokenCounts.countJSON(&scratch, tools)
 	}
 	if inputWasString {
 		c.UserAssistant += tokenCounts.count(originalInput)
@@ -1099,22 +1115,22 @@ func measureResponsesComposition(req map[string]any, inputWasString bool, origin
 		case role == "user" || role == "assistant":
 			c.UserAssistant += tokenCounts.count(responsesContentText(o["content"]))
 		case itemType == "function_call":
-			c.FunctionCalls += tokenCounts.count(jsStringifyString(o))
+			c.FunctionCalls += tokenCounts.countJSON(&scratch, o)
 		case itemType == "function_call_output":
 			if s, ok := o["output"].(string); ok {
 				c.FunctionOutputs += tokenCounts.count(s)
 			} else if v, present := o["output"]; present && v != nil {
-				c.FunctionOutputs += tokenCounts.count(jsStringifyString(v))
+				c.FunctionOutputs += tokenCounts.countJSON(&scratch, v)
 			} else {
-				c.FunctionOutputs += tokenCounts.count(jsStringifyString(""))
+				c.FunctionOutputs += tokenCounts.countJSON(&scratch, "")
 			}
 		case itemType == "reasoning":
-			c.ReasoningEncrypted += tokenCounts.count(jsStringifyString(o))
+			c.ReasoningEncrypted += tokenCounts.countJSON(&scratch, o)
 		case itemType == "compaction" || itemType == "compaction_trigger" ||
 			itemType == "context_compaction" || itemType == "item_reference":
-			c.CompactionOpaque += tokenCounts.count(jsStringifyString(o))
+			c.CompactionOpaque += tokenCounts.countJSON(&scratch, o)
 		case role == "" && itemType != "":
-			c.Other += tokenCounts.count(jsStringifyString(o))
+			c.Other += tokenCounts.countJSON(&scratch, o)
 		}
 	}
 	c.TotalLocal = c.Instructions + c.SystemDeveloper + c.UserAssistant +
