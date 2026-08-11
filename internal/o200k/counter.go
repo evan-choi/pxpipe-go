@@ -189,6 +189,12 @@ func nextPieceEnd(text string, start int) int {
 }
 
 func wordPieceEnd(text string, start int) (int, bool) {
+	if end, ok, handled := asciiWordPieceEnd(text, start); handled {
+		if ok {
+			end = contractionEnd(text, end)
+		}
+		return end, ok
+	}
 	r, size := utf8.DecodeRuneInString(text[start:])
 	prefixEnd := start
 	if r != '\r' && r != '\n' && !isLetterOrNumber(r) {
@@ -211,6 +217,47 @@ func wordPieceEnd(text string, start int) (int, bool) {
 		return contractionEnd(text, end), true
 	}
 	return 0, false
+}
+
+func asciiWordPieceEnd(text string, start int) (int, bool, bool) {
+	prefixEnd := start
+	b := text[start]
+	if b >= utf8.RuneSelf {
+		return 0, false, false
+	}
+	if b != '\r' && b != '\n' && !(b >= 'A' && b <= 'Z' || b >= 'a' && b <= 'z' || b >= '0' && b <= '9') {
+		prefixEnd++
+	}
+	if prefixEnd == start {
+		return asciiWordEnd(text, start)
+	}
+	return asciiWordEnd(text, prefixEnd)
+}
+
+func asciiWordEnd(text string, start int) (int, bool, bool) {
+	if start == len(text) {
+		return 0, false, true
+	}
+	pos := start
+	switch b := text[pos]; {
+	case b >= 'a' && b <= 'z':
+		for pos < len(text) && text[pos] >= 'a' && text[pos] <= 'z' {
+			pos++
+		}
+	case b >= 'A' && b <= 'Z':
+		for pos < len(text) && text[pos] >= 'A' && text[pos] <= 'Z' {
+			pos++
+		}
+		for pos < len(text) && text[pos] >= 'a' && text[pos] <= 'z' {
+			pos++
+		}
+	default:
+		return 0, false, b < utf8.RuneSelf
+	}
+	if pos < len(text) && text[pos] >= utf8.RuneSelf {
+		return 0, false, false
+	}
+	return pos, true, true
 }
 
 func lowerWordEnd(text string, start int) (int, bool) {

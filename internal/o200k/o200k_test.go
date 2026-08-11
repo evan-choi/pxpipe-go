@@ -69,7 +69,9 @@ func TestCounterMatchesTokenizerAndSplitPattern(t *testing.T) {
 	alphabet := []rune("aAzZ09 '\t\r\n/!éÉǅʰ中\u0301ा⃝²Ⅳ٣\u0085\u00a0\u2028🙂ſ")
 	inputs := []string{
 		"hello world",
+		"aB ABcD ABCdE !word !Word",
 		"ABCDef AbC ABC 中日語 don't WE'LL",
+		"aÉ Aé !École",
 		"  words  1234 /\r\n/ symbols",
 		"\u0301 \u0301A A\u0301 a\u0301 École",
 		string([]byte{0xff, 'a', 0xfe}),
