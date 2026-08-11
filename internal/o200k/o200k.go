@@ -79,26 +79,6 @@ func tokenCountFingerprint(text string) uint64 {
 	return h
 }
 
-func canNormalizeDigits(text string) bool {
-	hasDigits := false
-	for i := 0; i < len(text); {
-		b := text[i]
-		if b < utf8.RuneSelf {
-			if b >= '0' && b <= '9' {
-				hasDigits = true
-			}
-			i++
-			continue
-		}
-		r, size := utf8.DecodeRuneInString(text[i:])
-		if unicode.IsNumber(r) {
-			return false
-		}
-		i += size
-	}
-	return hasDigits
-}
-
 func digitNormalizedFingerprint(text string) uint64 {
 	const (
 		offset = uint64(14695981039346656037)
@@ -126,14 +106,29 @@ func digitNormalizedFingerprint(text string) uint64 {
 	return h
 }
 
-func digitNormalizedKey(text string) [sha256.Size]byte {
+func digitNormalizedKeyIfSafe(text string) ([sha256.Size]byte, bool) {
 	normalized := []byte(text)
-	for i, b := range normalized {
-		if b >= '0' && b <= '9' {
-			normalized[i] = '0'
+	hasDigits := false
+	for i := 0; i < len(normalized); {
+		b := normalized[i]
+		if b < utf8.RuneSelf {
+			if b >= '0' && b <= '9' {
+				normalized[i] = '0'
+				hasDigits = true
+			}
+			i++
+			continue
 		}
+		r, size := utf8.DecodeRune(normalized[i:])
+		if unicode.IsNumber(r) {
+			return [sha256.Size]byte{}, false
+		}
+		i += size
 	}
-	return sha256.Sum256(normalized)
+	if !hasDigits {
+		return [sha256.Size]byte{}, false
+	}
+	return sha256.Sum256(normalized), true
 }
 
 // CountTokens returns the o200k_base token count of text, treating special
@@ -164,22 +159,23 @@ func CountTokens(text string) int {
 		}
 		return cached.count
 	}
+	digitFingerprint := digitNormalizedFingerprint(text)
+	digitSlot := &digitTokenCountCache[digitFingerprint&(tokenCountCacheSlots-1)]
 	var digitKey [sha256.Size]byte
-	var digitSlot *atomic.Pointer[digitTokenCountCacheEntry]
-	digitFingerprint, admitDigitKey := uint64(0), false
-	if canNormalizeDigits(text) {
-		digitFingerprint = digitNormalizedFingerprint(text)
-		digitSlot = &digitTokenCountCache[digitFingerprint&(tokenCountCacheSlots-1)]
-		if cached := digitSlot.Load(); cached != nil && cached.fingerprint == digitFingerprint {
-			digitKey = digitNormalizedKey(text)
+	admitDigitKey := false
+	if cached := digitSlot.Load(); cached != nil && cached.fingerprint == digitFingerprint {
+		if normalizedKey, ok := digitNormalizedKeyIfSafe(text); ok {
+			digitKey = normalizedKey
 			if cached.key == digitKey {
 				slot.Store(&tokenCountCacheEntry{key: key, count: cached.count})
 				return cached.count
 			}
 			admitDigitKey = true
-		} else {
-			candidate := &digitTokenCountCandidates[digitFingerprint&(tokenCountCacheSlots-1)]
-			admitDigitKey = candidate.Swap(digitFingerprint) == digitFingerprint
+		}
+	} else {
+		candidate := &digitTokenCountCandidates[digitFingerprint&(tokenCountCacheSlots-1)]
+		if candidate.Swap(digitFingerprint) == digitFingerprint {
+			digitKey, admitDigitKey = digitNormalizedKeyIfSafe(text)
 		}
 	}
 	n, err := countTokensUncached(text)
@@ -188,9 +184,6 @@ func CountTokens(text string) int {
 	}
 	slot.Store(&tokenCountCacheEntry{key: key, count: n})
 	if admitDigitKey {
-		if digitKey == ([sha256.Size]byte{}) {
-			digitKey = digitNormalizedKey(text)
-		}
 		digitSlot.Store(&digitTokenCountCacheEntry{fingerprint: digitFingerprint, key: digitKey, count: n})
 	}
 	return n
