@@ -29,7 +29,7 @@ func TestRenderedPageCacheReturnsIndependentMetadata(t *testing.T) {
 		t.Fatal(err)
 	}
 	stats := cache.stats()
-	if stats.entries != 1 || stats.hits != 1 || stats.misses != 1 || stats.bytes <= 0 {
+	if stats.entries != 2 || stats.hits != 1 || stats.misses != 2 || stats.bytes <= 0 {
 		t.Fatalf("cache stats = %+v", stats)
 	}
 	if len(first) != len(second) {
@@ -129,6 +129,7 @@ func TestRenderCacheKeyCoversEveryRenderInput(t *testing.T) {
 		"slot empty":  newRenderCacheKey("text", 64, 500, style, 96, new(string), false),
 		"slot text":   newRenderCacheKey("text", 64, 500, style, 96, ptr("other"), false),
 		"reflowed":    newRenderCacheKey("text", 64, 500, style, 96, &slot, true),
+		"page":        newRenderPageCacheKey("text", 1, 64, style, &slot, 1),
 	}
 
 	styleVariants := []struct {
@@ -166,6 +167,38 @@ func TestRenderCacheKeyCoversEveryRenderInput(t *testing.T) {
 	sameValues.Invert, sameValues.PaperGray = &invert2, &paper2
 	if key := newRenderCacheKey("text", 64, 500, sameValues, 96, &slot, false); key != base {
 		t.Fatal("equal pointer values produced different keys")
+	}
+	page := newRenderPageCacheKey("text", 1, 64, style, &slot, 1)
+	if newRenderPageCacheKey("text", 2, 64, style, &slot, 1) == page ||
+		newRenderPageCacheKey("text", 1, 64, style, &slot, 2) == page {
+		t.Fatal("page line shape did not change cache key")
+	}
+}
+
+func TestRenderedPageCacheReusesUnchangedPages(t *testing.T) {
+	cache := newRenderedPageCache(defaultRenderCacheBytes)
+	tail := strings.Repeat("stable page content 0123456789\n", 120)
+	first, err := renderCacheTestPages(cache, "AAAAAAAA"+tail, DenseRenderStyle, nil, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	second, err := renderCacheTestPages(cache, "BBBBBBBB"+tail, DenseRenderStyle, nil, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(first) < 2 || len(second) != len(first) {
+		t.Fatalf("pages = %d/%d, want equal multi-page renders", len(first), len(second))
+	}
+	if bytes.Equal(first[0].PNG, second[0].PNG) {
+		t.Fatal("changed page was reused")
+	}
+	for i := 1; i < len(first); i++ {
+		if !bytes.Equal(first[i].PNG, second[i].PNG) {
+			t.Fatalf("unchanged page %d was rerendered differently", i)
+		}
+	}
+	if stats := cache.stats(); stats.hits == 0 {
+		t.Fatalf("unchanged pages did not hit the cache: %+v", stats)
 	}
 }
 

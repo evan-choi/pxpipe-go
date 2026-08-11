@@ -99,6 +99,7 @@ type pageRenderBatch struct {
 	errs          []error
 	cols          int
 	style         RenderStyle
+	pageCache     *renderedPageCache
 	wg            sync.WaitGroup
 }
 
@@ -122,10 +123,29 @@ func (b *pageRenderBatch) render(i int) {
 	if b.pageSlotLines != nil {
 		slots = b.pageSlotLines[i]
 	}
-	b.images[i], b.errs[i] = renderWrappedLinesToPNG(
-		b.pages[i], slots, wrappedLinesRuneCount(b.pages[i]), b.cols, b.style,
-	)
+	b.images[i], b.errs[i] = renderWrappedPageCached(b.pages[i], slots, b.cols, b.style, b.pageCache)
 	b.wg.Done()
+}
+
+func renderWrappedPageCached(lines, slots []string, cols int, style RenderStyle, pageCache *renderedPageCache) (*RenderedImage, error) {
+	if pageCache == nil {
+		return renderWrappedLinesToPNG(lines, slots, wrappedLinesRuneCount(lines), cols, style)
+	}
+	pageText := strings.Join(lines, "\n")
+	var pageSlotText *string
+	if slots != nil {
+		joined := strings.Join(slots, "\n")
+		pageSlotText = &joined
+	}
+	key := newRenderPageCacheKey(pageText, len(lines), cols, style, pageSlotText, len(slots))
+	if cached, ok := pageCache.get(key, pageText, pageSlotText); ok {
+		return cached[0], nil
+	}
+	image, err := renderWrappedLinesToPNG(lines, slots, wrappedLinesRuneCount(lines), cols, style)
+	if err != nil {
+		return nil, err
+	}
+	return pageCache.put(key, pageText, pageSlotText, []*RenderedImage{image})[0], nil
 }
 
 type RenderedImage struct {
@@ -1387,6 +1407,10 @@ func RenderTextToPngsReflow(text string, cols int, style RenderStyle) ([]*Render
 // RenderTextToPngsWithCharLimit splits text into pages each ≤ maxHeightPx
 // tall, respecting the per-image char budget.
 func renderTextToPngsWithCharLimitUncached(text string, cols, maxCharsPerImage int, style RenderStyle, maxHeightPx int, slotText *string, reflowed bool) ([]*RenderedImage, error) {
+	return renderTextToPngsWithCharLimitCachedPages(text, cols, maxCharsPerImage, style, maxHeightPx, slotText, reflowed, nil)
+}
+
+func renderTextToPngsWithCharLimitCachedPages(text string, cols, maxCharsPerImage int, style RenderStyle, maxHeightPx int, slotText *string, reflowed bool, pageCache *renderedPageCache) ([]*RenderedImage, error) {
 	markerScale := style.MarkerScale
 	if markerScale < 1 {
 		markerScale = 1
@@ -1427,7 +1451,7 @@ func renderTextToPngsWithCharLimitUncached(text string, cols, maxCharsPerImage i
 		if pageSlotLines != nil {
 			slots = pageSlotLines[i]
 		}
-		return renderWrappedLinesToPNG(pages[i], slots, wrappedLinesRuneCount(pages[i]), cols, style)
+		return renderWrappedPageCached(pages[i], slots, cols, style, pageCache)
 	}
 	workers := min(len(pages), runtime.GOMAXPROCS(0))
 	if workers == 1 {
@@ -1448,6 +1472,7 @@ func renderTextToPngsWithCharLimitUncached(text string, cols, maxCharsPerImage i
 		errs:          make([]error, len(pages)),
 		cols:          cols,
 		style:         style,
+		pageCache:     pageCache,
 	}
 	batch.wg.Add(len(pages))
 	jobs := pageRenderQueue()

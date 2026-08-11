@@ -42,8 +42,11 @@ type renderCacheKey struct {
 	cols            int
 	maxCharsPerPage int
 	maxHeightPx     int
+	pageLines       int
+	pageSlotLines   int
 	slotPresent     bool
 	reflowed        bool
+	page            bool
 }
 
 var renderCacheHashSeed = maphash.MakeSeed()
@@ -82,6 +85,14 @@ func newRenderCacheKey(text string, cols, maxCharsPerPage int, style RenderStyle
 		key.slotPresent = true
 		key.slotHash = maphash.String(renderCacheHashSeed, *slotText)
 	}
+	return key
+}
+
+func newRenderPageCacheKey(text string, lines, cols int, style RenderStyle, slotText *string, slotLines int) renderCacheKey {
+	key := newRenderCacheKey(text, cols, 0, style, 0, slotText, false)
+	key.page = true
+	key.pageLines = lines
+	key.pageSlotLines = slotLines
 	return key
 }
 
@@ -370,7 +381,7 @@ func renderTextToPngsCached(cache *renderedPageCache, text string, cols, maxChar
 	}
 	// ponytail: simultaneous cold misses may render twice; add per-key flights
 	// only if a production cold-start profile shows stampedes.
-	images, err := renderTextToPngsWithCharLimitUncached(text, cols, maxCharsPerImage, style, maxHeightPx, slotText, reflowed)
+	images, err := renderTextToPngsWithCharLimitCachedPages(text, cols, maxCharsPerImage, style, maxHeightPx, slotText, reflowed, cache)
 	if err != nil {
 		return nil, err
 	}
