@@ -1556,6 +1556,7 @@ func cachePrefixDigest(req map[string]any) (string, int, bool) {
 
 func countOutgoingTextChars(req map[string]any) int {
 	n := 0
+	var stringifyScratch []byte
 	if s, ok := req["system"].(string); ok {
 		n += u16len(s)
 	} else if arr, ok := asArr(req["system"]); ok {
@@ -1580,7 +1581,7 @@ func countOutgoingTextChars(req map[string]any) int {
 				n += u16len(desc)
 			}
 			if schema, has := tm["input_schema"]; has {
-				n += jsonStringifyLen(schema)
+				n += jsStringifyU16Len(&stringifyScratch, schema)
 			}
 		}
 	}
@@ -1613,7 +1614,7 @@ func countOutgoingTextChars(req map[string]any) int {
 					n += u16len(name)
 				}
 				if input, has := bm["input"]; has {
-					n += jsonStringifyLen(input)
+					n += jsStringifyU16Len(&stringifyScratch, input)
 				}
 			case "tool_result":
 				if id, ok := getStr(bm, "tool_use_id"); ok {

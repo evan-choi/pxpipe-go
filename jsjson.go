@@ -189,6 +189,11 @@ func jsStringifyString(v any) string {
 	return unsafe.String(unsafe.SliceData(b), len(b))
 }
 
+func jsStringifyU16Len(scratch *[]byte, v any) int {
+	*scratch = appendJSValue((*scratch)[:0], v)
+	return u16len(unsafe.String(unsafe.SliceData(*scratch), len(*scratch)))
+}
+
 func appendJSValue(b []byte, v any) []byte {
 	switch tv := v.(type) {
 	case nil:
