@@ -24,43 +24,57 @@ func TestRenderedPageCacheReturnsIndependentMetadata(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	if stats := cache.stats(); stats.entries != 0 {
+		t.Fatalf("one-shot render was cached: %+v", stats)
+	}
 	second, err := renderCacheTestPages(cache, renderCacheTestText, DenseRenderStyle, nil, false)
 	if err != nil {
 		t.Fatal(err)
 	}
-	stats := cache.stats()
-	if stats.entries != 2 || stats.hits != 1 || stats.misses != 2 || stats.bytes <= 0 {
-		t.Fatalf("cache stats = %+v", stats)
+	if stats := cache.stats(); stats.entries != 2 || stats.hits != 0 || stats.misses != 4 {
+		t.Fatalf("repeated render was not admitted: %+v", stats)
 	}
-	if len(first) != len(second) {
-		t.Fatalf("pages = %d, want %d", len(second), len(first))
-	}
-	for i := range first {
-		if !bytes.Equal(first[i].PNG, second[i].PNG) || first[i].Width != second[i].Width || first[i].Height != second[i].Height {
-			t.Fatalf("page %d differs", i)
-		}
-	}
-	if first[0].base64 == nil || first[0].base64 != second[0].base64 {
-		t.Fatal("cached render clones do not share base64 state")
-	}
-	if got, want := string(first[0].AppendPNGBase64(nil)), base64.StdEncoding.EncodeToString(first[0].PNG); got != want {
-		t.Fatalf("base64 = %q, want %q", got, want)
-	}
-	if first[0].base64.encoded != nil {
-		t.Fatal("first use populated the base64 cache")
-	}
-	second[0].AppendPNGBase64(nil)
-	if !first[0].base64.ready.Load() || len(first[0].base64.encoded) == 0 {
-		t.Fatal("reused render did not cache base64")
-	}
-
-	first[0].Width = 0
-	first[0].DroppedCodepoints['A'] = 999
 	third, err := renderCacheTestPages(cache, renderCacheTestText, DenseRenderStyle, nil, false)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if third[0].Width == 0 || third[0].DroppedCodepoints['A'] == 999 {
+	stats := cache.stats()
+	if stats.entries != 2 || stats.hits != 1 || stats.misses != 4 || stats.bytes <= 0 {
+		t.Fatalf("cache stats = %+v", stats)
+	}
+	if len(first) != len(second) || len(second) != len(third) {
+		t.Fatalf("pages = %d/%d/%d, want equal", len(first), len(second), len(third))
+	}
+	for i := range first {
+		if !bytes.Equal(first[i].PNG, second[i].PNG) || !bytes.Equal(second[i].PNG, third[i].PNG) ||
+			first[i].Width != second[i].Width || first[i].Height != second[i].Height {
+			t.Fatalf("page %d differs", i)
+		}
+	}
+	if first[0].base64 != nil {
+		t.Fatal("one-shot render retained base64 state")
+	}
+	if second[0].base64 == nil || second[0].base64 != third[0].base64 {
+		t.Fatal("cached render clones do not share base64 state")
+	}
+	if got, want := string(second[0].AppendPNGBase64(nil)), base64.StdEncoding.EncodeToString(second[0].PNG); got != want {
+		t.Fatalf("base64 = %q, want %q", got, want)
+	}
+	if second[0].base64.encoded != nil {
+		t.Fatal("first use populated the base64 cache")
+	}
+	third[0].AppendPNGBase64(nil)
+	if !second[0].base64.ready.Load() || len(second[0].base64.encoded) == 0 {
+		t.Fatal("reused render did not cache base64")
+	}
+
+	second[0].Width = 0
+	second[0].DroppedCodepoints['A'] = 999
+	fourth, err := renderCacheTestPages(cache, renderCacheTestText, DenseRenderStyle, nil, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if fourth[0].Width == 0 || fourth[0].DroppedCodepoints['A'] == 999 {
 		t.Fatal("caller mutation leaked into cache")
 	}
 }
@@ -195,6 +209,15 @@ func TestRenderedPageCacheReusesUnchangedPages(t *testing.T) {
 	for i := 1; i < len(first); i++ {
 		if !bytes.Equal(first[i].PNG, second[i].PNG) {
 			t.Fatalf("unchanged page %d was rerendered differently", i)
+		}
+	}
+	third, err := renderCacheTestPages(cache, "CCCCCCCC"+tail, DenseRenderStyle, nil, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for i := 1; i < len(second); i++ {
+		if !bytes.Equal(second[i].PNG, third[i].PNG) {
+			t.Fatalf("admitted page %d differs", i)
 		}
 	}
 	if stats := cache.stats(); stats.hits == 0 {
