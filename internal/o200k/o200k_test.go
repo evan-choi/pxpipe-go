@@ -126,12 +126,16 @@ func scannerPieces(text string) []string {
 }
 
 func TestDigitNormalizationRejectsMixedUnicodeNumbers(t *testing.T) {
-	if !canNormalizeDigits("↵ 123") {
-		t.Error("canNormalizeDigits rejected non-number Unicode")
+	want, ok := digitNormalizedKeyIfSafe("↵ 123")
+	if !ok {
+		t.Fatal("digitNormalizedKeyIfSafe rejected ASCII digits")
+	}
+	if got, ok := digitNormalizedKeyIfSafe("↵ 987"); !ok || got != want {
+		t.Fatal("ASCII digit variants did not share a normalized key")
 	}
 	for _, text := range []string{"१२3", "3²", "Ⅳ4"} {
-		if canNormalizeDigits(text) {
-			t.Errorf("canNormalizeDigits(%q) = true", text)
+		if _, ok := digitNormalizedKeyIfSafe(text); ok {
+			t.Errorf("digitNormalizedKeyIfSafe(%q) accepted mixed Unicode numbers", text)
 		}
 	}
 }
