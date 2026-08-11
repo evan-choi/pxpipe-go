@@ -23,39 +23,39 @@
 
     <text x="80" y="222" font-size="30">Claude transform</text>
     <text x="80" y="271" font-size="26">pxpipe</text>
-    <rect x="338" y="245" width="401.72" height="32" rx="7" fill="#98a3ad"/>
-    <text x="757" y="271" font-size="24">48.40 ms</text>
+    <rect x="338" y="245" width="410.85" height="32" rx="7" fill="#98a3ad"/>
+    <text x="766" y="271" font-size="24">49.50 ms</text>
     <text x="80" y="324" font-size="26">pxpipe-go</text>
-    <rect x="338" y="297" width="5.55" height="32" rx="7" fill="#218c45"/>
-    <text x="361" y="323" font-size="24">0.67 ms</text>
-    <text x="1628" y="323" font-size="24">72.4x faster</text>
+    <rect x="338" y="297" width="5.78" height="32" rx="7" fill="#218c45"/>
+    <text x="361" y="323" font-size="24">0.70 ms</text>
+    <text x="1628" y="323" font-size="24">71.1x faster</text>
 
     <text x="80" y="388" font-size="30">Dense render</text>
     <text x="80" y="437" font-size="26">pxpipe</text>
     <rect x="338" y="411" width="97.94" height="32" rx="7" fill="#98a3ad"/>
     <text x="453" y="437" font-size="24">11.80 ms</text>
     <text x="80" y="490" font-size="26">pxpipe-go</text>
-    <rect x="338" y="463" width="1.05" height="32" rx="7" fill="#218c45"/>
+    <rect x="338" y="463" width="1.08" height="32" rx="7" fill="#218c45"/>
     <text x="355" y="489" font-size="24">0.13 ms</text>
-    <text x="1628" y="489" font-size="24">93.1x faster</text>
+    <text x="1628" y="489" font-size="24">90.7x faster</text>
 
     <text x="80" y="554" font-size="30">OpenAI Chat</text>
     <text x="80" y="603" font-size="26">pxpipe</text>
-    <rect x="338" y="577" width="415.00" height="32" rx="7" fill="#98a3ad"/>
-    <text x="770" y="603" font-size="24">50.00 ms</text>
+    <rect x="338" y="577" width="426.62" height="32" rx="7" fill="#98a3ad"/>
+    <text x="782" y="603" font-size="24">51.40 ms</text>
     <text x="80" y="656" font-size="26">pxpipe-go</text>
-    <rect x="338" y="629" width="2.07" height="32" rx="7" fill="#218c45"/>
+    <rect x="338" y="629" width="2.10" height="32" rx="7" fill="#218c45"/>
     <text x="356" y="655" font-size="24">0.25 ms</text>
-    <text x="1628" y="655" font-size="24">200.5x faster</text>
+    <text x="1628" y="655" font-size="24">203.4x faster</text>
 
     <text x="80" y="720" font-size="30">OpenAI Responses</text>
     <text x="80" y="769" font-size="26">pxpipe</text>
-    <rect x="338" y="743" width="901.38" height="32" rx="7" fill="#98a3ad"/>
-    <text x="1256" y="769" font-size="24">108.60 ms</text>
+    <rect x="338" y="743" width="924.62" height="32" rx="7" fill="#98a3ad"/>
+    <text x="1280" y="769" font-size="24">111.40 ms</text>
     <text x="80" y="822" font-size="26">pxpipe-go</text>
-    <rect x="338" y="795" width="4.48" height="32" rx="7" fill="#218c45"/>
-    <text x="359" y="821" font-size="24">0.54 ms</text>
-    <text x="1628" y="821" font-size="24">201.1x faster</text>
+    <rect x="338" y="795" width="3.70" height="32" rx="7" fill="#218c45"/>
+    <text x="358" y="821" font-size="24">0.45 ms</text>
+    <text x="1628" y="821" font-size="24">249.6x faster</text>
 
     <g font-size="20" fill="#5f6b78" text-anchor="middle">
       <text x="338" y="887">0</text>
@@ -81,12 +81,12 @@
       <line x1="1269" y1="1078" x2="1269" y2="1200"/>
     </g>
     <text x="80" y="1127" font-size="26">pxpipe</text>
-    <rect x="338" y="1094" width="857.52" height="32" rx="7" fill="#98a3ad"/>
-    <text x="1213" y="1120" font-size="24">414.48 MiB</text>
+    <rect x="338" y="1094" width="859.01" height="32" rx="7" fill="#98a3ad"/>
+    <text x="1214" y="1120" font-size="24">415.20 MiB</text>
     <text x="80" y="1180" font-size="26">pxpipe-go</text>
-    <rect x="338" y="1147" width="221.18" height="32" rx="7" fill="#218c45"/>
-    <text x="576" y="1173" font-size="24">106.91 MiB</text>
-    <text x="1628" y="1173" font-size="24">74.2% lower</text>
+    <rect x="338" y="1147" width="213.68" height="32" rx="7" fill="#218c45"/>
+    <text x="569" y="1173" font-size="24">103.28 MiB</text>
+    <text x="1628" y="1173" font-size="24">75.1% lower</text>
 
     <g font-size="20" fill="#5f6b78" text-anchor="middle">
       <text x="338" y="1232">0</text>
@@ -95,6 +95,6 @@
       <text x="1269" y="1232">450 MiB</text>
     </g>
 
-    <text x="80" y="1291" font-size="19" fill="#5f6b78">pxpipe@c5fc2a8 &#183; pxpipe-go@7476a74 &#183; Apple M1 Pro &#183; macOS 26.5.2 &#183; Bun 1.3.14 &#183; Go 1.26.5 &#183; median of five runs</text>
+    <text x="80" y="1291" font-size="19" fill="#5f6b78">pxpipe@c5fc2a8 &#183; pxpipe-go@6b1c65e &#183; Apple M1 Pro &#183; macOS 26.5.2 &#183; Bun 1.3.14 &#183; Go 1.26.5 &#183; median of five runs</text>
   </g>
 </svg>

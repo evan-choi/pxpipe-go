@@ -214,6 +214,24 @@ func wordPieceEnd(text string, start int) (int, bool) {
 }
 
 func lowerWordEnd(text string, start int) (int, bool) {
+	if start < len(text) && text[start] >= 'a' && text[start] <= 'z' {
+		pos := start
+		for pos < len(text) {
+			if b := text[pos]; b < utf8.RuneSelf {
+				if b < 'a' || b > 'z' {
+					break
+				}
+				pos++
+				continue
+			}
+			r, size := utf8.DecodeRuneInString(text[pos:])
+			if !isLowerWordRune(r) {
+				break
+			}
+			pos += size
+		}
+		return pos, true
+	}
 	pos := start
 	lastLower := -1
 	for pos < len(text) {
