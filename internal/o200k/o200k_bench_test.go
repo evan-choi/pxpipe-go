@@ -10,6 +10,9 @@ var highCardinalityBenchmarkSerial atomic.Uint64
 
 func benchmarkCountTokensVariants(b *testing.B, alphabet string) {
 	b.Helper()
+	if _, err := vocabulary(); err != nil {
+		b.Fatal(err)
+	}
 	scratch := []byte(strings.Repeat("Agent Operating Manual section 123 with stable payload.\n", 512) + "PVAR=aaaaaaaa")
 	marker := len(scratch) - 8
 	b.SetBytes(int64(len(scratch)))
