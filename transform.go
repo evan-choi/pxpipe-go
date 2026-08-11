@@ -1240,34 +1240,12 @@ type cachePrefixDigestCacheEntry struct {
 var cachePrefixDigestCache [cachePrefixDigestCacheSlots]atomic.Pointer[cachePrefixDigestCacheEntry]
 var cachePrefixDigestCandidates [cachePrefixDigestCandidateSlots]atomic.Uint64
 
-func cachePrefixFingerprintBytes(h uint64, text string) uint64 {
-	const (
-		prime  = uint64(1099511628211)
-		sample = 128
-	)
-	h = (h ^ uint64(len(text))) * prime
-	hash := func(part string) {
-		for i := 0; i < len(part); i++ {
-			h = (h ^ uint64(part[i])) * prime
-		}
-	}
-	if len(text) <= 3*sample {
-		hash(text)
-		return h
-	}
-	hash(text[:sample])
-	mid := len(text)/2 - sample/2
-	hash(text[mid : mid+sample])
-	hash(text[len(text)-sample:])
-	return h
-}
-
 func cachePrefixRequestFingerprint(body []byte) uint64 {
 	if len(body) == 0 {
 		return 0
 	}
 	text := unsafe.String(unsafe.SliceData(body), len(body))
-	fingerprint := cachePrefixFingerprintBytes(14695981039346656037, text)
+	fingerprint := sampledTextFingerprint(14695981039346656037, text)
 	if fingerprint == 0 {
 		return 1
 	}
