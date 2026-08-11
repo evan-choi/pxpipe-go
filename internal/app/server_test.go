@@ -35,6 +35,9 @@ func TestRunServerPrintsGuideAndShutsDown(t *testing.T) {
 	t.Setenv("HOME", home)
 	t.Setenv("XDG_CONFIG_HOME", filepath.Join(home, "config"))
 	t.Setenv("CODEX_CA_CERTIFICATE", "")
+	t.Setenv("PXPIPE_MODELS", "")
+	pxpipe.SetAllowedModelBases(nil)
+	t.Cleanup(func() { pxpipe.SetAllowedModelBases(nil) })
 	port := availableTCPPort(t)
 	ctx, cancel := context.WithCancel(context.Background())
 	var output lockedBuffer
@@ -50,6 +53,9 @@ func TestRunServerPrintsGuideAndShutsDown(t *testing.T) {
 		}
 		time.Sleep(10 * time.Millisecond)
 	}
+	if !pxpipe.IsSupportedModel("claude-opus-5") || !pxpipe.IsSupportedGptModel("gpt-5.6-sol") {
+		t.Fatal("serve without PXPIPE_MODELS must allow Anthropic and OpenAI models")
+	}
 	cancel()
 	select {
 	case err := <-done:
@@ -58,6 +64,9 @@ func TestRunServerPrintsGuideAndShutsDown(t *testing.T) {
 		}
 	case <-time.After(3 * time.Second):
 		t.Fatal("server did not shut down")
+	}
+	if pxpipe.IsSupportedModel("claude-opus-5") || pxpipe.IsSupportedGptModel("gpt-5.6-sol") {
+		t.Fatal("serve model scope was not restored after shutdown")
 	}
 	got := output.String()
 	for _, want := range []string{
