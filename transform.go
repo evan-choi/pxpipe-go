@@ -13,6 +13,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 	"unsafe"
 
@@ -1220,6 +1221,99 @@ type cachePrefixDigests struct {
 	markerPos   string
 }
 
+const (
+	cachePrefixDigestCacheSlots     = 16
+	cachePrefixDigestCandidateSlots = 1 << 10
+	maxCachePrefixDigestCacheBytes  = 1 << 20
+)
+
+type cachePrefixDigestCacheEntry struct {
+	fingerprint uint64
+	body        string
+	digests     cachePrefixDigests
+}
+
+// A repeated sampled request admits one immutable entry. The fingerprint only
+// selects a slot; the complete transformed body before live pin injection is
+// compared before a hit, so sampled collisions remain misses. Non-replacing
+// slots retain at most 16 MiB. An empty body rejects oversized entries.
+var cachePrefixDigestCache [cachePrefixDigestCacheSlots]atomic.Pointer[cachePrefixDigestCacheEntry]
+var cachePrefixDigestCandidates [cachePrefixDigestCandidateSlots]atomic.Uint64
+
+func cachePrefixFingerprintBytes(h uint64, text string) uint64 {
+	const (
+		prime  = uint64(1099511628211)
+		sample = 128
+	)
+	h = (h ^ uint64(len(text))) * prime
+	hash := func(part string) {
+		for i := 0; i < len(part); i++ {
+			h = (h ^ uint64(part[i])) * prime
+		}
+	}
+	if len(text) <= 3*sample {
+		hash(text)
+		return h
+	}
+	hash(text[:sample])
+	mid := len(text)/2 - sample/2
+	hash(text[mid : mid+sample])
+	hash(text[len(text)-sample:])
+	return h
+}
+
+func cachePrefixRequestFingerprint(body []byte) uint64 {
+	if len(body) == 0 {
+		return 0
+	}
+	text := unsafe.String(unsafe.SliceData(body), len(body))
+	fingerprint := cachePrefixFingerprintBytes(14695981039346656037, text)
+	if fingerprint == 0 {
+		return 1
+	}
+	return fingerprint
+}
+
+func shouldTryCachePrefixDigests(fingerprint uint64) bool {
+	if fingerprint == 0 {
+		return false
+	}
+	slotIndex := fingerprint & (cachePrefixDigestCacheSlots - 1)
+	if entry := cachePrefixDigestCache[slotIndex].Load(); entry != nil {
+		return entry.fingerprint == fingerprint && entry.body != ""
+	}
+	candidate := &cachePrefixDigestCandidates[fingerprint&(cachePrefixDigestCandidateSlots-1)]
+	return candidate.Swap(fingerprint) == fingerprint
+}
+
+func cachedCachePrefixDigests(
+	fingerprint uint64,
+	body []byte,
+) (cachePrefixDigests, bool) {
+	entry := cachePrefixDigestCache[fingerprint&(cachePrefixDigestCacheSlots-1)].Load()
+	if entry == nil || entry.fingerprint != fingerprint || len(entry.body) != len(body) {
+		return cachePrefixDigests{}, false
+	}
+	if entry.body != unsafe.String(unsafe.SliceData(body), len(body)) {
+		return cachePrefixDigests{}, false
+	}
+	return entry.digests, true
+}
+
+func admitCachePrefixDigests(
+	fingerprint uint64,
+	body []byte,
+	digests cachePrefixDigests,
+) {
+	entry := &cachePrefixDigestCacheEntry{fingerprint: fingerprint}
+	if len(body) <= maxCachePrefixDigestCacheBytes {
+		entry.body = strings.Clone(unsafe.String(unsafe.SliceData(body), len(body)))
+		entry.digests = digests
+	}
+	slot := &cachePrefixDigestCache[fingerprint&(cachePrefixDigestCacheSlots-1)]
+	slot.CompareAndSwap(nil, entry)
+}
+
 type cachePrefixHash struct {
 	h     hash.Hash
 	sum   *[sha256.Size]byte
@@ -1338,7 +1432,6 @@ func cachePrefixDiagnostics(req map[string]any) (cachePrefixDigests, bool) {
 			}
 		}
 	}
-
 	hashes := getCachePrefixHashes()
 	mainHash := &hashes.main
 	systemHash := &hashes.system
@@ -1434,6 +1527,24 @@ func cachePrefixDiagnostics(req map[string]any) (cachePrefixDigests, bool) {
 	putCachePrefixHashes(hashes)
 	putCachePrefixScratch(scratch)
 	return result, true
+}
+
+func cachedOrComputeCachePrefixDiagnostics(req map[string]any, fingerprint uint64) (cachePrefixDigests, bool) {
+	if !shouldTryCachePrefixDigests(fingerprint) {
+		return cachePrefixDiagnostics(req)
+	}
+	scratch := getCachePrefixScratch()
+	scratch = appendJSValue(scratch, req)
+	if cached, ok := cachedCachePrefixDigests(fingerprint, scratch); ok {
+		putCachePrefixScratch(scratch)
+		return cached, true
+	}
+	digests, ok := cachePrefixDiagnostics(req)
+	if ok {
+		admitCachePrefixDigests(fingerprint, scratch, digests)
+	}
+	putCachePrefixScratch(scratch)
+	return digests, ok
 }
 
 // cachePrefixDigest retains the original aggregate helper used by benchmarks
@@ -1833,7 +1944,13 @@ func TransformRequest(body []byte, opts *TransformOptions) (outBody []byte, info
 	return out, info
 }
 
-func transformParsed(req map[string]any, body []byte, o *resolvedOptions, info *TransformInfo, droppedCodepoints map[rune]int) ([]byte, error) {
+func transformParsed(
+	req map[string]any,
+	body []byte,
+	o *resolvedOptions,
+	info *TransformInfo,
+	droppedCodepoints map[rune]int,
+) ([]byte, error) {
 	msgsAtEntry, _ := asArr(req["messages"])
 	info.NativeImages = countNativeImages(msgsAtEntry)
 	info.NativeImageBytes = countNativeImageBytes(msgsAtEntry)
@@ -2221,7 +2338,7 @@ func transformParsed(req map[string]any, body []byte, o *resolvedOptions, info *
 	info.BillingLine = billingLine
 
 	info.Compressed = true
-	if pfx, ok := cachePrefixDiagnostics(req); ok {
+	if pfx, ok := cachedOrComputeCachePrefixDiagnostics(req, cachePrefixRequestFingerprint(body)); ok {
 		info.CachePrefixSha8 = pfx.sha8
 		info.CachePrefixBytes = pfx.bytes
 		info.CachePrefixToolsSha8 = pfx.toolsSha8
