@@ -292,6 +292,23 @@ func TestClaudeHistoryUsesProfileGeometry(t *testing.T) {
 	if overridden.cols != cols || overridden.style.Font != "jetbrains-mono-14" {
 		t.Fatalf("overridden history geometry = cols %d, font %q", overridden.cols, overridden.style.Font)
 	}
+
+	req := map[string]any{"messages": parityConversation(60, 1800, "SESSION ANCHOR: ")}
+	info := &TransformInfo{}
+	collapsed, err := runHistoryCollapse(req, info, resolveOptions(&TransformOptions{
+		Model: "claude-opus-5", historySessions: newSessionStateStore(),
+	}), map[rune]int{}, 0, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !collapsed || len(info.ImageDims) == 0 {
+		t.Fatalf("Opus history did not render: %+v", info)
+	}
+	for _, dim := range info.ImageDims {
+		if dim.Width != 1556 {
+			t.Fatalf("Opus history width = %d, want 1556", dim.Width)
+		}
+	}
 }
 
 func TestCachePrefixComponentAndMarkedDiagnostics(t *testing.T) {

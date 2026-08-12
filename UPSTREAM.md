@@ -9,11 +9,11 @@ git submodule update --init --recursive
 
 ## Revisions
 
-- Last verified Go port baseline: `c5fc2a8f3b2864cf72aa1aa79a7e9e72a04ff37a`
-  (2026-08-09)
-- Current reference submodule: `c5fc2a8f3b2864cf72aa1aa79a7e9e72a04ff37a`
-  (2026-08-09)
-- Upstream `origin/main` last checked: 2026-08-11; no newer commit.
+- Last verified Go port baseline: `ffbb0d8df4b0b11f9191605a2f81e054fc072b02`
+  (`v0.13.1`, 2026-08-11)
+- Current reference submodule: `ffbb0d8df4b0b11f9191605a2f81e054fc072b02`
+  (`v0.13.1`, 2026-08-11)
+- Upstream `origin/main` last checked: 2026-08-12; matches `v0.13.1`.
 
 The baseline advances only after equivalent behavior and regenerated fixtures
 are verified against the pinned reference.
@@ -59,6 +59,12 @@ rejection signals.
 - `6ddda91`: invalid `charsPerToken` values fall back to the calibrated value
   of 3. The regular transform option default remains 4, matching upstream.
 
+## Ported after c5fc2a8
+
+- `56899a1`: Opus collapsed-history pages use the profile's 172-column
+  geometry unless the caller explicitly overrides `Cols`. The resulting
+  history pages are 1556 px wide instead of the dense 2816 px width.
+
 ## Verification after 508fc9d
 
 The upstream test changes through `a9b9759` are mapped as follows:
@@ -95,7 +101,7 @@ port.
 ## Verification after a9b9759
 
 Golden data must be regenerated only by running the TypeScript implementation
-from `pxpipe@c5fc2a8` with Bun:
+from `pxpipe@ffbb0d8` (`v0.13.1`) with Bun:
 
 ```bash
 cd pxpipe
@@ -127,6 +133,8 @@ The new behavior maps to these Go checks:
 - Decoded image budgets: `image_byte_budget_test.go`.
 - TypeScript output parity: `golden_transform_test.go` and
   `golden_openai_test.go`.
+- Opus history profile selection, caller overrides, and rendered page width:
+  `transform_upstream_test.go`.
 
 ## Not ported after a9b9759
 
