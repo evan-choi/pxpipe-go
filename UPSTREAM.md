@@ -9,11 +9,11 @@ git submodule update --init --recursive
 
 ## Revisions
 
-- Last verified Go port baseline: `ffbb0d8df4b0b11f9191605a2f81e054fc072b02`
-  (`v0.13.1`, 2026-08-11)
-- Current reference submodule: `ffbb0d8df4b0b11f9191605a2f81e054fc072b02`
-  (`v0.13.1`, 2026-08-11)
-- Upstream `origin/main` last checked: 2026-08-12; matches `v0.13.1`.
+- Last verified Go port baseline: `2e7836ed22f57377e5582e9bc66c49777c5fe595`
+  (`package.json` version `0.13.2`, 2026-09-03)
+- Current reference submodule: `2e7836ed22f57377e5582e9bc66c49777c5fe595`
+  (`package.json` version `0.13.2`, 2026-09-03)
+- Upstream `origin/main` last checked: 2026-09-04; no newer commit.
 
 The baseline advances only after equivalent behavior and regenerated fixtures
 are verified against the pinned reference.
@@ -65,6 +65,27 @@ rejection signals.
   geometry unless the caller explicitly overrides `Cols`. The resulting
   history pages are 1556 px wide instead of the dense 2816 px width.
 
+## Ported after ffbb0d8
+
+- `e800c7b` and `0247e03`: Gemini 3.7 Flash is measured and enabled by
+  default; Gemini history uses compact framing and a 32-image latency cap.
+- `e800c7b`: Markdown quote-prefixed pin commands such as `>pxpipe pin` are
+  recognized.
+- `aa93e8e`: Claude Code automode, severity, and category blocks stay in the
+  dynamic tail instead of re-keying the static slab.
+- `46eefa3`: reflowed tool-result truncation charges packed visual rows instead
+  of one row per logical segment.
+- `f8ff0b4`: render-cache keys use fixed-size SHA-256 digests and do not retain
+  prompt text copies.
+- `6302467`: Qwen 3.8 27B uses the measured 14px profile and a 32-image provider
+  cap; non-GPT-5 OpenAI-compatible requests use image detail `high`.
+- `545780a`: child CA bundles retain system roots for replacing CA environment
+  variables.
+- `af89c1d`: OpenAI Chat Completions and Responses pin commands are relocated
+  to the latest user input.
+- `5082ad9`: non-Fable Claude slabs and history use the unified 172-column 14px
+  profile; Sol, Grok, and Qwen share the native-14px history policy.
+
 ## Verification after 508fc9d
 
 The upstream test changes through `a9b9759` are mapped as follows:
@@ -101,7 +122,7 @@ port.
 ## Verification after a9b9759
 
 Golden data must be regenerated only by running the TypeScript implementation
-from `pxpipe@ffbb0d8` (`v0.13.1`) with Bun:
+from `pxpipe@2e7836e` (`package.json` version `0.13.2`) with Bun:
 
 ```bash
 cd pxpipe
@@ -136,6 +157,21 @@ The new behavior maps to these Go checks:
 - Opus history profile selection, caller overrides, and rendered page width:
   `transform_upstream_test.go`.
 
+Additional checks for the latest baseline are:
+
+- Dynamic tags and packed-row truncation: `static_tag_test.go` and
+  `gates_test.go`.
+- OpenAI pin relocation: `pin_response_test.go`.
+- Gemini, Claude, Grok, Sol, and Qwen profiles plus Qwen image headroom:
+  `gptprofile_test.go` and `openai_options_test.go`.
+- Fixed-size render-cache keys: `render/cache_test.go`.
+- System-root CA composition: `internal/app/app_test.go`.
+
+The Go suite passes against the regenerated fixtures. Upstream's own
+`pnpm test` currently reports 1,203 passing and two failing assertions in
+`tests/image-byte-budget.test.ts`; those assertions still assume the old
+12,683-byte 5x8 Claude slab after `5082ad9` changed non-Fable Claude to 14px.
+
 ## Not ported after a9b9759
 
 - Node request-timing telemetry and Node response scanning from `3556db5` and
@@ -146,3 +182,9 @@ The new behavior maps to these Go checks:
   offline CLI stats are not part of the Go runtime port.
 - Node dependency updates, release metadata, community routing documentation,
   `CONTRIBUTING.md`, and the pull-request template have no Go counterpart.
+- Google GenerateContent changes and the Responses-to-Messages bridge do not
+  apply because this port exposes neither surface.
+- `bfaaca4`'s provider-router wrapper is redundant with `NewHandler`'s existing
+  `ProtocolOf`, `RewritePath`, and `UpstreamFor` hooks.
+- Dashboard, Worker binding, eval harness, and npm dependency changes after
+  `ffbb0d8` have no Go runtime counterpart.

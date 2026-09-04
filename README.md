@@ -104,9 +104,10 @@ credential injection, and pure transforms.
 | `PXPIPE_GPT_PROFILES` | JSON profiles for GPT-compatible models not in the built-in table |
 | `PXPIPE_RENDER_CACHE_BYTES` | Render cache capacity; defaults to `64 MiB`, and `0` disables it |
 
-The library and CLI wrapper have a built-in allowlist of `claude-fable-5` and
-`gemini-3.6-flash`; GPT models are opt-in. `pxpipe serve` accepts every valid
-Anthropic and OpenAI model when `PXPIPE_MODELS` is empty.
+The library and CLI wrapper have a built-in allowlist of `claude-fable-5`,
+`gemini-3.6-flash`, and `gemini-3.7-flash`; other models are opt-in. `pxpipe
+serve` accepts every valid Anthropic and OpenAI model when `PXPIPE_MODELS` is
+empty.
 
 ## Documentation
 

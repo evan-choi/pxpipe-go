@@ -55,9 +55,10 @@ and Codex inference still need provider end-to-end validation.
 
 On macOS, `Claude.app` is matched case-insensitively and searched for in
 `~/Applications` and `/Applications`. Its bundle executable receives
-process-scoped `ANTHROPIC_UNIX_SOCKET`, `NODE_EXTRA_CA_CERTS`, and
-`SSL_CERT_FILE` values. Fully quit a running Claude process before launching it
-through pxpipe so it inherits the new environment.
+process-scoped `ANTHROPIC_UNIX_SOCKET`, `NODE_EXTRA_CA_CERTS`, `SSL_CERT_FILE`,
+`CURL_CA_BUNDLE`, and `REQUESTS_CA_BUNDLE` values. The CA bundle retains the
+system roots. Fully quit a running Claude process before launching it through
+pxpipe so it inherits the new environment.
 
 ## Standalone proxy
 
@@ -223,10 +224,10 @@ output, err := pxpipe.RenderTextToImages(text, pxpipe.RenderOptions{
 
 ## Model scope and environment
 
-The library and CLI wrapper have a built-in allowlist of `claude-fable-5` and
-`gemini-3.6-flash`. Opt GPT models in through `PXPIPE_MODELS` or
-`pxpipe.SetAllowedModelBases`. Models outside the list pass through without
-byte changes.
+The library and CLI wrapper have a built-in allowlist of `claude-fable-5`,
+`gemini-3.6-flash`, and `gemini-3.7-flash`. Opt other models in through
+`PXPIPE_MODELS` or `pxpipe.SetAllowedModelBases`. Models outside the list pass
+through without byte changes.
 
 Standalone `pxpipe serve` accepts every valid Anthropic and OpenAI model when
 `PXPIPE_MODELS` is unset or blank. Set it to restrict the server to an explicit
