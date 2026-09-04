@@ -70,7 +70,7 @@ func TestCertificateBundleIncludesSystemRootsOnce(t *testing.T) {
 		}
 	}
 	t.Setenv("SSL_CERT_FILE", roots)
-	path, cleanup, err := certificateBundle(dir, authority, extra, roots)
+	path, cleanup, err := certificateBundle(dir, authority, true, extra, roots)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -82,6 +82,21 @@ func TestCertificateBundleIncludesSystemRootsOnce(t *testing.T) {
 	text := string(bundle)
 	if !strings.Contains(text, "PXPIPE") || !strings.Contains(text, "SYSTEM") || !strings.Contains(text, "EXTRA") || strings.Count(text, "SYSTEM") != 1 {
 		t.Fatalf("certificate bundle = %q", text)
+	}
+	if !strings.HasPrefix(text, "PXPIPE\n") {
+		t.Fatalf("pxpipe CA is not first in bundle: %q", text)
+	}
+	additionalPath, additionalCleanup, err := certificateBundle(dir, authority, false, extra)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer additionalCleanup()
+	additional, err := os.ReadFile(additionalPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(additional) != "PXPIPE\nEXTRA\n" {
+		t.Fatalf("additional CA bundle = %q", additional)
 	}
 }
 
@@ -101,6 +116,13 @@ func TestFindSystemRootBundle(t *testing.T) {
 	t.Setenv("SSL_CERT_FILE", generated)
 	if got := findSystemRootBundle(root); got != root {
 		t.Fatalf("generated bundle was reused as system roots: %q", got)
+	}
+	t.Setenv("SSL_CERT_FILE", filepath.Join(t.TempDir(), "mitm-ca.pem"))
+	if err := os.WriteFile(os.Getenv("SSL_CERT_FILE"), []byte("PXPIPE"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if got := findSystemRootBundle(root); got != root {
+		t.Fatalf("pxpipe CA was reused as system roots: %q", got)
 	}
 }
 
@@ -285,7 +307,7 @@ func TestClaudeDesktopProfileInjectsUnixSocket(t *testing.T) {
 		t.Fatal(err)
 	}
 	if code != 17 {
-		t.Fatalf("helper exit code = %d", code)
+		t.Fatalf("helper exit code = %d: %s", code, stderr.String())
 	}
 	for _, want := range []string{
 		"pxpipe summary", "estimated : ", "actual    : 128 tokens (-",
@@ -456,14 +478,20 @@ func TestClaudeDesktopAppHelper(t *testing.T) {
 		os.Exit(98)
 	}
 	certificateBundle, err := os.ReadFile(os.Getenv("SSL_CERT_FILE"))
-	if err != nil || !strings.Contains(string(certificateBundle), "EXISTING-NODE-CA") ||
-		!strings.Contains(string(certificateBundle), "EXISTING-SSL-CA") ||
+	if err != nil || !strings.Contains(string(certificateBundle), "EXISTING-SSL-CA") ||
 		!strings.Contains(string(certificateBundle), "BEGIN CERTIFICATE") {
 		fmt.Fprintln(os.Stderr, "Claude Desktop CA bundle mismatch")
 		os.Exit(99)
 	}
+	nodeCertificateBundle, err := os.ReadFile(os.Getenv("NODE_EXTRA_CA_CERTS"))
+	if err != nil || !strings.Contains(string(nodeCertificateBundle), "EXISTING-NODE-CA") ||
+		!strings.Contains(string(nodeCertificateBundle), "BEGIN CERTIFICATE") ||
+		strings.Contains(string(nodeCertificateBundle), "EXISTING-SSL-CA") {
+		fmt.Fprintln(os.Stderr, "Claude Desktop additional CA bundle mismatch")
+		os.Exit(99)
+	}
 	if os.Getenv("HTTPS_PROXY") != "http://existing-proxy.example:8443" ||
-		os.Getenv("NODE_EXTRA_CA_CERTS") != os.Getenv("SSL_CERT_FILE") ||
+		os.Getenv("NODE_EXTRA_CA_CERTS") == os.Getenv("SSL_CERT_FILE") ||
 		os.Getenv("NODE_EXTRA_CA_CERTS") == os.Getenv("PXPIPE_DESKTOP_NODE_CA") ||
 		os.Getenv("SSL_CERT_FILE") == os.Getenv("PXPIPE_DESKTOP_SSL_CA") || os.Getenv("NO_PROXY") != "localhost" ||
 		os.Getenv("ANTHROPIC_BASE_URL") != os.Getenv("PXPIPE_DESKTOP_UPSTREAM") {
