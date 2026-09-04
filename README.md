@@ -22,7 +22,7 @@ and offline export CLI are not included.
 pxpipe-go requires Go 1.26.3 or later.
 
 ```bash
-go install github.com/evan-choi/pxpipe-go/cmd/pxpipe@v0.4.19
+go install github.com/evan-choi/pxpipe-go/cmd/pxpipe@v0.4.20
 pxpipe --version
 ```
 
@@ -33,7 +33,7 @@ needed.
 Add the Go package to a module with:
 
 ```bash
-go get github.com/evan-choi/pxpipe-go@v0.4.19
+go get github.com/evan-choi/pxpipe-go@v0.4.20
 ```
 
 ## Quick start
