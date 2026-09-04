@@ -1341,19 +1341,34 @@ func chatContentToText(content any) string {
 	return ""
 }
 
+func chatContentHasImage(content any) bool {
+	parts, ok := content.([]any)
+	if !ok {
+		return false
+	}
+	for _, part := range parts {
+		switch blockType(part) {
+		case "image_url", "input_image", "image":
+			return true
+		}
+	}
+	return false
+}
+
 func chatMessageToTurn(msg any, idx int) historyTurn {
 	o, _ := msg.(map[string]any)
 	if o == nil {
 		o = map[string]any{}
 	}
 	role, _ := o["role"].(string)
+	hasImage := chatContentHasImage(o["content"])
 	body := chatContentToText(o["content"])
 	if role == "tool" {
 		var closeIds []string
 		if id, ok := o["tool_call_id"].(string); ok && id != "" {
 			closeIds = []string{id}
 		}
-		return historyTurn{Text: "[tool_result]\n" + body, CloseIds: closeIds}
+		return historyTurn{Text: "[tool_result]\n" + body, CloseIds: closeIds, Opaque: hasImage}
 	}
 	if role == "assistant" {
 		var openIds []string
@@ -1392,16 +1407,16 @@ func chatMessageToTurn(msg any, idx int) historyTurn {
 		if strings.TrimSpace(text) != "" {
 			full = "<assistant t=\"" + strconv.Itoa(idx) + "\">\n" + text + "\n</assistant>"
 		}
-		return historyTurn{Text: full, OpenIds: openIds}
+		return historyTurn{Text: full, OpenIds: openIds, Opaque: hasImage}
 	}
 	if strings.TrimSpace(body) == "" {
-		return historyTurn{}
+		return historyTurn{Opaque: hasImage}
 	}
 	tag := role
 	if role == "user" || role == "" {
 		tag = "user"
 	}
-	turn := historyTurn{Text: "<" + tag + " t=\"" + strconv.Itoa(idx) + "\">\n" + body + "\n</" + tag + ">"}
+	turn := historyTurn{Text: "<" + tag + " t=\"" + strconv.Itoa(idx) + "\">\n" + body + "\n</" + tag + ">", Opaque: hasImage}
 	if role == "user" {
 		b := body
 		turn.UserText = &b

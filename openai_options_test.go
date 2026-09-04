@@ -158,6 +158,34 @@ func TestQwenStaticSlabRespectsProviderImageCap(t *testing.T) {
 	}
 }
 
+func TestChatHistoryPreservesCallerImages(t *testing.T) {
+	bulk := strings.Repeat("history alpha beta gamma path=/tmp/file.json ", 400)
+	callerImage := "data:image/png;base64,caller-image"
+	body := jsStringify(map[string]any{
+		"model": "qwen3.8-27b",
+		"messages": []any{
+			map[string]any{"role": "user", "content": "opening"},
+			map[string]any{"role": "assistant", "content": bulk},
+			map[string]any{"role": "user", "content": bulk},
+			map[string]any{"role": "assistant", "content": bulk},
+			map[string]any{"role": "user", "content": []any{
+				map[string]any{"type": "text", "text": "inspect this image"},
+				map[string]any{"type": "image_url", "image_url": map[string]any{"url": callerImage}},
+			}},
+			map[string]any{"role": "assistant", "content": "acknowledged"},
+			map[string]any{"role": "user", "content": "continue"},
+		},
+	})
+	charsPerToken := 1.0
+	out, info := TransformOpenAIChatCompletions(body, &TransformOptions{CharsPerToken: &charsPerToken})
+	if !info.Compressed || info.HistoryReason != "collapsed" {
+		t.Fatalf("history fixture did not collapse: %+v", info)
+	}
+	if !strings.Contains(string(out), callerImage) {
+		t.Fatal("history collapse removed a caller image")
+	}
+}
+
 func TestGptHistoryPlanReusesExactSectionSources(t *testing.T) {
 	pinned := "pin"
 	turns := []historyTurn{
