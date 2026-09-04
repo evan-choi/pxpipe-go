@@ -31,9 +31,12 @@
     "imageableFunctionOutputs": 0,
     "collapsedFunctionPairs": 0,
     "collapsedFunctionCalls": 0,
-    "collapsedFunctionOutputs": 0
+    "collapsedFunctionOutputs": 0,
+    "barrierTypes": [
+      "function_call:10"
+    ]
   },
   "firstUserSha8": "1b1bf47b",
-  "historyReason": "below_min_tokens",
+  "historyReason": "not_profitable",
   "historyTextChars": 693
 }

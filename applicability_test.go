@@ -38,6 +38,14 @@ func TestConfiguredModelBasesIgnoreRuntimeOverride(t *testing.T) {
 	}
 }
 
+func TestDefaultModelBasesIncludeGemini37(t *testing.T) {
+	t.Setenv("PXPIPE_MODELS", "")
+	SetAllowedModelBases(nil)
+	if got := GetConfiguredModelBases(); !slices.Contains(got, "gemini-3.7-flash") {
+		t.Fatalf("default model bases = %v", got)
+	}
+}
+
 func TestAllowedModelBasesConcurrentAccess(t *testing.T) {
 	t.Setenv("PXPIPE_MODELS", "gpt-5.4")
 	SetAllowedModelBases(nil)

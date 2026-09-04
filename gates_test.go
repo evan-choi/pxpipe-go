@@ -1,10 +1,26 @@
 package pxpipe
 
 import (
+	"fmt"
+	"strings"
 	"testing"
 
 	"github.com/evan-choi/pxpipe-go/render"
 )
+
+func TestTruncateForBudgetPacksReflowedSegments(t *testing.T) {
+	segments := make([]string, 10_000)
+	for i := range segments {
+		segments[i] = fmt.Sprintf("2026-05-18T12:00:00Z entry %d payload content here", i)
+	}
+	result := truncateForBudget(strings.Join(segments, render.NLSentinel), 10, render.DenseContentCols, render.DenseContentCharsPerImage, render.LinesPerImage)
+	if !result.truncated || u16len(result.text) <= 150_000 {
+		t.Fatalf("reflowed truncation = truncated %v, %d chars", result.truncated, u16len(result.text))
+	}
+	if !strings.Contains(result.text, "entry 0") || !strings.Contains(result.text, "entry 9999") {
+		t.Fatal("reflowed truncation did not preserve both ends")
+	}
+}
 
 func TestInvalidCharsPerTokenUsesCalibratedFallback(t *testing.T) {
 	if got := normCpt(0); got != 3 {

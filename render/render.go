@@ -138,14 +138,14 @@ func renderWrappedPageCached(lines, slots []string, cols int, style RenderStyle,
 		pageSlotText = &joined
 	}
 	key := newRenderPageCacheKey(pageText, len(lines), cols, style, pageSlotText, len(slots))
-	if cached, ok := pageCache.get(key, pageText, pageSlotText); ok {
+	if cached, ok := pageCache.get(key); ok {
 		return cached[0], nil
 	}
 	image, err := renderWrappedLinesToPNG(lines, slots, wrappedLinesRuneCount(lines), cols, style)
 	if err != nil {
 		return nil, err
 	}
-	return pageCache.putRepeated(key, pageText, pageSlotText, []*RenderedImage{image})[0], nil
+	return pageCache.putRepeated(key, []*RenderedImage{image})[0], nil
 }
 
 type RenderedImage struct {

@@ -165,13 +165,20 @@ func (p profile) certificateEnvironment() string {
 	return "NODE_EXTRA_CA_CERTS"
 }
 
-func (p profile) environment(proxyURL, certificatePath string) (map[string]string, []string) {
+func (p profile) environment(proxyURL, additionalCAPath, bundlePath string) (map[string]string, []string) {
 	set := map[string]string{
-		"HTTPS_PROXY":              proxyURL,
-		"https_proxy":              proxyURL,
-		"HTTP_PROXY":               proxyURL,
-		"http_proxy":               proxyURL,
-		p.certificateEnvironment(): certificatePath,
+		"HTTPS_PROXY":         proxyURL,
+		"https_proxy":         proxyURL,
+		"HTTP_PROXY":          proxyURL,
+		"http_proxy":          proxyURL,
+		"NODE_EXTRA_CA_CERTS": additionalCAPath,
+		"SSL_CERT_FILE":       bundlePath,
+		"CURL_CA_BUNDLE":      bundlePath,
+		"REQUESTS_CA_BUNDLE":  bundlePath,
+	}
+	set[p.certificateEnvironment()] = additionalCAPath
+	if p.kind == profileCodex {
+		set["CODEX_CA_CERTIFICATE"] = bundlePath
 	}
 	unset := []string{"NO_PROXY", "no_proxy"}
 	if p.kind == profileOpenCode {

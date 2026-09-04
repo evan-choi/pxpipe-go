@@ -119,6 +119,73 @@ func TestGptHistoryOptionsInheritProfileAndEnvironment(t *testing.T) {
 	}
 }
 
+func TestQwenHistoryUsesRemainingProviderImageBudget(t *testing.T) {
+	profile := ResolveGptProfile("qwen3.8-27b")
+	got := gptHistoryOptsFor("qwen3.8-27b", resolveOpenAIOpts(nil), profile, 24)
+	if got.MaxImages != 8 {
+		t.Fatalf("Qwen history max images = %d, want 8", got.MaxImages)
+	}
+	if got.MinCollapsePrefix != 1 || got.CollapseChunk != 1 || got.FreezeChunk != 1 {
+		t.Fatalf("Qwen history chunks = prefix %d, collapse %d, freeze %d", got.MinCollapsePrefix, got.CollapseChunk, got.FreezeChunk)
+	}
+}
+
+func TestOpenAIImageDetailMatchesModelFamily(t *testing.T) {
+	if got := openAIImageDetail("gpt-5.6-sol"); got != "original" {
+		t.Fatalf("GPT-5 detail = %q", got)
+	}
+	if got := openAIImageDetail("grok-4.6"); got != "high" {
+		t.Fatalf("non-GPT-5 detail = %q", got)
+	}
+}
+
+func TestQwenStaticSlabRespectsProviderImageCap(t *testing.T) {
+	images := make([]any, 32)
+	for i := range images {
+		images[i] = map[string]any{"type": "image_url", "image_url": map[string]any{"url": "data:image/png;base64,x"}}
+	}
+	body := jsStringify(map[string]any{
+		"model": "qwen3.8-27b",
+		"messages": []any{
+			map[string]any{"role": "system", "content": strings.Repeat("instruction alpha beta gamma delta path=/tmp/file.json\n", 200)},
+			map[string]any{"role": "user", "content": images},
+		},
+	})
+	minChars, collapse := 1, false
+	out, info := TransformOpenAIChatCompletions(body, &TransformOptions{MinCompressChars: &minChars, CollapseHistory: &collapse})
+	if info.Reason != "provider_image_cap" || !reflect.DeepEqual(out, body) {
+		t.Fatalf("Qwen cap result = reason %q, body changed %v", info.Reason, !reflect.DeepEqual(out, body))
+	}
+}
+
+func TestChatHistoryPreservesCallerImages(t *testing.T) {
+	bulk := strings.Repeat("history alpha beta gamma path=/tmp/file.json ", 400)
+	callerImage := "data:image/png;base64,caller-image"
+	body := jsStringify(map[string]any{
+		"model": "qwen3.8-27b",
+		"messages": []any{
+			map[string]any{"role": "user", "content": "opening"},
+			map[string]any{"role": "assistant", "content": bulk},
+			map[string]any{"role": "user", "content": bulk},
+			map[string]any{"role": "assistant", "content": bulk},
+			map[string]any{"role": "user", "content": []any{
+				map[string]any{"type": "text", "text": "inspect this image"},
+				map[string]any{"type": "image_url", "image_url": map[string]any{"url": callerImage}},
+			}},
+			map[string]any{"role": "assistant", "content": "acknowledged"},
+			map[string]any{"role": "user", "content": "continue"},
+		},
+	})
+	charsPerToken := 1.0
+	out, info := TransformOpenAIChatCompletions(body, &TransformOptions{CharsPerToken: &charsPerToken})
+	if !info.Compressed || info.HistoryReason != "collapsed" {
+		t.Fatalf("history fixture did not collapse: %+v", info)
+	}
+	if !strings.Contains(string(out), callerImage) {
+		t.Fatal("history collapse removed a caller image")
+	}
+}
+
 func TestGptHistoryPlanReusesExactSectionSources(t *testing.T) {
 	pinned := "pin"
 	turns := []historyTurn{

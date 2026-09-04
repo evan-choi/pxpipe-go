@@ -60,7 +60,7 @@ func runServer(ctx context.Context, force <-chan struct{}, port int, stdin io.Re
 		return err
 	}
 	certificatePath, removeCertificateBundle, err := certificateBundle(
-		filepath.Join(configDir, "pxpipe"), authority.CertificatePath(), os.Getenv("CODEX_CA_CERTIFICATE"),
+		filepath.Join(configDir, "pxpipe"), authority.CertificatePath(), true, os.Getenv("CODEX_CA_CERTIFICATE"),
 	)
 	if err != nil {
 		return err

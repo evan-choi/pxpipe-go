@@ -14,6 +14,7 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"strings"
 	"sync"
 	"time"
 
@@ -85,12 +86,22 @@ func runProfile(ctx context.Context, p profile, stdin io.Reader, stdout, stderr 
 		return 1, err
 	}
 	certificatePath, removeCertificateBundle, err := certificateBundle(
-		filepath.Join(configDir, "pxpipe"), authority.CertificatePath(), os.Getenv(p.certificateEnvironment()),
+		filepath.Join(configDir, "pxpipe"), authority.CertificatePath(), true,
+		os.Getenv(p.certificateEnvironment()), os.Getenv("NODE_EXTRA_CA_CERTS"),
+		os.Getenv("SSL_CERT_FILE"), os.Getenv("CURL_CA_BUNDLE"), os.Getenv("REQUESTS_CA_BUNDLE"),
 	)
 	if err != nil {
 		return 1, err
 	}
 	defer removeCertificateBundle()
+	nodeCertificatePath, removeNodeCertificateBundle, err := certificateBundle(
+		filepath.Join(configDir, "pxpipe"), authority.CertificatePath(), false,
+		os.Getenv("NODE_EXTRA_CA_CERTS"),
+	)
+	if err != nil {
+		return 1, err
+	}
+	defer removeNodeCertificateBundle()
 
 	transport := http.DefaultTransport.(*http.Transport).Clone()
 	defer transport.CloseIdleConnections()
@@ -158,7 +169,7 @@ func runProfile(ctx context.Context, p profile, stdin io.Reader, stdout, stderr 
 	go func() { proxyErrors <- proxy.Serve(proxyListener) }()
 
 	proxyURL := "http://" + proxyListener.Addr().String()
-	set, unset := p.environment(proxyURL, certificatePath)
+	set, unset := p.environment(proxyURL, nodeCertificatePath, certificatePath)
 	if unixSocketPath != "" {
 		set["ANTHROPIC_UNIX_SOCKET"] = unixSocketPath
 	}
@@ -240,13 +251,22 @@ func runClaudeDesktopProfile(ctx context.Context, p profile, stdin io.Reader, st
 		return 1, err
 	}
 	certificatePath, removeCertificateBundle, err := certificateBundle(
-		filepath.Join(configDir, "pxpipe"), authority.CertificatePath(),
+		filepath.Join(configDir, "pxpipe"), authority.CertificatePath(), true,
 		os.Getenv("NODE_EXTRA_CA_CERTS"), os.Getenv("SSL_CERT_FILE"),
+		os.Getenv("CURL_CA_BUNDLE"), os.Getenv("REQUESTS_CA_BUNDLE"),
 	)
 	if err != nil {
 		return 1, err
 	}
 	defer removeCertificateBundle()
+	nodeCertificatePath, removeNodeCertificateBundle, err := certificateBundle(
+		filepath.Join(configDir, "pxpipe"), authority.CertificatePath(), false,
+		os.Getenv("NODE_EXTRA_CA_CERTS"),
+	)
+	if err != nil {
+		return 1, err
+	}
+	defer removeNodeCertificateBundle()
 
 	listener, socketPath, removeSocket, err := newUnixSocketListener()
 	if err != nil {
@@ -281,8 +301,10 @@ func runClaudeDesktopProfile(ctx context.Context, p profile, stdin io.Reader, st
 			Command: p.command, Args: p.args,
 			Env: runner.Environment(os.Environ(), map[string]string{
 				"ANTHROPIC_UNIX_SOCKET": socketPath,
-				"NODE_EXTRA_CA_CERTS":   certificatePath,
+				"NODE_EXTRA_CA_CERTS":   nodeCertificatePath,
 				"SSL_CERT_FILE":         certificatePath,
+				"CURL_CA_BUNDLE":        certificatePath,
+				"REQUESTS_CA_BUNDLE":    certificatePath,
 			}, nil),
 			Stdin: stdin, Stdout: stdout, Stderr: stderr,
 		})
@@ -360,18 +382,57 @@ func serve(server *http.Server, listener net.Listener) error {
 	return err
 }
 
-func certificateBundle(dir, authorityPath string, extraPaths ...string) (string, func(), error) {
-	var extras []byte
-	for _, extraPath := range extraPaths {
-		if extraPath == "" || extraPath == authorityPath {
+var systemRootBundleCandidates = []string{
+	"/etc/ssl/cert.pem",
+	"/etc/ssl/certs/ca-certificates.crt",
+	"/etc/pki/tls/certs/ca-bundle.crt",
+	"/etc/ssl/ca-bundle.pem",
+}
+
+func findSystemRootBundle(candidates ...string) string {
+	if configured := os.Getenv("SSL_CERT_FILE"); configured != "" {
+		candidates = append([]string{configured}, candidates...)
+	}
+	for _, path := range candidates {
+		base := filepath.Base(path)
+		if base == "mitm-ca.pem" || strings.HasPrefix(base, ".child-ca-bundle-") {
 			continue
 		}
+		if info, err := os.Stat(path); err == nil && !info.IsDir() {
+			return path
+		}
+	}
+	return ""
+}
+
+func certificateBundle(dir, authorityPath string, includeSystemRoots bool, extraPaths ...string) (string, func(), error) {
+	if includeSystemRoots {
+		if systemRoots := findSystemRootBundle(systemRootBundleCandidates...); systemRoots != "" {
+			extraPaths = append(extraPaths, systemRoots)
+		}
+	}
+	var extras []byte
+	seen := map[string]struct{}{authorityPath: {}}
+	for _, extraPath := range extraPaths {
+		if extraPath == "" {
+			continue
+		}
+		base := filepath.Base(extraPath)
+		if base == "mitm-ca.pem" || strings.HasPrefix(base, ".child-ca-bundle-") {
+			continue
+		}
+		if _, duplicate := seen[extraPath]; duplicate {
+			continue
+		}
+		seen[extraPath] = struct{}{}
 		extra, err := os.ReadFile(extraPath)
 		if err != nil {
 			return "", func() {}, fmt.Errorf("read existing CA bundle: %w", err)
 		}
 		extras = append(extras, extra...)
-		extras = append(extras, '\n')
+		if len(extras) > 0 && extras[len(extras)-1] != '\n' {
+			extras = append(extras, '\n')
+		}
 	}
 	if len(extras) == 0 {
 		return authorityPath, func() {}, nil
@@ -391,9 +452,12 @@ func certificateBundle(dir, authorityPath string, extraPaths ...string) (string,
 		remove()
 		return "", func() {}, fmt.Errorf("secure child CA bundle: %w", err)
 	}
-	content := make([]byte, 0, len(extras)+len(authority))
-	content = append(content, extras...)
+	content := make([]byte, 0, len(extras)+len(authority)+1)
 	content = append(content, authority...)
+	if len(content) > 0 && content[len(content)-1] != '\n' {
+		content = append(content, '\n')
+	}
+	content = append(content, extras...)
 	if _, err := file.Write(content); err != nil {
 		file.Close()
 		remove()

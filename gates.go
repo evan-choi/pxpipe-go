@@ -469,15 +469,23 @@ func truncateForBudget(text string, maxImages, cols, maxCharsPerImage, linesPerI
 	lines := strings.Split(text, nlChar)
 	originalLines := len(lines)
 	originalChars := u16len(text)
+	reflowed := nlChar == render.NLSentinel
+	packedCols := maxInt(1, cols)
+	rowCost := func(line string, priorChars, addChars int) int {
+		if reflowed {
+			return ceilDiv(priorChars+addChars, packedCols) - ceilDiv(priorChars, packedCols)
+		}
+		return lineRows(line, cols)
+	}
 
 	if shape == "structured" {
 		rows, chars, cut := 0, 0, 0
 		for i, line := range lines {
-			r := lineRows(line, cols)
 			c := u16len(line)
 			if i > 0 {
 				c++
 			}
+			r := rowCost(line, chars, c)
 			if rows+r > totalRowBudget || chars+c > totalCharBudget {
 				break
 			}
@@ -510,11 +518,11 @@ func truncateForBudget(text string, maxImages, cols, maxCharsPerImage, linesPerI
 	tailCharBudget := totalCharBudget - headCharBudget
 	headRows, headChars, headCut := 0, 0, 0
 	for i, line := range lines {
-		r := lineRows(line, cols)
 		c := u16len(line)
 		if i > 0 {
 			c++
 		}
+		r := rowCost(line, headChars, c)
 		if headRows+r > headRowBudget || headChars+c > headCharBudget {
 			break
 		}
@@ -528,11 +536,11 @@ func truncateForBudget(text string, maxImages, cols, maxCharsPerImage, linesPerI
 	tailRows, tailChars := 0, 0
 	tailStart := len(lines)
 	for i := len(lines) - 1; i >= headCut; i-- {
-		r := lineRows(lines[i], cols)
 		c := u16len(lines[i])
 		if i < len(lines)-1 {
 			c++
 		}
+		r := rowCost(lines[i], tailChars, c)
 		if tailRows+r > tailRowBudget || tailChars+c > tailCharBudget {
 			break
 		}

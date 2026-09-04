@@ -46,6 +46,15 @@ func TestGoldenGptProfiles(t *testing.T) {
 		numEq("multiplier", got.Vision.Multiplier)
 		numEq("patchCap", float64(got.Vision.PatchCap))
 		numEq("tokensPerMegapixel", got.Vision.TokensPerMegapixel)
+		numEq("tokens", float64(got.Vision.Tokens))
+		if exact, ok := wv["exact"].(map[string]any); ok {
+			if got.Vision.Exact == nil || got.Vision.Exact.WidthPx != int(exact["widthPx"].(float64)) ||
+				got.Vision.Exact.HeightPx != int(exact["heightPx"].(float64)) || got.Vision.Exact.Tokens != int(exact["tokens"].(float64)) {
+				t.Errorf("%s: vision.exact %+v want %+v", id, got.Vision.Exact, exact)
+			}
+		} else if got.Vision.Exact != nil {
+			t.Errorf("%s: vision.exact %+v want unset", id, got.Vision.Exact)
+		}
 
 		if w, ok := wp["cacheReadRate"].(float64); !ok || got.CacheReadRate != w {
 			t.Errorf("%s: cacheReadRate %v want %v", id, got.CacheReadRate, wp["cacheReadRate"])
@@ -77,6 +86,13 @@ func TestGoldenGptProfiles(t *testing.T) {
 		if got.ExactStaticBaseline != wantExact {
 			t.Errorf("%s: exactStaticBaseline %v want %v", id, got.ExactStaticBaseline, wantExact)
 		}
+		if want, ok := wp["providerImageCap"].(float64); ok {
+			if got.ProviderImageCap != int(want) {
+				t.Errorf("%s: providerImageCap %d want %v", id, got.ProviderImageCap, want)
+			}
+		} else if got.ProviderImageCap != 0 {
+			t.Errorf("%s: providerImageCap %d want unset", id, got.ProviderImageCap)
+		}
 
 		wh := wp["history"].(map[string]any)
 		hInt := func(name string, gotN int) {
@@ -88,6 +104,18 @@ func TestGoldenGptProfiles(t *testing.T) {
 		hInt("keepTail", got.History.KeepTail)
 		hInt("keepRecentPairs", got.History.KeepRecentPairs)
 		hInt("minCollapseTokens", got.History.MinCollapseTokens)
+		hOptionalInt := func(name string, gotN *int) {
+			if want, ok := wh[name].(float64); ok {
+				if gotN == nil || *gotN != int(want) {
+					t.Errorf("%s: history.%s %v want %v", id, name, gotN, want)
+				}
+			} else if gotN != nil {
+				t.Errorf("%s: history.%s %d want unset", id, name, *gotN)
+			}
+		}
+		hOptionalInt("minCollapsePrefix", got.History.MinCollapsePrefix)
+		hOptionalInt("collapseChunk", got.History.CollapseChunk)
+		hOptionalInt("freezeChunk", got.History.FreezeChunk)
 		if w := wh["responsesMode"].(string); got.History.ResponsesMode != w {
 			t.Errorf("%s: responsesMode %q want %q", id, got.History.ResponsesMode, w)
 		}
@@ -116,8 +144,34 @@ func TestGoldenGptProfiles(t *testing.T) {
 	}
 }
 
+func TestLatestBuiltInProfiles(t *testing.T) {
+	gemini := ResolveGptProfile("google/gemini-3.7-flash")
+	if gemini.CacheReadRate != 0.25 || gemini.FactSheetFormat != "compact" ||
+		gemini.History.MaxImages != 32 || gemini.History.KeepTail != 4 {
+		t.Fatalf("Gemini 3.7 profile = %+v", gemini)
+	}
+
+	for _, model := range []string{"gpt-5.6-sol", "grok-4.6", "workers-ai/@cf/qwen/qwen3.8-27b"} {
+		profile := ResolveGptProfile(model)
+		if profile.Style.Font != "jetbrains-mono-14" || profile.History.MinCollapseTokens != 0 ||
+			profile.History.MinCollapsePrefix == nil || *profile.History.MinCollapsePrefix != 1 ||
+			profile.History.ResponsesMode != "mixed" {
+			t.Errorf("%s native 14px profile = %+v", model, profile)
+		}
+	}
+	if qwen := ResolveGptProfile("qwen3.8-27b"); qwen.ProviderImageCap != 32 {
+		t.Fatalf("Qwen provider image cap = %d", qwen.ProviderImageCap)
+	}
+	if !IsMisresolvedModelId("qwen3-30b") {
+		t.Fatal("unmeasured Qwen model must fail closed")
+	}
+	if claude := ResolveGptProfile("claude-opus-5"); claude.StripCols != 172 || claude.Style.Font != "jetbrains-mono-14" {
+		t.Fatalf("Claude legible profile = cols %d, font %q", claude.StripCols, claude.Style.Font)
+	}
+}
+
 func TestGptEnvProfileOverride(t *testing.T) {
-	t.Setenv("PXPIPE_GPT_PROFILES", `{"kimi-k3":{"vision":{"regime":"mpix","tokensPerMegapixel":1000},"stripCols":152,"maxHeightPx":1932},"gpt-5.6-sol":{"stripCols":120,"historyStripCols":111,"historyStyle":{"font":"jetbrains-mono-12"}}}`)
+	t.Setenv("PXPIPE_GPT_PROFILES", `{"kimi-k3":{"vision":{"regime":"mpix","tokensPerMegapixel":1000},"stripCols":152,"maxHeightPx":1932},"gpt-5.6-sol":{"stripCols":120,"history":{"minCollapsePrefix":0,"collapseChunk":2,"freezeChunk":3},"historyStripCols":111,"historyStyle":{"font":"jetbrains-mono-12"}}}`)
 	p := ResolveGptProfile("moonshotai/kimi-k3")
 	if p.Vision.Regime != "mpix" || p.Vision.TokensPerMegapixel != 1000 {
 		t.Errorf("kimi-k3 vision = %+v", p.Vision)
@@ -135,6 +189,11 @@ func TestGptEnvProfileOverride(t *testing.T) {
 	}
 	if sol.HistoryStripCols == nil || *sol.HistoryStripCols != 111 || sol.HistoryStyle == nil || sol.HistoryStyle.Font != "jetbrains-mono-12" {
 		t.Errorf("sol history geometry = cols %v style %+v", sol.HistoryStripCols, sol.HistoryStyle)
+	}
+	if sol.History.MinCollapsePrefix == nil || *sol.History.MinCollapsePrefix != 0 ||
+		sol.History.CollapseChunk == nil || *sol.History.CollapseChunk != 2 ||
+		sol.History.FreezeChunk == nil || *sol.History.FreezeChunk != 3 {
+		t.Errorf("sol history chunks = %+v", sol.History)
 	}
 	if IsMisresolvedModelId("moonshotai/kimi-k3") {
 		t.Error("declared env id must not be misresolved")

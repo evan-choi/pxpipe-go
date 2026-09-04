@@ -109,12 +109,46 @@ func TestHasPinCommandCandidate(t *testing.T) {
 		{"assistant", []any{map[string]any{"role": "assistant", "content": "@pxpipe pin ignored"}}, nil, false},
 		{"user string", []any{map[string]any{"role": "user", "content": "@pxpipe pin concise"}}, nil, true},
 		{"user block", []any{map[string]any{"role": "user", "content": []any{textBlock(" @pxpipe\tunpin all")}}}, nil, true},
+		{"quoted", []any{map[string]any{"role": "user", "content": "> pxpipe pin concise"}}, nil, true},
 		{"system", nil, []any{textBlock("@pxpipe pin from file")}, true},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			if got := hasPinCommandCandidate(tc.messages, tc.system); got != tc.want {
 				t.Fatalf("hasPinCommandCandidate() = %v, want %v", got, tc.want)
+			}
+		})
+	}
+}
+
+func TestRelocateOpenAIPins(t *testing.T) {
+	for _, tc := range []struct {
+		name      string
+		body      string
+		transform func([]byte, *TransformOptions) ([]byte, *TransformInfo)
+	}{
+		{
+			name:      "chat",
+			body:      `{"model":"gpt-4o","messages":[{"role":"system","content":">pxpipe pin follow rules"},{"role":"user","content":"do it"}]}`,
+			transform: TransformOpenAIChatCompletions,
+		},
+		{
+			name:      "responses",
+			body:      `{"model":"gpt-4o","instructions":"> @pxpipe pin follow rules","input":[{"role":"user","content":[{"type":"input_text","text":"do it"}]}]}`,
+			transform: TransformOpenAIResponses,
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			out, info := tc.transform([]byte(tc.body), nil)
+			if info.PinChars == 0 {
+				t.Fatal("pin was not relocated")
+			}
+			text := string(out)
+			if strings.Contains(text, ">pxpipe pin") || strings.Contains(text, "> @pxpipe pin") {
+				t.Fatalf("pin command remained in output: %s", text)
+			}
+			if !strings.Contains(text, "[pxpipe pin]") || !strings.Contains(text, "follow rules") {
+				t.Fatalf("relocated pin missing from output: %s", text)
 			}
 		})
 	}

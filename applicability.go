@@ -12,7 +12,7 @@ import (
 // runtime override (SetAllowedModelBases) → PXPIPE_MODELS env CSV → built-in
 // default. Anthropic and OpenAI surfaces share this scope.
 
-var defaultModelBases = []string{"claude-fable-5", "gemini-3.6-flash"}
+var defaultModelBases = []string{"claude-fable-5", "gemini-3.6-flash", "gemini-3.7-flash"}
 
 var (
 	runtimeModelBases         atomic.Pointer[modelBasesSnapshot]

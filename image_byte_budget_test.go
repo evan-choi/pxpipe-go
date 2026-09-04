@@ -9,11 +9,19 @@ import (
 
 func imageByteBudgetBody(messages []any) []byte {
 	body, _ := json.Marshal(map[string]any{
-		"model":    "claude-fable-5",
+		"model":    "claude-3-5-sonnet",
 		"system":   "SLAB\n" + strings.Repeat("s", 60_000),
 		"messages": messages,
 	})
 	return body
+}
+
+func imageByteBudgetOptions(maxImageBytes int) *TransformOptions {
+	return &TransformOptions{
+		Model:           "claude-3-5-sonnet",
+		MaxImageBytes:   &maxImageBytes,
+		historySessions: newSessionStateStore(),
+	}
 }
 
 func TestCountNativeImageBytesAtBothNestingLevels(t *testing.T) {
@@ -34,7 +42,7 @@ func TestCountNativeImageBytesAtBothNestingLevels(t *testing.T) {
 func TestImageByteBudgetAdmitsGroupsAtomically(t *testing.T) {
 	low := 1_000
 	body := imageByteBudgetBody([]any{map[string]any{"role": "user", "content": "go"}})
-	out, info := TransformRequest(body, &TransformOptions{MaxImageBytes: &low, historySessions: newSessionStateStore()})
+	out, info := TransformRequest(body, imageByteBudgetOptions(low))
 	if info.ImageCount != 0 || info.ImageByteSkips == 0 || !strings.HasPrefix(info.Reason, "image_bytes") {
 		t.Fatalf("low-budget slab was partially admitted: %+v", info)
 	}
@@ -43,16 +51,19 @@ func TestImageByteBudgetAdmitsGroupsAtomically(t *testing.T) {
 	}
 
 	high := 18 << 20
-	_, slab := TransformRequest(body, &TransformOptions{MaxImageBytes: &high, historySessions: newSessionStateStore()})
-	limit := slab.ImageBytes + 1
+	_, slab := TransformRequest(body, imageByteBudgetOptions(high))
+	if slab.ImageCount == 0 || slab.ImageBytes == 0 {
+		t.Fatalf("slab fixture did not render: %+v", slab)
+	}
+	limit := slab.ImageBytes
 	toolBody := imageByteBudgetBody([]any{
 		map[string]any{"role": "user", "content": "go"},
 		map[string]any{"role": "user", "content": []any{map[string]any{
 			"type": "tool_result", "tool_use_id": "t1", "content": "RESULT t1\n" + strings.Repeat("x", 40_000),
 		}}},
 	})
-	out, info = TransformRequest(toolBody, &TransformOptions{MaxImageBytes: &limit, historySessions: newSessionStateStore()})
-	if info.ImageCount == 0 || info.ToolResultImgs != 0 || info.ImageByteSkips == 0 {
+	out, info = TransformRequest(toolBody, imageByteBudgetOptions(limit))
+	if info.ImageCount == 0 || info.ToolResultImgs != 0 || info.ImageByteSkips == 0 || !info.ImageBytesNearLimit {
 		t.Fatalf("tool-result byte admission = %+v", info)
 	}
 	if !strings.Contains(string(out), "RESULT t1") {
@@ -69,7 +80,7 @@ func TestCallerImagesConsumeByteBudgetWithoutBeingRemoved(t *testing.T) {
 		map[string]any{"role": "user", "content": "go"},
 	})
 	limit := 3_200
-	out, info := TransformRequest(body, &TransformOptions{MaxImageBytes: &limit, historySessions: newSessionStateStore()})
+	out, info := TransformRequest(body, imageByteBudgetOptions(limit))
 	if info.NativeImageBytes != 3_000 || info.ImageCount != 0 || info.ImageByteSkips == 0 || !info.ImageBytesNearLimit {
 		t.Fatalf("caller image byte budget = %+v", info)
 	}

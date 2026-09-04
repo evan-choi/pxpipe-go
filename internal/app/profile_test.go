@@ -18,35 +18,46 @@ func TestProfileEnvironment(t *testing.T) {
 		name      string
 		profile   profile
 		caEnv     string
+		caPath    string
 		hasHTTP   bool
 		websocket string
 		unset     []string
 	}{
 		{
 			name: "claude", profile: claudeProfile("claude", nil), caEnv: "NODE_EXTRA_CA_CERTS",
-			hasHTTP: true, unset: []string{"NO_PROXY", "no_proxy"},
+			caPath: "/tmp/pxpipe-extra-ca.pem", hasHTTP: true, unset: []string{"NO_PROXY", "no_proxy"},
 		},
 		{
 			name: "opencode", profile: openCodeProfile("opencode", nil), caEnv: "NODE_EXTRA_CA_CERTS",
-			hasHTTP: true, websocket: "false", unset: []string{"NO_PROXY", "no_proxy"},
+			caPath: "/tmp/pxpipe-extra-ca.pem", hasHTTP: true, websocket: "false", unset: []string{"NO_PROXY", "no_proxy"},
 		},
 		{
 			name: "codex", profile: codexProfile("codex", nil), caEnv: "CODEX_CA_CERTIFICATE",
-			hasHTTP: true, unset: []string{"NO_PROXY", "no_proxy"},
+			caPath: "/tmp/pxpipe-ca-bundle.pem", hasHTTP: true, unset: []string{"NO_PROXY", "no_proxy"},
 		},
 		{
 			name: "generic", profile: genericProfile("other-cli", nil), caEnv: "NODE_EXTRA_CA_CERTS",
-			hasHTTP: true, unset: []string{"NO_PROXY", "no_proxy"},
+			caPath: "/tmp/pxpipe-extra-ca.pem", hasHTTP: true, unset: []string{"NO_PROXY", "no_proxy"},
 		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			set, unset := tt.profile.environment("http://127.0.0.1:1234", "/tmp/pxpipe-ca.pem")
+			set, unset := tt.profile.environment(
+				"http://127.0.0.1:1234", "/tmp/pxpipe-extra-ca.pem", "/tmp/pxpipe-ca-bundle.pem",
+			)
 			if set["HTTPS_PROXY"] != "http://127.0.0.1:1234" || set["https_proxy"] != set["HTTPS_PROXY"] {
 				t.Fatalf("HTTPS proxy environment = %#v", set)
 			}
-			if set[tt.caEnv] != "/tmp/pxpipe-ca.pem" {
+			if set[tt.caEnv] != tt.caPath {
 				t.Fatalf("CA environment = %#v", set)
+			}
+			if set["NODE_EXTRA_CA_CERTS"] != "/tmp/pxpipe-extra-ca.pem" {
+				t.Errorf("NODE_EXTRA_CA_CERTS = %q", set["NODE_EXTRA_CA_CERTS"])
+			}
+			for _, name := range []string{"SSL_CERT_FILE", "CURL_CA_BUNDLE", "REQUESTS_CA_BUNDLE"} {
+				if set[name] != "/tmp/pxpipe-ca-bundle.pem" {
+					t.Errorf("%s = %q", name, set[name])
+				}
 			}
 			if tt.hasHTTP && (set["HTTP_PROXY"] != set["HTTPS_PROXY"] || set["http_proxy"] != set["HTTPS_PROXY"]) {
 				t.Fatalf("HTTP proxy environment = %#v", set)

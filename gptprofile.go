@@ -57,6 +57,9 @@ type GptHistoryProfile struct {
 	KeepTail          int    `json:"keepTail"`
 	KeepRecentPairs   int    `json:"keepRecentPairs"`
 	MinCollapseTokens int    `json:"minCollapseTokens"`
+	MinCollapsePrefix *int   `json:"minCollapsePrefix,omitempty"`
+	CollapseChunk     *int   `json:"collapseChunk,omitempty"`
+	FreezeChunk       *int   `json:"freezeChunk,omitempty"`
 	ResponsesMode     string `json:"responsesMode"`  // "pairs" | "mixed"
 	Framing           string `json:"framing"`        // "full" | "compact"
 	FactSheetScope    string `json:"factSheetScope"` // "per-segment" | "combined"
@@ -80,6 +83,7 @@ type GptModelProfile struct {
 	HistoryStyle              *render.RenderStyle `json:"historyStyle,omitempty"`
 	MaxSerializedRequestBytes int                 `json:"maxSerializedRequestBytes,omitempty"`
 	ExactStaticBaseline       bool                `json:"exactStaticBaseline,omitempty"`
+	ProviderImageCap          int                 `json:"providerImageCap,omitempty"`
 }
 
 func intPtr(v int) *int { return &v }
@@ -104,6 +108,21 @@ var gptBaseHistory = GptHistoryProfile{
 	FactSheetScope:    "per-segment",
 }
 
+var native14History = func() GptHistoryProfile {
+	h := gptBaseHistory
+	h.MaxImages = 32
+	h.KeepTail = 1
+	h.KeepRecentPairs = 1
+	h.MinCollapseTokens = 0
+	h.MinCollapsePrefix = intPtr(1)
+	h.CollapseChunk = intPtr(1)
+	h.FreezeChunk = intPtr(1)
+	h.ResponsesMode = "mixed"
+	h.Framing = "compact"
+	h.FactSheetScope = "combined"
+	return h
+}()
+
 // DefaultGptProfile is the conservative fallback for unrecognized models:
 // tile 85/170 over-states cost, biasing the gate toward pass-through.
 var DefaultGptProfile = &GptModelProfile{
@@ -127,15 +146,11 @@ var gpt56SolProfile = &GptModelProfile{
 	MaxHeightPx:         1954,
 	MinCompressTokens:   intPtr(500),
 	FactSheetFormat:     "full",
-	History: GptHistoryProfile{
-		MaxImages:         64,
-		KeepTail:          1,
-		KeepRecentPairs:   1,
-		MinCollapseTokens: 1000,
-		ResponsesMode:     "mixed",
-		Framing:           "compact",
-		FactSheetScope:    "combined",
-	},
+	History: func() GptHistoryProfile {
+		h := native14History
+		h.MaxImages = 64
+		return h
+	}(),
 	Style: render.RenderStyle{Font: "jetbrains-mono-14", AA: true, MarkerScale: 1},
 }
 
@@ -200,12 +215,21 @@ var grokProfile = &GptModelProfile{
 	MaxHeightPx:       512,
 	MinCompressTokens: intPtr(500),
 	FactSheetFormat:   "full",
-	History: func() GptHistoryProfile {
-		h := gptBaseHistory
-		h.MaxImages = 24
-		return h
-	}(),
-	Style: render.RenderStyle{Font: "jetbrains-mono-14", AA: true, MarkerScale: 1},
+	History:           native14History,
+	Style:             render.RenderStyle{Font: "jetbrains-mono-14", AA: true, MarkerScale: 1},
+}
+
+var qwen38Profile = &GptModelProfile{
+	Vision:            GptVisionCost{Regime: "mpix", TokensPerMegapixel: 1000},
+	CacheReadRate:     0.25,
+	OutputRate:        3,
+	ProviderImageCap:  32,
+	StripCols:         84,
+	MaxHeightPx:       512,
+	MinCompressTokens: intPtr(500),
+	FactSheetFormat:   "full",
+	History:           native14History,
+	Style:             render.RenderStyle{Font: "jetbrains-mono-14", AA: true, MarkerScale: 1},
 }
 
 // Claude profiles as seen by the GPT path (claude-model-profiles.ts).
@@ -237,8 +261,10 @@ var claudeLegacyGptProfile = func() *GptModelProfile {
 
 var claudeLegibleGptProfile = func() *GptModelProfile {
 	p := *claudeGptProfile
-	p.HistoryStripCols = intPtr(172)
 	style := render.RenderStyle{Font: "jetbrains-mono-14", AA: true, MarkerScale: 1}
+	p.StripCols = 172
+	p.Style = style
+	p.HistoryStripCols = intPtr(172)
 	p.HistoryStyle = &style
 	return &p
 }()
@@ -264,28 +290,49 @@ func resolveClaudeGptProfile(m string) *GptModelProfile {
 	return claudeLegibleGptProfile
 }
 
-// Gemini 3.6 Flash (gemini-model-profiles.ts).
-var gemini36FlashProfile = &GptModelProfile{
+// Measured Gemini Flash profiles (gemini-model-profiles.ts).
+var geminiFlashProfile = &GptModelProfile{
 	Vision: GptVisionCost{
 		Regime: "flat",
 		Tokens: 1120,
 		Exact:  &GptFlatExact{WidthPx: 1568, HeightPx: 728, Tokens: 1078},
 	},
-	CacheReadRate:     basePricing.cacheReadRate,
+	CacheReadRate:     0.25,
 	OutputRate:        basePricing.outputRate,
 	StripCols:         render.AnthropicSlabCols,
 	MaxHeightPx:       render.MaxHeightPx,
 	MinCompressTokens: intPtr(500),
-	FactSheetFormat:   "full",
-	History:           gptBaseHistory,
-	Style:             gptBaseStyle,
+	FactSheetFormat:   "compact",
+	History: func() GptHistoryProfile {
+		h := gptBaseHistory
+		h.MaxImages = 32
+		h.KeepTail = 4
+		h.KeepRecentPairs = 4
+		h.Framing = "compact"
+		h.FactSheetScope = "combined"
+		return h
+	}(),
+	Style: gptBaseStyle,
 }
 
-func isGeminiModel(model string) bool {
-	return model == "gemini-3.6-flash" || model == "google/gemini-3.6-flash"
+func normalizedProviderModel(model string) string {
+	if slash := strings.LastIndexByte(model, '/'); slash >= 0 {
+		return model[slash+1:]
+	}
+	return model
+}
+
+func hasGeminiMeasuredProfile(model string) bool {
+	switch normalizedProviderModel(model) {
+	case "gemini-3.6-flash", "gemini-3.7-flash":
+		return true
+	}
+	return false
 }
 
 func isGrokModel(m string) bool { return strings.HasPrefix(m, "grok-") }
+
+func isQwenModel(m string) bool { return strings.Contains(m, "qwen3.8-27b") }
 
 func digitPrefixLen(s string) int {
 	i := 0
@@ -355,6 +402,8 @@ func resolveGptBuiltin(m string) *GptModelProfile {
 		return o13Profile
 	case isGrokModel(m):
 		return grokProfile
+	case isQwenModel(m):
+		return qwen38Profile
 	}
 	return DefaultGptProfile
 }
@@ -425,6 +474,9 @@ type envHistoryIn struct {
 	KeepTail          *float64 `json:"keepTail"`
 	KeepRecentPairs   *float64 `json:"keepRecentPairs"`
 	MinCollapseTokens *float64 `json:"minCollapseTokens"`
+	MinCollapsePrefix *float64 `json:"minCollapsePrefix"`
+	CollapseChunk     *float64 `json:"collapseChunk"`
+	FreezeChunk       *float64 `json:"freezeChunk"`
 	ResponsesMode     *string  `json:"responsesMode"`
 	Framing           *string  `json:"framing"`
 	FactSheetScope    *string  `json:"factSheetScope"`
@@ -606,15 +658,27 @@ func parseGptEnvProfiles(raw string) (map[string]*GptModelProfile, []string) {
 		}
 		history := base.History
 		if h := p.History; h != nil {
-			history = GptHistoryProfile{
-				MaxImages:         envPosInt(h.MaxImages, base.History.MaxImages),
-				KeepTail:          envNonNegInt(h.KeepTail, base.History.KeepTail),
-				KeepRecentPairs:   envNonNegInt(h.KeepRecentPairs, base.History.KeepRecentPairs),
-				MinCollapseTokens: envNonNegInt(h.MinCollapseTokens, base.History.MinCollapseTokens),
-				ResponsesMode:     envEnum(h.ResponsesMode, base.History.ResponsesMode, "pairs", "mixed"),
-				Framing:           envEnum(h.Framing, base.History.Framing, "full", "compact"),
-				FactSheetScope:    envEnum(h.FactSheetScope, base.History.FactSheetScope, "per-segment", "combined"),
+			history.MaxImages = envPosInt(h.MaxImages, base.History.MaxImages)
+			history.KeepTail = envNonNegInt(h.KeepTail, base.History.KeepTail)
+			history.KeepRecentPairs = envNonNegInt(h.KeepRecentPairs, base.History.KeepRecentPairs)
+			history.MinCollapseTokens = envNonNegInt(h.MinCollapseTokens, base.History.MinCollapseTokens)
+			resolveOptional := func(value *float64, target **int) {
+				if value == nil {
+					return
+				}
+				fallback := 10
+				if *target != nil {
+					fallback = **target
+				}
+				resolved := envNonNegInt(value, fallback)
+				*target = &resolved
 			}
+			resolveOptional(h.MinCollapsePrefix, &history.MinCollapsePrefix)
+			resolveOptional(h.CollapseChunk, &history.CollapseChunk)
+			resolveOptional(h.FreezeChunk, &history.FreezeChunk)
+			history.ResponsesMode = envEnum(h.ResponsesMode, base.History.ResponsesMode, "pairs", "mixed")
+			history.Framing = envEnum(h.Framing, base.History.Framing, "full", "compact")
+			history.FactSheetScope = envEnum(h.FactSheetScope, base.History.FactSheetScope, "per-segment", "combined")
 		}
 		vision := base.Vision
 		if v := envValidVision(p.Vision); v != nil {
@@ -698,8 +762,8 @@ func ResolveGptProfile(model string) *GptModelProfile {
 	m := stripBracketVariants(strings.ToLower(model))
 	ids, idCount := candidateIds(m)
 	for _, id := range ids[:idCount] {
-		if isGeminiModel(id) {
-			return gemini36FlashProfile
+		if hasGeminiMeasuredProfile(id) {
+			return geminiFlashProfile
 		}
 	}
 	env, order := gptEnvProfiles()
@@ -757,8 +821,9 @@ func IsMisresolvedModelId(model string) bool {
 		matches  func(string) bool
 	}
 	guards := []guard{
-		{func(id string) bool { return strings.Contains(id, "gemini") }, isGeminiModel},
+		{func(id string) bool { return strings.Contains(id, "gemini") }, hasGeminiMeasuredProfile},
 		{func(id string) bool { return strings.Contains(id, "grok") }, isGrokModel},
+		{func(id string) bool { return strings.Contains(id, "qwen") }, isQwenModel},
 	}
 	for _, g := range guards {
 		mentioned, matched := false, false
