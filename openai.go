@@ -1155,6 +1155,10 @@ func TransformOpenAIChatCompletions(body []byte, opts *TransformOptions) ([]byte
 		info.Reason = "parse_error: messages must be an array"
 		return body, info
 	}
+	pinBody := body
+	if info.PinChars = relocateOpenAIPins(req); info.PinChars > 0 {
+		pinBody = jsStringifyCap(req, len(body)+info.PinChars+256)
+	}
 	model, _ := req["model"].(string)
 
 	firstUserIdx := -1
@@ -1166,7 +1170,7 @@ func TransformOpenAIChatCompletions(body []byte, opts *TransformOptions) ([]byte
 	}
 	if firstUserIdx < 0 {
 		info.Reason = "no_user_message"
-		return body, info
+		return pinBody, info
 	}
 
 	var authorityDocs, systemTexts []string
@@ -1214,7 +1218,7 @@ func TransformOpenAIChatCompletions(body []byte, opts *TransformOptions) ([]byte
 				return jsStringifyCap(req, openAIJSONCapacity(len(body), info.ImageBytes, info.CompressedChars+info.CollapsedChars)), info
 			}
 		}
-		return body, info
+		return pinBody, info
 	}
 	if combinedRaw == "" {
 		return finishHistoryOnly("no_static_context")
@@ -1266,7 +1270,7 @@ func TransformOpenAIChatCompletions(body []byte, opts *TransformOptions) ([]byte
 	images, err := render.RenderTextToPngs(renderedText, cols, profile.Style, profile.MaxHeightPx, nil)
 	if err != nil || len(images) == 0 {
 		info.Reason = "render_empty"
-		return body, info
+		return pinBody, info
 	}
 
 	droppedCodepoints := accumulateRenderedImages(images, info)
@@ -1331,7 +1335,7 @@ func TransformOpenAIChatCompletions(body []byte, opts *TransformOptions) ([]byte
 	if o.CollapseHistory {
 		if _, err := applyChatHistoryCollapse(req, info, o, profile, firstUserIdx+1); err != nil {
 			info.Reason = "render_empty"
-			return body, info
+			return pinBody, info
 		}
 	}
 
@@ -1356,6 +1360,10 @@ func TransformOpenAIResponses(body []byte, opts *TransformOptions) ([]byte, *Tra
 		info.Reason = "parse_error: " + err.Error()
 		return body, info
 	}
+	pinBody := body
+	if info.PinChars = relocateOpenAIPins(req); info.PinChars > 0 {
+		pinBody = jsStringifyCap(req, len(body)+info.PinChars+256)
+	}
 	model, _ := req["model"].(string)
 
 	originalInput, inputWasString := req["input"].(string)
@@ -1365,7 +1373,7 @@ func TransformOpenAIResponses(body []byte, opts *TransformOptions) ([]byte, *Tra
 			inputItems = arr
 		} else {
 			info.Reason = "parse_error: input must be a string or array"
-			return body, info
+			return pinBody, info
 		}
 	}
 
@@ -1380,7 +1388,7 @@ func TransformOpenAIResponses(body []byte, opts *TransformOptions) ([]byte, *Tra
 	}
 	if !inputWasString && firstUserIdx < 0 {
 		info.Reason = "no_user_message"
-		return body, info
+		return pinBody, info
 	}
 
 	// Composition metrics and history planning count the same payloads.
@@ -1449,7 +1457,7 @@ func TransformOpenAIResponses(body []byte, opts *TransformOptions) ([]byte, *Tra
 				return finishSerialized()
 			}
 		}
-		return body, info
+		return pinBody, info
 	}
 	if combinedRaw == "" {
 		return finishHistoryOnly("no_static_context")
@@ -1501,7 +1509,7 @@ func TransformOpenAIResponses(body []byte, opts *TransformOptions) ([]byte, *Tra
 	images, err := render.RenderTextToPngs(renderedText, cols, profile.Style, profile.MaxHeightPx, nil)
 	if err != nil || len(images) == 0 {
 		info.Reason = "render_empty"
-		return body, info
+		return pinBody, info
 	}
 
 	droppedCodepoints := accumulateRenderedImages(images, info)
@@ -1600,7 +1608,7 @@ func TransformOpenAIResponses(body []byte, opts *TransformOptions) ([]byte, *Tra
 	if o.CollapseHistory && !inputWasString {
 		if _, err := applyResponsesHistoryCollapse(req, inputItems, info, o, profile); err != nil {
 			info.Reason = "render_empty"
-			return body, info
+			return pinBody, info
 		}
 	}
 

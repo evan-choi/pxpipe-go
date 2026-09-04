@@ -23,7 +23,7 @@ const (
 )
 
 var (
-	pinCmdRe          = regexp.MustCompile(`^@pxpipe[ \t]+(pin|unpin)\b(.*)$`)
+	pinCmdRe          = regexp.MustCompile(`^>?[ \t]*@?pxpipe[ \t]+(pin|unpin)\b(.*)$`)
 	leadingReminderRe = regexp.MustCompile(`(?s)^\s*<system-reminder>.*?</system-reminder>`)
 	filePathOfRe      = regexp.MustCompile(`(?m)^Contents of (.+?)(?: \(|:\s*$)`)
 )
@@ -96,7 +96,7 @@ func foldPins(messages []any, system any) []pin {
 func hasPinCommandCandidate(messages []any, system any) bool {
 	contains := func(content any) bool {
 		if text, ok := content.(string); ok {
-			return strings.Contains(text, "@pxpipe")
+			return strings.Contains(text, "pxpipe")
 		}
 		blocks, _ := asArr(content)
 		for _, value := range blocks {
@@ -104,7 +104,7 @@ func hasPinCommandCandidate(messages []any, system any) bool {
 			if !ok || blockType(value) != "text" {
 				continue
 			}
-			if text, ok := getStr(block, "text"); ok && strings.Contains(text, "@pxpipe") {
+			if text, ok := getStr(block, "text"); ok && strings.Contains(text, "pxpipe") {
 				return true
 			}
 		}
@@ -848,6 +848,97 @@ func normalizeOpenAIRequest(req map[string]any) ([]any, any, bool) {
 		return messages, nil, true
 	}
 	return messages, system, true
+}
+
+func stripOpenAIContent(content any) any {
+	if text, ok := content.(string); ok {
+		return stripLines(text)
+	}
+	parts, ok := asArr(content)
+	if !ok {
+		return content
+	}
+	out := append([]any(nil), parts...)
+	for i, raw := range out {
+		part, ok := asMap(raw)
+		if !ok {
+			continue
+		}
+		text, ok := getStr(part, "text")
+		if !ok {
+			continue
+		}
+		type_, hasType := getStr(part, "type")
+		if hasType && type_ != "text" && type_ != "input_text" && type_ != "output_text" {
+			continue
+		}
+		stripped := stripLines(text)
+		if stripped != text {
+			copy := cloneMap(part)
+			copy["text"] = stripped
+			out[i] = copy
+		}
+	}
+	return out
+}
+
+func relocateOpenAIPins(req map[string]any) int {
+	messages, system, ok := normalizeOpenAIRequest(req)
+	if !ok {
+		return 0
+	}
+	pinText := pinBlockText(foldPins(messages, system))
+	if pinText == "" {
+		return 0
+	}
+
+	items, inputArray := asArr(req["input"])
+	if !inputArray {
+		items, _ = asArr(req["messages"])
+	}
+	_, stringInput := req["input"].(string)
+	var target map[string]any
+	for i := len(items) - 1; i >= 0; i-- {
+		item, ok := asMap(items[i])
+		if ok && item["role"] == "user" {
+			target = item
+			break
+		}
+	}
+	if !stringInput && target == nil {
+		return 0
+	}
+
+	if instructions, ok := req["instructions"].(string); ok {
+		req["instructions"] = stripLines(instructions)
+	}
+	for _, raw := range items {
+		item, ok := asMap(raw)
+		if !ok {
+			continue
+		}
+		role, _ := getStr(item, "role")
+		if role == "system" || role == "developer" || role == "user" {
+			item["content"] = stripOpenAIContent(item["content"])
+		}
+	}
+
+	if input, ok := req["input"].(string); ok {
+		req["input"] = input + "\n\n" + pinText
+	} else if content, ok := target["content"].(string); ok {
+		target["content"] = content + "\n\n" + pinText
+	} else if content, ok := asArr(target["content"]); ok {
+		type_ := "text"
+		if inputArray {
+			type_ = "input_text"
+		}
+		part := map[string]any{"type": type_, "text": pinText}
+		setObjKeyOrder(part, []string{"type", "text"})
+		target["content"] = append(content, part)
+	} else {
+		return 0
+	}
+	return u16len(pinText)
 }
 
 func pinCommandResponseOpenAI(body []byte, wire Protocol) *pinCommandReply {
