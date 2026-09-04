@@ -185,14 +185,11 @@ func configuredHistoryMaxImages(model string) int {
 	return maxInt(1, minInt(100, parsed))
 }
 
-func gptHistoryOptsFor(model string, o openaiResolvedOptions, profile *GptModelProfile) gptHistoryOptions {
+func gptHistoryOptsFor(model string, o openaiResolvedOptions, profile *GptModelProfile, existingImages ...int) gptHistoryOptions {
 	h := defaultGptHistoryOptions()
 	if overrides := o.GptHistory; overrides != nil {
 		if overrides.KeepTail != nil {
 			h.KeepTail = *overrides.KeepTail
-		}
-		if overrides.MaxImages != nil {
-			h.MaxImages = *overrides.MaxImages
 		}
 		if overrides.KeepRecentPairs != nil {
 			h.KeepRecentPairs = *overrides.KeepRecentPairs
@@ -238,6 +235,15 @@ func gptHistoryOptsFor(model string, o openaiResolvedOptions, profile *GptModelP
 	if o.GptHistory == nil || o.GptHistory.MinCollapseTokens == nil {
 		h.MinCollapseTokens = profile.History.MinCollapseTokens
 	}
+	if (o.GptHistory == nil || o.GptHistory.MinCollapsePrefix == nil) && profile.History.MinCollapsePrefix != nil {
+		h.MinCollapsePrefix = *profile.History.MinCollapsePrefix
+	}
+	if (o.GptHistory == nil || o.GptHistory.CollapseChunk == nil) && profile.History.CollapseChunk != nil {
+		h.CollapseChunk = *profile.History.CollapseChunk
+	}
+	if (o.GptHistory == nil || o.GptHistory.FreezeChunk == nil) && profile.History.FreezeChunk != nil {
+		h.FreezeChunk = *profile.History.FreezeChunk
+	}
 	h.ResponsesMode = profile.History.ResponsesMode
 	if o.GptHistory == nil || o.GptHistory.Cols == nil {
 		h.Cols = profile.StripCols
@@ -248,8 +254,18 @@ func gptHistoryOptsFor(model string, o openaiResolvedOptions, profile *GptModelP
 	if o.GptHistory == nil || o.GptHistory.Style == nil {
 		h.Style = profile.Style
 	}
-	if o.GptHistory == nil || o.GptHistory.MaxImages == nil {
-		h.MaxImages = configuredHistoryMaxImages(model)
+	configuredMax := configuredHistoryMaxImages(model)
+	if o.GptHistory != nil && o.GptHistory.MaxImages != nil {
+		configuredMax = *o.GptHistory.MaxImages
+	}
+	existing := 0
+	if len(existingImages) > 0 {
+		existing = existingImages[0]
+	}
+	if profile.ProviderImageCap > 0 {
+		h.MaxImages = maxInt(0, minInt(configuredMax, profile.ProviderImageCap-existing))
+	} else {
+		h.MaxImages = maxInt(0, configuredMax-existing)
 	}
 	h.tokenCounts = o.tokenCounts
 	return h
@@ -627,10 +643,17 @@ func rewriteFlatToolsForGpt(tools []any, hasTools bool) (rewritten []any, change
 	return out, true, strings.Join(docList, "\n\n")
 }
 
-func openAIImagePart(img *render.RenderedImage) map[string]any {
+func openAIImageDetail(model string) string {
+	if strings.HasPrefix(strings.ToLower(model), "gpt-5") {
+		return "original"
+	}
+	return "high"
+}
+
+func openAIImagePart(img *render.RenderedImage, model string) map[string]any {
 	inner := map[string]any{
 		"url":    pngDataURL{image: img},
-		"detail": "original",
+		"detail": openAIImageDetail(model),
 	}
 	setObjKeyOrder(inner, []string{"url", "detail"})
 	part := map[string]any{"type": "image_url", "image_url": inner}
@@ -638,14 +661,31 @@ func openAIImagePart(img *render.RenderedImage) map[string]any {
 	return part
 }
 
-func responsesImagePart(img *render.RenderedImage) map[string]any {
+func responsesImagePart(img *render.RenderedImage, model string) map[string]any {
 	part := map[string]any{
 		"type":      "input_image",
 		"image_url": pngDataURL{image: img},
-		"detail":    "original",
+		"detail":    openAIImageDetail(model),
 	}
 	setObjKeyOrder(part, []string{"type", "image_url", "detail"})
 	return part
+}
+
+func countOpenAIRequestImages(messages []any) int {
+	count := 0
+	for _, raw := range messages {
+		message, ok := asMap(raw)
+		if !ok {
+			continue
+		}
+		content, _ := asArr(message["content"])
+		for _, part := range content {
+			if blockType(part) == "image_url" {
+				count++
+			}
+		}
+	}
+	return count
 }
 
 func inputTextPart(text string) map[string]any {
@@ -921,7 +961,10 @@ func applyChatHistoryCollapse(req map[string]any, info *TransformInfo, o openaiR
 		return evalOpenAIGate(model, text, cols, o.CharsPerToken, baselineTextTokens).Profitable
 	}
 	messages, _ := req["messages"].([]any)
-	plan, err := planGptCollapse(chatMessagesToTurns(messages), protectedPrefix, profitable, gptHistoryOptsFor(model, o, profile))
+	plan, err := planGptCollapse(
+		chatMessagesToTurns(messages), protectedPrefix, profitable,
+		gptHistoryOptsFor(model, o, profile, countOpenAIRequestImages(messages)),
+	)
 	if err != nil {
 		return false, err
 	}
@@ -939,12 +982,12 @@ func applyChatHistoryCollapse(req map[string]any, info *TransformInfo, o openaiR
 	histFactSheet := factSheetText(plan.Text, profile.FactSheetFormat == "compact")
 	content := []any{chatTextPart(intro)}
 	for _, img := range plan.Images {
-		content = append(content, openAIImagePart(img))
+		content = append(content, openAIImagePart(img, model))
 	}
 	if plan.PinText != nil {
 		content = append(content, chatTextPart(pinnedRequestBlock(*plan.PinText)))
 		for _, img := range plan.ImagesAfter {
-			content = append(content, openAIImagePart(img))
+			content = append(content, openAIImagePart(img, model))
 		}
 	}
 	if histFactSheet != "" {
@@ -973,7 +1016,7 @@ func applyResponsesHistoryCollapse(req map[string]any, inputItems []any, info *T
 	profitable := func(text string, cols int, baselineTextTokens int) bool {
 		return evalOpenAIGate(model, text, cols, o.CharsPerToken, baselineTextTokens).Profitable
 	}
-	plan, err := planResponsesPairCollapse(inputItems, profitable, gptHistoryOptsFor(model, o, profile))
+	plan, err := planResponsesPairCollapse(inputItems, profitable, gptHistoryOptsFor(model, o, profile, info.ImageCount))
 	if err != nil {
 		return false, err
 	}
@@ -1033,7 +1076,7 @@ func applyResponsesHistoryCollapse(req map[string]any, inputItems []any, info *T
 	for segmentIndex, segment := range plan.Segments {
 		content := []any{inputTextPart(intro)}
 		for _, img := range segment.Images {
-			content = append(content, responsesImagePart(img))
+			content = append(content, responsesImagePart(img, model))
 		}
 		sheet := ""
 		if profile.History.FactSheetScope == "combined" {
@@ -1273,6 +1316,25 @@ func TransformOpenAIChatCompletions(body []byte, opts *TransformOptions) ([]byte
 		return pinBody, info
 	}
 
+	if o.CollapseHistory && profile.ProviderImageCap > 0 {
+		historyReq, cloneErr := parseOrderedJSON(jsStringify(req))
+		if cloneErr == nil {
+			historyInfo := *info
+			if applied, collapseErr := applyChatHistoryCollapse(historyReq, &historyInfo, o, profile, firstUserIdx+1); collapseErr == nil && applied {
+				historyMessages, _ := asArr(historyReq["messages"])
+				if countOpenAIRequestImages(historyMessages)+len(images) > profile.ProviderImageCap {
+					historyInfo.OutgoingTextChars = chatOutgoingTextChars(historyReq)
+					historyInfo.Compressed = true
+					return jsStringifyCap(historyReq, openAIJSONCapacity(len(body), historyInfo.ImageBytes, historyInfo.CollapsedChars)), &historyInfo
+				}
+			}
+		}
+	}
+	if profile.ProviderImageCap > 0 && countOpenAIRequestImages(messages)+len(images) > profile.ProviderImageCap {
+		info.Reason = "provider_image_cap"
+		return pinBody, info
+	}
+
 	droppedCodepoints := accumulateRenderedImages(images, info)
 	if top := gptDroppedCodepointsTop(droppedCodepoints); top != nil {
 		info.DroppedCodepointsTop = top
@@ -1303,7 +1365,7 @@ func TransformOpenAIChatCompletions(body []byte, opts *TransformOptions) ([]byte
 
 	var slabContent []any
 	for _, img := range images {
-		slabContent = append(slabContent, openAIImagePart(img))
+		slabContent = append(slabContent, openAIImagePart(img, model))
 	}
 	if slabFactSheet != "" {
 		slabContent = append(slabContent, chatTextPart(slabFactSheet))
@@ -1556,7 +1618,7 @@ func TransformOpenAIResponses(body []byte, opts *TransformOptions) ([]byte, *Tra
 
 	var slabParts []any
 	for _, img := range images {
-		slabParts = append(slabParts, responsesImagePart(img))
+		slabParts = append(slabParts, responsesImagePart(img, model))
 	}
 	if slabFactSheet != "" {
 		slabParts = append(slabParts, inputTextPart(slabFactSheet))

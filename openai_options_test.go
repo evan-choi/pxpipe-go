@@ -119,6 +119,45 @@ func TestGptHistoryOptionsInheritProfileAndEnvironment(t *testing.T) {
 	}
 }
 
+func TestQwenHistoryUsesRemainingProviderImageBudget(t *testing.T) {
+	profile := ResolveGptProfile("qwen3.8-27b")
+	got := gptHistoryOptsFor("qwen3.8-27b", resolveOpenAIOpts(nil), profile, 24)
+	if got.MaxImages != 8 {
+		t.Fatalf("Qwen history max images = %d, want 8", got.MaxImages)
+	}
+	if got.MinCollapsePrefix != 1 || got.CollapseChunk != 1 || got.FreezeChunk != 1 {
+		t.Fatalf("Qwen history chunks = prefix %d, collapse %d, freeze %d", got.MinCollapsePrefix, got.CollapseChunk, got.FreezeChunk)
+	}
+}
+
+func TestOpenAIImageDetailMatchesModelFamily(t *testing.T) {
+	if got := openAIImageDetail("gpt-5.6-sol"); got != "original" {
+		t.Fatalf("GPT-5 detail = %q", got)
+	}
+	if got := openAIImageDetail("grok-4.6"); got != "high" {
+		t.Fatalf("non-GPT-5 detail = %q", got)
+	}
+}
+
+func TestQwenStaticSlabRespectsProviderImageCap(t *testing.T) {
+	images := make([]any, 32)
+	for i := range images {
+		images[i] = map[string]any{"type": "image_url", "image_url": map[string]any{"url": "data:image/png;base64,x"}}
+	}
+	body := jsStringify(map[string]any{
+		"model": "qwen3.8-27b",
+		"messages": []any{
+			map[string]any{"role": "system", "content": strings.Repeat("instruction alpha beta gamma delta path=/tmp/file.json\n", 200)},
+			map[string]any{"role": "user", "content": images},
+		},
+	})
+	minChars, collapse := 1, false
+	out, info := TransformOpenAIChatCompletions(body, &TransformOptions{MinCompressChars: &minChars, CollapseHistory: &collapse})
+	if info.Reason != "provider_image_cap" || !reflect.DeepEqual(out, body) {
+		t.Fatalf("Qwen cap result = reason %q, body changed %v", info.Reason, !reflect.DeepEqual(out, body))
+	}
+}
+
 func TestGptHistoryPlanReusesExactSectionSources(t *testing.T) {
 	pinned := "pin"
 	turns := []historyTurn{
