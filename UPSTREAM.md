@@ -174,9 +174,13 @@ Additional checks for the latest baseline are:
 
 The Go suite passes against the regenerated fixtures. Upstream's own
 `pnpm test` currently reports 1,203 passing and two failing assertions in
-`tests/image-byte-budget.test.ts`; those assertions still assume the old
-12,683-byte 5x8 Claude slab after `5082ad9` changed non-Fable Claude to 14px.
-They do not change the parity baseline or justify a different Go behavior.
+`tests/image-byte-budget.test.ts`. Those tests put `claude-3-5-sonnet` only in
+the request body, while the direct `transformRequest` API selects geometry from
+`opts.model`; they therefore still render the default 5x8 profile, whose current
+PNG bytes no longer fit the stale fixed limits. The Go regression passes the
+model option explicitly and derives its boundary from the rendered slab. This
+test-only mismatch does not change the parity baseline or justify a different
+runtime behavior.
 
 ## Not ported after a9b9759
 
