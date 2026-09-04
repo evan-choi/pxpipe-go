@@ -83,8 +83,8 @@ func TestPNGBase64SHA256CachesOnlyExactSequence(t *testing.T) {
 	cache := newRenderedPageCache(defaultRenderCacheBytes)
 	images := []*RenderedImage{{PNG: []byte("first")}, {PNG: []byte("second")}}
 	key := newRenderCacheKey("text", 64, 500, DenseRenderStyle, 96, nil, false)
-	first := cache.put(key, "text", nil, images)
-	second, ok := cache.get(key, "text", nil)
+	first := cache.put(key, images)
+	second, ok := cache.get(key)
 	if !ok || first[0].sequence == nil || first[0].sequence != second[0].sequence {
 		t.Fatal("cached render clones do not share sequence state")
 	}
@@ -101,7 +101,7 @@ func TestPNGBase64SHA256CachesOnlyExactSequence(t *testing.T) {
 func TestAppendPNGBase64DeferredWaitsForReuse(t *testing.T) {
 	cache := newRenderedPageCache(defaultRenderCacheBytes)
 	key := newRenderCacheKey("deferred", 64, 500, DenseRenderStyle, 96, nil, false)
-	images := cache.put(key, "deferred", nil, []*RenderedImage{{PNG: []byte("image")}})
+	images := cache.put(key, []*RenderedImage{{PNG: []byte("image")}})
 	images[0].AppendPNGBase64Deferred(nil)
 	images[0].AppendPNGBase64Deferred(nil)
 	if images[0].base64.ready.Load() {
@@ -189,6 +189,20 @@ func TestRenderCacheKeyCoversEveryRenderInput(t *testing.T) {
 	}
 }
 
+func TestRenderCacheBudgetDoesNotRetainSourceLength(t *testing.T) {
+	entryBytes := func(text string) int64 {
+		cache := newRenderedPageCache(defaultRenderCacheBytes)
+		cache.put(
+			newRenderCacheKey(text, 64, 500, DenseRenderStyle, 96, nil, false),
+			[]*RenderedImage{{PNG: []byte("same image")}},
+		)
+		return cache.stats().bytes
+	}
+	if short, long := entryBytes("short"), entryBytes(strings.Repeat("long prompt ", 50_000)); short != long {
+		t.Fatalf("cache bytes depend on source length: short %d, long %d", short, long)
+	}
+}
+
 func TestRenderedPageCacheReusesUnchangedPages(t *testing.T) {
 	cache := newRenderedPageCache(defaultRenderCacheBytes)
 	tail := strings.Repeat("stable page content 0123456789\n", 120)
@@ -228,13 +242,13 @@ func TestRenderedPageCacheReusesUnchangedPages(t *testing.T) {
 func ptr[T any](value T) *T { return &value }
 
 func TestRenderedPageCacheEvictsLeastRecentlyUsed(t *testing.T) {
-	cache := newRenderedPageCache(2_850)
+	cache := newRenderedPageCache(3_000)
 	put := func(text string, fill byte) {
 		images := []*RenderedImage{{PNG: bytes.Repeat([]byte{fill}, 600), DroppedCodepoints: map[rune]int{}}}
-		cache.put(newRenderCacheKey(text, 64, 500, DenseRenderStyle, 96, nil, false), text, nil, images)
+		cache.put(newRenderCacheKey(text, 64, 500, DenseRenderStyle, 96, nil, false), images)
 	}
 	get := func(text string) bool {
-		_, ok := cache.get(newRenderCacheKey(text, 64, 500, DenseRenderStyle, 96, nil, false), text, nil)
+		_, ok := cache.get(newRenderCacheKey(text, 64, 500, DenseRenderStyle, 96, nil, false))
 		return ok
 	}
 
@@ -248,33 +262,29 @@ func TestRenderedPageCacheEvictsLeastRecentlyUsed(t *testing.T) {
 		t.Fatal("cache did not evict the least recently used entry")
 	}
 	stats := cache.stats()
-	if stats.entries != 2 || stats.bytes > cache.maxBytes {
+	if stats.entries != 2 || stats.bytes > cache.maxBytes || stats.evictions != 1 {
 		t.Fatalf("cache stats = %+v", stats)
 	}
 }
 
-func TestRenderedPageCacheNeverServesHashCollision(t *testing.T) {
+func TestRenderedPageCacheDoesNotReplaceExistingDigestEntry(t *testing.T) {
 	cache := newRenderedPageCache(defaultRenderCacheBytes)
 	key := newRenderCacheKey("first", 64, 500, DenseRenderStyle, 96, nil, false)
 	first := []*RenderedImage{{PNG: []byte("first")}}
-	cache.put(key, "first", nil, first)
-
-	if _, ok := cache.get(key, "second", nil); ok {
-		t.Fatal("hash collision returned the wrong entry")
-	}
+	cache.put(key, first)
 	second := []*RenderedImage{{PNG: []byte("second")}}
-	cache.put(key, "second", nil, second)
-	got, ok := cache.get(key, "first", nil)
+	cache.put(key, second)
+	got, ok := cache.get(key)
 	if !ok || !bytes.Equal(got[0].PNG, first[0].PNG) {
-		t.Fatal("hash collision replaced the original entry")
+		t.Fatal("duplicate digest replaced the original entry")
 	}
 }
 
 func TestRenderedPageCacheBudgetAndDisable(t *testing.T) {
 	oversized := newRenderedPageCache(100)
 	images := []*RenderedImage{{PNG: make([]byte, 200)}}
-	oversized.put(newRenderCacheKey("x", 1, 1, RenderStyle{}, 1, nil, false), "x", nil, images)
-	if stats := oversized.stats(); stats.entries != 0 || stats.bytes != 0 {
+	oversized.put(newRenderCacheKey("x", 1, 1, RenderStyle{}, 1, nil, false), images)
+	if stats := oversized.stats(); stats.entries != 0 || stats.bytes != 0 || stats.oversized != 1 {
 		t.Fatalf("oversized entry was retained: %+v", stats)
 	}
 

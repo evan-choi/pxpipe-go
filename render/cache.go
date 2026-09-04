@@ -3,7 +3,7 @@ package render
 import (
 	"crypto/sha256"
 	"encoding/base64"
-	"hash/maphash"
+	"encoding/binary"
 	"io"
 	"maps"
 	"os"
@@ -39,8 +39,8 @@ type renderCacheStyleKey struct {
 }
 
 type renderCacheKey struct {
-	textHash        uint64
-	slotHash        uint64
+	textHash        [sha256.Size]byte
+	slotHash        [sha256.Size]byte
 	style           renderCacheStyleKey
 	cols            int
 	maxCharsPerPage int
@@ -52,11 +52,9 @@ type renderCacheKey struct {
 	page            bool
 }
 
-var renderCacheHashSeed = maphash.MakeSeed()
-
 func newRenderCacheKey(text string, cols, maxCharsPerPage int, style RenderStyle, maxHeightPx int, slotText *string, reflowed bool) renderCacheKey {
 	key := renderCacheKey{
-		textHash:        maphash.String(renderCacheHashSeed, text),
+		textHash:        sha256.Sum256([]byte(text)),
 		cols:            cols,
 		maxCharsPerPage: maxCharsPerPage,
 		maxHeightPx:     maxHeightPx,
@@ -86,7 +84,7 @@ func newRenderCacheKey(text string, cols, maxCharsPerPage int, style RenderStyle
 	}
 	if slotText != nil {
 		key.slotPresent = true
-		key.slotHash = maphash.String(renderCacheHashSeed, *slotText)
+		key.slotHash = sha256.Sum256([]byte(*slotText))
 	}
 	return key
 }
@@ -100,19 +98,9 @@ func newRenderPageCacheKey(text string, lines, cols int, style RenderStyle, slot
 }
 
 type renderedPageCacheEntry struct {
-	text        string
-	slotText    string
-	slotPresent bool
-	images      []*RenderedImage
-	bytes       int64
-	used        atomic.Uint64
-}
-
-func (e *renderedPageCacheEntry) matches(text string, slotText *string) bool {
-	if e.text != text || e.slotPresent != (slotText != nil) {
-		return false
-	}
-	return slotText == nil || e.slotText == *slotText
+	images []*RenderedImage
+	bytes  int64
+	used   atomic.Uint64
 }
 
 type renderedPageCache struct {
@@ -126,14 +114,18 @@ type renderedPageCache struct {
 	bytes      atomic.Int64
 	hits       atomic.Uint64
 	misses     atomic.Uint64
+	evictions  atomic.Uint64
+	oversized  atomic.Uint64
 	clock      atomic.Uint64
 }
 
 type renderedPageCacheStats struct {
-	entries int64
-	bytes   int64
-	hits    uint64
-	misses  uint64
+	entries   int64
+	bytes     int64
+	hits      uint64
+	misses    uint64
+	evictions uint64
+	oversized uint64
 }
 
 func newRenderedPageCache(maxBytes int64) *renderedPageCache {
@@ -142,10 +134,12 @@ func newRenderedPageCache(maxBytes int64) *renderedPageCache {
 
 func (c *renderedPageCache) stats() renderedPageCacheStats {
 	return renderedPageCacheStats{
-		entries: c.entries.Load(),
-		bytes:   c.bytes.Load(),
-		hits:    c.hits.Load(),
-		misses:  c.misses.Load(),
+		entries:   c.entries.Load(),
+		bytes:     c.bytes.Load(),
+		hits:      c.hits.Load(),
+		misses:    c.misses.Load(),
+		evictions: c.evictions.Load(),
+		oversized: c.oversized.Load(),
 	}
 }
 
@@ -163,10 +157,13 @@ func (c *renderedPageCache) clear() {
 	c.bytes.Store(0)
 	c.hits.Store(0)
 	c.misses.Store(0)
+	c.evictions.Store(0)
+	c.oversized.Store(0)
 }
 
 func (c *renderedPageCache) admit(key renderCacheKey) bool {
-	fingerprint := key.textHash ^ key.slotHash ^ uint64(uint32(key.cols))<<32 ^ uint64(uint32(key.maxCharsPerPage))
+	fingerprint := binary.LittleEndian.Uint64(key.textHash[:]) ^ binary.LittleEndian.Uint64(key.slotHash[:]) ^
+		uint64(uint32(key.cols))<<32 ^ uint64(uint32(key.maxCharsPerPage))
 	fingerprint ^= uint64(uint32(key.maxHeightPx)) * 0x9e3779b97f4a7c15
 	if key.page {
 		fingerprint ^= 0xd6e8feb86659fd93 ^ uint64(uint32(key.pageLines))<<32 ^ uint64(uint32(key.pageSlotLines))
@@ -284,12 +281,12 @@ func cloneRenderedImages(images []*RenderedImage) []*RenderedImage {
 	return out
 }
 
-func (c *renderedPageCache) get(key renderCacheKey, text string, slotText *string) ([]*RenderedImage, bool) {
+func (c *renderedPageCache) get(key renderCacheKey) ([]*RenderedImage, bool) {
 	if c.maxBytes == 0 {
 		return nil, false
 	}
 	value, ok := c.values.Load(key)
-	if !ok || !value.(*renderedPageCacheEntry).matches(text, slotText) {
+	if !ok {
 		c.misses.Add(1)
 		return nil, false
 	}
@@ -299,11 +296,8 @@ func (c *renderedPageCache) get(key renderCacheKey, text string, slotText *strin
 	return cloneRenderedImages(entry.images), true
 }
 
-func renderCacheEntryBytes(text string, slotText *string, images []*RenderedImage) int64 {
-	retained := int64(len(text))
-	if slotText != nil {
-		retained += int64(len(*slotText))
-	}
+func renderCacheEntryBytes(images []*RenderedImage) int64 {
+	retained := int64(2 * sha256.Size)
 	for _, image := range images {
 		retained += int64(len(image.PNG)) + int64(base64.StdEncoding.EncodedLen(len(image.PNG)))
 	}
@@ -315,24 +309,22 @@ type renderCacheEvictionCandidate struct {
 	entry *renderedPageCacheEntry
 }
 
-func (c *renderedPageCache) put(key renderCacheKey, text string, slotText *string, images []*RenderedImage) []*RenderedImage {
-	retained := renderCacheEntryBytes(text, slotText, images)
-	if c.maxBytes == 0 || retained > c.maxBytes {
+func (c *renderedPageCache) put(key renderCacheKey, images []*RenderedImage) []*RenderedImage {
+	retained := renderCacheEntryBytes(images)
+	if c.maxBytes == 0 {
+		return images
+	}
+	if retained > c.maxBytes {
+		c.oversized.Add(1)
 		return images
 	}
 
 	c.mu.Lock()
 	if value, ok := c.values.Load(key); ok {
 		entry := value.(*renderedPageCacheEntry)
-		if entry.matches(text, slotText) {
-			entry.used.Store(c.clock.Add(1))
-			c.mu.Unlock()
-			return cloneRenderedImages(entry.images)
-		}
-		// A digest collision is a miss, never permission to replace or serve the
-		// other source text.
+		entry.used.Store(c.clock.Add(1))
 		c.mu.Unlock()
-		return images
+		return cloneRenderedImages(entry.images)
 	}
 
 	if c.bytes.Load()+retained > c.maxBytes {
@@ -354,6 +346,7 @@ func (c *renderedPageCache) put(key renderCacheKey, text string, slotText *strin
 			if c.values.CompareAndDelete(candidate.key, candidate.entry) {
 				c.entries.Add(-1)
 				c.bytes.Add(-candidate.entry.bytes)
+				c.evictions.Add(1)
 			}
 		}
 	}
@@ -370,13 +363,8 @@ func (c *renderedPageCache) put(key renderCacheKey, text string, slotText *strin
 		image.sequenceIndex = i
 	}
 	entry := &renderedPageCacheEntry{
-		text:        strings.Clone(text),
-		slotPresent: slotText != nil,
-		images:      images,
-		bytes:       retained,
-	}
-	if slotText != nil {
-		entry.slotText = strings.Clone(*slotText)
+		images: images,
+		bytes:  retained,
 	}
 	entry.used.Store(c.clock.Add(1))
 	c.values.Store(storedKey, entry)
@@ -386,11 +374,11 @@ func (c *renderedPageCache) put(key renderCacheKey, text string, slotText *strin
 	return cloneRenderedImages(images)
 }
 
-func (c *renderedPageCache) putRepeated(key renderCacheKey, text string, slotText *string, images []*RenderedImage) []*RenderedImage {
+func (c *renderedPageCache) putRepeated(key renderCacheKey, images []*RenderedImage) []*RenderedImage {
 	if !c.admit(key) {
 		return images
 	}
-	return c.put(key, text, slotText, images)
+	return c.put(key, images)
 }
 
 func renderCacheBudget() int64 {
@@ -412,7 +400,7 @@ func renderTextToPngsCached(cache *renderedPageCache, text string, cols, maxChar
 		return renderTextToPngsWithCharLimitUncached(text, cols, maxCharsPerImage, style, maxHeightPx, slotText, reflowed)
 	}
 	key := newRenderCacheKey(text, cols, maxCharsPerImage, style, maxHeightPx, slotText, reflowed)
-	if images, ok := cache.get(key, text, slotText); ok {
+	if images, ok := cache.get(key); ok {
 		return images, nil
 	}
 	// ponytail: simultaneous cold misses may render twice; add per-key flights
@@ -421,5 +409,5 @@ func renderTextToPngsCached(cache *renderedPageCache, text string, cols, maxChar
 	if err != nil {
 		return nil, err
 	}
-	return cache.putRepeated(key, text, slotText, images), nil
+	return cache.putRepeated(key, images), nil
 }
