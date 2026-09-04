@@ -18,6 +18,11 @@ git submodule update --init --recursive
 The baseline advances only after equivalent behavior and regenerated fixtures
 are verified against the pinned reference.
 
+For shared surfaces, the pinned TypeScript implementation is the behavioral
+specification. The Go port may optimize execution and memory use, but must not
+change wire output, gating decisions, render geometry, or telemetry. Intentional
+surface exclusions are listed separately below.
+
 ## Ported after 508fc9d
 
 - `2a071a8`: per-turn Anthropic billing headers are excluded from imaged slab
@@ -171,6 +176,7 @@ The Go suite passes against the regenerated fixtures. Upstream's own
 `pnpm test` currently reports 1,203 passing and two failing assertions in
 `tests/image-byte-budget.test.ts`; those assertions still assume the old
 12,683-byte 5x8 Claude slab after `5082ad9` changed non-Fable Claude to 14px.
+They do not change the parity baseline or justify a different Go behavior.
 
 ## Not ported after a9b9759
 
