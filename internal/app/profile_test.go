@@ -48,6 +48,11 @@ func TestProfileEnvironment(t *testing.T) {
 			if set[tt.caEnv] != "/tmp/pxpipe-ca.pem" {
 				t.Fatalf("CA environment = %#v", set)
 			}
+			for _, name := range []string{"NODE_EXTRA_CA_CERTS", "SSL_CERT_FILE", "CURL_CA_BUNDLE", "REQUESTS_CA_BUNDLE"} {
+				if set[name] != "/tmp/pxpipe-ca.pem" {
+					t.Errorf("%s = %q", name, set[name])
+				}
+			}
 			if tt.hasHTTP && (set["HTTP_PROXY"] != set["HTTPS_PROXY"] || set["http_proxy"] != set["HTTPS_PROXY"]) {
 				t.Fatalf("HTTP proxy environment = %#v", set)
 			}

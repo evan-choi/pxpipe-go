@@ -171,6 +171,10 @@ func (p profile) environment(proxyURL, certificatePath string) (map[string]strin
 		"https_proxy":              proxyURL,
 		"HTTP_PROXY":               proxyURL,
 		"http_proxy":               proxyURL,
+		"NODE_EXTRA_CA_CERTS":      certificatePath,
+		"SSL_CERT_FILE":            certificatePath,
+		"CURL_CA_BUNDLE":           certificatePath,
+		"REQUESTS_CA_BUNDLE":       certificatePath,
 		p.certificateEnvironment(): certificatePath,
 	}
 	unset := []string{"NO_PROXY", "no_proxy"}

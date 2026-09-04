@@ -59,6 +59,51 @@ func TestRunProfileComposesProxyEnvironmentAndReturnsChildExitCode(t *testing.T)
 	}
 }
 
+func TestCertificateBundleIncludesSystemRootsOnce(t *testing.T) {
+	dir := t.TempDir()
+	authority := filepath.Join(dir, "authority.pem")
+	roots := filepath.Join(dir, "roots.pem")
+	extra := filepath.Join(dir, "extra.pem")
+	for path, content := range map[string]string{authority: "PXPIPE\n", roots: "SYSTEM\n", extra: "EXTRA\n"} {
+		if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	t.Setenv("SSL_CERT_FILE", roots)
+	path, cleanup, err := certificateBundle(dir, authority, extra, roots)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer cleanup()
+	bundle, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	text := string(bundle)
+	if !strings.Contains(text, "PXPIPE") || !strings.Contains(text, "SYSTEM") || !strings.Contains(text, "EXTRA") || strings.Count(text, "SYSTEM") != 1 {
+		t.Fatalf("certificate bundle = %q", text)
+	}
+}
+
+func TestFindSystemRootBundle(t *testing.T) {
+	t.Setenv("SSL_CERT_FILE", "")
+	root := filepath.Join(t.TempDir(), "roots.pem")
+	if err := os.WriteFile(root, []byte("ROOTS"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if got := findSystemRootBundle("/missing/roots.pem", root); got != root {
+		t.Fatalf("system root bundle = %q, want %q", got, root)
+	}
+	generated := filepath.Join(t.TempDir(), ".child-ca-bundle-old.pem")
+	if err := os.WriteFile(generated, []byte("OLD"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("SSL_CERT_FILE", generated)
+	if got := findSystemRootBundle(root); got != root {
+		t.Fatalf("generated bundle was reused as system roots: %q", got)
+	}
+}
+
 func TestProfilesRouteLocalOverridesByPath(t *testing.T) {
 	tests := []struct {
 		name        string
