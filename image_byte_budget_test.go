@@ -9,7 +9,7 @@ import (
 
 func imageByteBudgetBody(messages []any) []byte {
 	body, _ := json.Marshal(map[string]any{
-		"model":    "claude-fable-5",
+		"model":    "claude-3-5-sonnet",
 		"system":   "SLAB\n" + strings.Repeat("s", 60_000),
 		"messages": messages,
 	})
@@ -44,7 +44,10 @@ func TestImageByteBudgetAdmitsGroupsAtomically(t *testing.T) {
 
 	high := 18 << 20
 	_, slab := TransformRequest(body, &TransformOptions{MaxImageBytes: &high, historySessions: newSessionStateStore()})
-	limit := slab.ImageBytes + 1
+	if slab.ImageCount == 0 || slab.ImageBytes == 0 {
+		t.Fatalf("slab fixture did not render: %+v", slab)
+	}
+	limit := slab.ImageBytes
 	toolBody := imageByteBudgetBody([]any{
 		map[string]any{"role": "user", "content": "go"},
 		map[string]any{"role": "user", "content": []any{map[string]any{
@@ -52,7 +55,7 @@ func TestImageByteBudgetAdmitsGroupsAtomically(t *testing.T) {
 		}}},
 	})
 	out, info = TransformRequest(toolBody, &TransformOptions{MaxImageBytes: &limit, historySessions: newSessionStateStore()})
-	if info.ImageCount == 0 || info.ToolResultImgs != 0 || info.ImageByteSkips == 0 {
+	if info.ImageCount == 0 || info.ToolResultImgs != 0 || info.ImageByteSkips == 0 || !info.ImageBytesNearLimit {
 		t.Fatalf("tool-result byte admission = %+v", info)
 	}
 	if !strings.Contains(string(out), "RESULT t1") {
